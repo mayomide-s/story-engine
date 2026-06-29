@@ -8,6 +8,17 @@ import { EventTimeline } from "../components/EventTimeline";
 const videoProvider = import.meta.env.VITE_VIDEO_PROVIDER ?? "mock";
 const storageProvider = import.meta.env.VITE_STORAGE_PROVIDER ?? "local";
 
+function pickPreferredRunId(runs: PipelineRunSummary[]) {
+  const preferredRun =
+    runs.find((run) => run.status === "completed") ??
+    runs.find((run) => run.video_status === "approved") ??
+    runs.find((run) => run.video_status === "completed") ??
+    runs.find((run) => run.status === "needs_review") ??
+    runs.find((run) => run.provider_job_id || run.video_status) ??
+    runs[0];
+  return preferredRun?.id ?? "";
+}
+
 function CopyButton({ text, label }: { text: string; label: string }) {
   const [copied, setCopied] = useState(false);
 
@@ -42,8 +53,8 @@ export function VideoReviewPage() {
       setRuns(data);
       if (requestedRunId && data.some((run) => run.id === requestedRunId)) {
         setSelectedRunId(requestedRunId);
-      } else if (data[0]) {
-        setSelectedRunId(data[0].id);
+      } else if (data.length > 0) {
+        setSelectedRunId(pickPreferredRunId(data));
       }
     });
   }, [searchParams]);
