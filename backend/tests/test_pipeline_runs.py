@@ -691,3 +691,87 @@ def test_asset_library_detail_includes_linked_idea_queue_metadata(client):
     assert payload["idea_queue_item"]["id"] == item_id
     assert payload["idea_queue_item"]["target_platform"] == "youtube"
     assert payload["pipeline_run"]["id"] == run_id
+
+
+def test_asset_export_pack_api_returns_manual_posting_bundle(client):
+    create = client.post("/api/pipeline-runs", json={"topic": "Export Pack", "auto_mode": False, "style_preset": "office_comedy"})
+    run_id = create.json()["pipeline_run"]["id"]
+    resume = client.post(f"/api/pipeline-runs/{run_id}/resume", json={"review_notes": "Ready to export"})
+    assert resume.status_code == 200
+
+    response = client.get(f"/api/asset-library/{run_id}/export-pack")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["video_public_url"]
+    assert payload["thumbnail_public_url"]
+    assert payload["caption"]
+    assert payload["hashtags"]
+    assert payload["final_prompt_used"]
+    assert payload["quality_score"] == 0.92
+    assert payload["platform_sections"]["tiktok"]["recommended_caption"]
+    assert payload["platform_sections"]["instagram_reels"]["recommended_caption"]
+    assert payload["platform_sections"]["youtube_shorts"]["title"]
+    assert payload["alternative_captions"]
+    assert payload["alternative_hooks"]
+
+
+def test_manual_posting_status_update_and_url_storage(client):
+    create = client.post("/api/pipeline-runs", json={"topic": "Manual Posting", "auto_mode": False})
+    run_id = create.json()["pipeline_run"]["id"]
+    resume = client.post(f"/api/pipeline-runs/{run_id}/resume", json={"review_notes": "Ship it"})
+    assert resume.status_code == 200
+
+    update = client.patch(
+        f"/api/asset-library/{run_id}/manual-posting",
+        json={
+            "manual_posting_status": "posted_multiple",
+            "tiktok_post_url": "https://tiktok.com/@codetoons/video/123",
+            "instagram_post_url": "https://instagram.com/reel/456",
+            "youtube_post_url": "https://youtube.com/shorts/789",
+        },
+    )
+    assert update.status_code == 200
+    payload = update.json()
+    assert payload["manual_posting_status"] == "posted_multiple"
+    assert payload["manual_post_urls"]["tiktok"] == "https://tiktok.com/@codetoons/video/123"
+    assert payload["manual_post_urls"]["instagram"] == "https://instagram.com/reel/456"
+    assert payload["manual_post_urls"]["youtube"] == "https://youtube.com/shorts/789"
+
+    detail = client.get(f"/api/asset-library/{run_id}")
+    assert detail.status_code == 200
+    manual_package = detail.json()["manual_post_package"]
+    assert manual_package["manual_posting_status"] == "posted_multiple"
+    assert manual_package["tiktok_post_url"] == "https://tiktok.com/@codetoons/video/123"
+
+
+def test_manual_posting_status_derives_from_single_url_when_not_explicit(client):
+    create = client.post("/api/pipeline-runs", json={"topic": "TikTok Only", "auto_mode": False})
+    run_id = create.json()["pipeline_run"]["id"]
+    resume = client.post(f"/api/pipeline-runs/{run_id}/resume", json={"review_notes": "Ready"})
+    assert resume.status_code == 200
+
+    update = client.patch(
+        f"/api/asset-library/{run_id}/manual-posting",
+        json={"tiktok_post_url": "https://tiktok.com/@codetoons/video/abc"},
+    )
+    assert update.status_code == 200
+    assert update.json()["manual_posting_status"] == "posted_tiktok"
+
+
+def test_asset_library_filters_by_manual_posting_status(client):
+    create = client.post("/api/pipeline-runs", json={"topic": "Posted Filter", "auto_mode": False})
+    run_id = create.json()["pipeline_run"]["id"]
+    resume = client.post(f"/api/pipeline-runs/{run_id}/resume", json={"review_notes": "Archive"})
+    assert resume.status_code == 200
+
+    update = client.patch(
+        f"/api/asset-library/{run_id}/manual-posting",
+        json={"manual_posting_status": "posted_youtube", "youtube_post_url": "https://youtube.com/shorts/filter"},
+    )
+    assert update.status_code == 200
+
+    response = client.get("/api/asset-library", params={"manual_posting_status": "posted_youtube"})
+    assert response.status_code == 200
+    items = response.json()
+    assert any(item["run_id"] == run_id for item in items)
+    assert all(item["manual_posting_status"] == "posted_youtube" for item in items)

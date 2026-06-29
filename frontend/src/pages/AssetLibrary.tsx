@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { api, AssetLibraryDetail, AssetLibraryItem } from "../api/client";
+import { ExportPackPanel } from "../components/ExportPackPanel";
 
 function CopyButton({ text, label }: { text: string; label: string }) {
   const [copied, setCopied] = useState(false);
@@ -51,6 +52,7 @@ const PROVIDERS = ["all", "mock", "runway"];
 const STATUSES = ["all", "approved", "rejected", "needs_review"];
 const STYLES = ["all", "clean_3d_cartoon", "neon_club_metaphor", "whiteboard_character", "bug_monster", "office_comedy"];
 const PLATFORMS = ["all", "instagram", "tiktok", "youtube"];
+const POSTING_STATUSES = ["all", "not_posted", "posted_tiktok", "posted_instagram", "posted_youtube", "posted_multiple"];
 
 export function AssetLibraryPage() {
   const [items, setItems] = useState<AssetLibraryItem[]>([]);
@@ -60,6 +62,7 @@ export function AssetLibraryPage() {
   const [status, setStatus] = useState("all");
   const [stylePreset, setStylePreset] = useState("all");
   const [platform, setPlatform] = useState("all");
+  const [manualPostingStatus, setManualPostingStatus] = useState("all");
   const [query, setQuery] = useState("");
   const [error, setError] = useState("");
 
@@ -69,6 +72,7 @@ export function AssetLibraryPage() {
     if (status !== "all") params.status = status;
     if (stylePreset !== "all") params.style_preset = stylePreset;
     if (platform !== "all") params.platform = platform;
+    if (manualPostingStatus !== "all") params.manual_posting_status = manualPostingStatus;
     if (query.trim()) params.q = query.trim();
     const data = await api.listAssetLibrary(params);
     setItems(data);
@@ -81,9 +85,14 @@ export function AssetLibraryPage() {
     }
   }
 
+  async function loadDetail(runId: string) {
+    const data = await api.getAssetLibraryItem(runId);
+    setDetail(data);
+  }
+
   useEffect(() => {
     loadItems().catch((requestError: Error) => setError(requestError.message));
-  }, [provider, status, stylePreset, platform]);
+  }, [provider, status, stylePreset, platform, manualPostingStatus]);
 
   useEffect(() => {
     const timeout = window.setTimeout(() => {
@@ -94,7 +103,7 @@ export function AssetLibraryPage() {
 
   useEffect(() => {
     if (!selectedRunId) return;
-    api.getAssetLibraryItem(selectedRunId).then(setDetail).catch((requestError: Error) => setError(requestError.message));
+    loadDetail(selectedRunId).catch((requestError: Error) => setError(requestError.message));
   }, [selectedRunId]);
 
   const selectedItem = useMemo(() => items.find((item) => item.run_id === selectedRunId) ?? null, [items, selectedRunId]);
@@ -155,6 +164,14 @@ export function AssetLibraryPage() {
               ))}
             </select>
           </label>
+          <label className="field">
+            <span>Posting</span>
+            <select value={manualPostingStatus} onChange={(event) => setManualPostingStatus(event.target.value)}>
+              {POSTING_STATUSES.map((itemStatus) => (
+                <option key={itemStatus} value={itemStatus}>{itemStatus}</option>
+              ))}
+            </select>
+          </label>
         </div>
         {error ? <p className="error">{error}</p> : null}
         <div className="asset-grid">
@@ -173,6 +190,7 @@ export function AssetLibraryPage() {
                 <span className="status-pill">{item.style_preset}</span>
                 <span className="status-pill muted">{item.provider}</span>
                 {item.target_platform ? <span className="status-pill muted">{item.target_platform}</span> : null}
+                {item.manual_posting_status ? <span className="status-pill muted">{item.manual_posting_status}</span> : null}
               </div>
               <span>run: {item.run_status}</span>
               <span>video: {item.video_status}</span>
@@ -221,6 +239,7 @@ export function AssetLibraryPage() {
               <div><span>Quality Score</span><strong>{String(detail.video.quality_score ?? "n/a")}</strong></div>
               <div><span>Run Status</span><strong>{String(detail.pipeline_run.status)}</strong></div>
               <div><span>Video Status</span><strong>{String(detail.video.status)}</strong></div>
+              <div><span>Manual Posting</span><strong>{String(detail.manual_post_package?.manual_posting_status ?? "not_posted")}</strong></div>
             </div>
             {detail.idea ? (
               <div className="copy-block">
@@ -316,6 +335,13 @@ export function AssetLibraryPage() {
               <div><span>Linked Idea Queue Item</span><strong>{String(detail.idea_queue_item?.id ?? "none")}</strong></div>
               <div><span>Target Platform</span><strong>{String(detail.idea_queue_item?.target_platform ?? "n/a")}</strong></div>
             </div>
+            <ExportPackPanel
+              runId={selectedItem.run_id}
+              onUpdated={async () => {
+                await loadItems();
+                await loadDetail(selectedItem.run_id);
+              }}
+            />
           </div>
         ) : (
           <p className="subtle">Select a generated asset to inspect its full archive detail.</p>

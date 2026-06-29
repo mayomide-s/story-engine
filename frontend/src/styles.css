@@ -368,6 +368,12 @@ pre {
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 }
 
+.platform-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
 .thumb-preview {
   width: 100%;
   aspect-ratio: 9 / 16;
@@ -389,6 +395,12 @@ pre {
   padding: 0.9rem;
   border-radius: 14px;
   background: rgba(7, 12, 20, 0.55);
+}
+
+.steps-list {
+  margin: 0;
+  padding-left: 1.2rem;
+  color: #d7dde8;
 }
 
 .compact {

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 
 import { api, PipelineRunDetail, PipelineRunSummary } from "../api/client";
+import { ExportPackPanel } from "../components/ExportPackPanel";
 import { EventTimeline } from "../components/EventTimeline";
 
 const videoProvider = import.meta.env.VITE_VIDEO_PROVIDER ?? "mock";
@@ -52,6 +53,12 @@ export function VideoReviewPage() {
       api.getRun(selectedRunId).then(setDetail).catch((requestError: Error) => setError(requestError.message));
     }
   }, [selectedRunId]);
+
+  async function refreshDetail() {
+    if (!selectedRunId) return;
+    const data = await api.getRun(selectedRunId);
+    setDetail(data);
+  }
 
   const manualPackage = detail?.manual_post_package as Record<string, unknown> | null;
   const video = detail?.video as Record<string, unknown> | null;
@@ -293,6 +300,8 @@ export function VideoReviewPage() {
                 <p className="subtle">No manual posting package available yet.</p>
               )}
             </div>
+
+            {selectedRunId ? <ExportPackPanel runId={selectedRunId} onUpdated={refreshDetail} /> : null}
           </div>
         ) : (
           <p className="subtle">Resume a run from the dashboard to generate the video and review package.</p>

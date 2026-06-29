@@ -55,6 +55,7 @@ export type AssetLibraryItem = {
   target_platform?: string | null;
   caption?: string | null;
   prompt_text?: string | null;
+  manual_posting_status?: string | null;
 };
 
 export type AssetLibraryDetail = {
@@ -66,6 +67,50 @@ export type AssetLibraryDetail = {
   quality_check: Record<string, unknown> | null;
   manual_post_package: Record<string, unknown> | null;
   idea_queue_item: Record<string, unknown> | null;
+};
+
+export type ExportPlatformSection = {
+  recommended_caption: string;
+  hashtags: string[];
+  title?: string | null;
+  description?: string | null;
+  checklist: string[];
+  full_post_text: string;
+  manual_post_url?: string | null;
+};
+
+export type AssetExportPack = {
+  run_id: string;
+  topic: string;
+  style_preset: string;
+  provider: string;
+  created_at: string;
+  video_public_url: string;
+  thumbnail_public_url?: string | null;
+  caption: string;
+  hashtags: string[];
+  final_prompt_used: string;
+  quality_score?: number | null;
+  quality_checklist: Record<string, unknown>;
+  quality_critique?: string | null;
+  idea_title?: string | null;
+  idea_hook?: string | null;
+  alternative_captions: string[];
+  alternative_hooks: string[];
+  manual_posting_status: string;
+  manual_post_urls: {
+    tiktok?: string | null;
+    instagram?: string | null;
+    youtube?: string | null;
+  };
+  target_platform?: string | null;
+  linked_pipeline_run_id: string;
+  linked_idea_queue_item_id?: string | null;
+  platform_sections: {
+    tiktok: ExportPlatformSection;
+    instagram_reels: ExportPlatformSection;
+    youtube_shorts: ExportPlatformSection;
+  };
 };
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000/api";
@@ -158,4 +203,10 @@ export const api = {
     return request<AssetLibraryItem[]>(`/asset-library${suffix}`);
   },
   getAssetLibraryItem: (runId: string) => request<AssetLibraryDetail>(`/asset-library/${runId}`),
+  getAssetExportPack: (runId: string) => request<AssetExportPack>(`/asset-library/${runId}/export-pack`),
+  updateAssetManualPosting: (runId: string, payload: Record<string, unknown>) =>
+    request<AssetExportPack>(`/asset-library/${runId}/manual-posting`, {
+      method: "PATCH",
+      body: JSON.stringify(payload)
+    }),
 };

@@ -60,6 +60,14 @@ class ManualPackageStatus(str, enum.Enum):
     ARCHIVED = "archived"
 
 
+class ManualPostingStatus(str, enum.Enum):
+    NOT_POSTED = "not_posted"
+    POSTED_TIKTOK = "posted_tiktok"
+    POSTED_INSTAGRAM = "posted_instagram"
+    POSTED_YOUTUBE = "posted_youtube"
+    POSTED_MULTIPLE = "posted_multiple"
+
+
 class IdeaQueueStatus(str, enum.Enum):
     DRAFT = "draft"
     READY = "ready"
@@ -202,6 +210,13 @@ class ManualPostPackage(Base):
     platform_variants_json: Mapped[dict] = mapped_column(JSON, default=dict)
     checklist_json: Mapped[list] = mapped_column(JSON, default=list)
     status: Mapped[ManualPackageStatus] = mapped_column(Enum(ManualPackageStatus), default=ManualPackageStatus.DRAFT)
+    manual_posting_status: Mapped[ManualPostingStatus] = mapped_column(
+        Enum(ManualPostingStatus),
+        default=ManualPostingStatus.NOT_POSTED,
+    )
+    tiktok_post_url: Mapped[str | None] = mapped_column(Text)
+    instagram_post_url: Mapped[str | None] = mapped_column(Text)
+    youtube_post_url: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 

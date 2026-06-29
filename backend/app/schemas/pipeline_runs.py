@@ -4,6 +4,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.models import PipelinePriority, PipelineStage, PipelineStatus
+from app.models.entities import ManualPostingStatus
 
 
 class PipelineRunCreate(BaseModel):
@@ -39,6 +40,13 @@ class ReviewConfigPatch(BaseModel):
 
 class ReviewAction(BaseModel):
     review_notes: str | None = None
+
+
+class ManualPostingUpdate(BaseModel):
+    manual_posting_status: ManualPostingStatus | None = None
+    tiktok_post_url: str | None = None
+    instagram_post_url: str | None = None
+    youtube_post_url: str | None = None
 
 
 class PipelineRunSummary(BaseModel):
