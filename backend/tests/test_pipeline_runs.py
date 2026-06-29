@@ -540,6 +540,155 @@ def test_cancel_run_sets_cancelled_status(client):
     assert cancel.json()["pipeline_run"]["status"] == "cancelled"
 
 
+def test_account_defaults_can_be_saved(client):
+    update = client.patch(
+        "/api/settings/account-defaults",
+        json={
+            "default_style_preset": "office_comedy",
+            "target_platforms": ["youtube", "instagram"],
+            "default_caption_tone": "dry and witty",
+            "default_hashtag_set": ["#python", "#backend"],
+            "default_duration_seconds": 22,
+            "default_audience_level": "intermediate",
+            "default_content_format": "bug explanation",
+            "brand_description": "Dry humor coding stories.",
+            "preferred_cta": "Save this for your next debugging session.",
+            "avoid_phrases": ["guru hack"],
+            "emoji_preference": "none",
+        },
+    )
+    assert update.status_code == 200
+    payload = update.json()
+    assert payload["account_config_json"]["default_style_preset"] == "office_comedy"
+    assert payload["account_config_json"]["target_platforms"] == ["youtube", "instagram"]
+    assert payload["account_config_json"]["default_caption_tone"] == "dry and witty"
+
+    read = client.get("/api/settings/account-defaults")
+    assert read.status_code == 200
+    assert read.json()["account_config_json"]["preferred_cta"] == "Save this for your next debugging session."
+
+
+def test_brand_defaults_apply_to_new_idea_queue_items(client):
+    client.patch(
+        "/api/settings/account-defaults",
+        json={
+            "default_style_preset": "whiteboard_character",
+            "target_platforms": ["youtube"],
+            "default_caption_tone": "clean teacher mode",
+            "default_duration_seconds": 20,
+            "default_audience_level": "advanced",
+            "default_content_format": "quick concept explainer",
+        },
+    )
+    response = client.post("/api/idea-queue", json={"topic": "Memoization"})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["style_preset"] == "whiteboard_character"
+    assert payload["target_platform"] == "youtube"
+    assert payload["input_config_json"]["caption_tone"] == "clean teacher mode"
+    assert payload["input_config_json"]["audience_level"] == "advanced"
+    assert payload["input_config_json"]["content_format"] == "quick concept explainer"
+
+
+def test_brand_defaults_apply_to_new_direct_runs(client):
+    client.patch(
+        "/api/settings/account-defaults",
+        json={
+            "default_style_preset": "bug_monster",
+            "target_platforms": ["tiktok", "instagram"],
+            "default_caption_tone": "chaotic but clear",
+            "default_duration_seconds": 24,
+            "default_audience_level": "intermediate",
+            "default_content_format": "bug explanation",
+        },
+    )
+    response = client.post("/api/pipeline-runs", json={"topic": "Race conditions", "auto_mode": False})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["pipeline_run"]["style_preset"] == "bug_monster"
+    assert payload["pipeline_run"]["input_config_json"]["target_platforms"] == ["tiktok", "instagram"]
+    assert payload["pipeline_run"]["input_config_json"]["caption_tone"] == "chaotic but clear"
+    assert payload["idea"]["difficulty"] == "intermediate"
+    assert payload["idea"]["format"] == "bug explanation"
+
+
+def test_run_and_idea_overrides_take_priority_over_brand_defaults(client):
+    client.patch(
+        "/api/settings/account-defaults",
+        json={
+            "default_style_preset": "office_comedy",
+            "target_platforms": ["youtube"],
+            "default_caption_tone": "dry and witty",
+            "default_duration_seconds": 20,
+            "default_audience_level": "advanced",
+            "default_content_format": "interview-style tip",
+        },
+    )
+
+    idea = client.post(
+        "/api/idea-queue",
+        json={
+            "topic": "TCP handshake",
+            "style_preset": "clean_3d_cartoon",
+            "target_platform": "instagram",
+            "caption_tone": "friendly coach",
+            "duration_preference_seconds": 18,
+            "audience_level": "beginner",
+            "content_format": "coding metaphor",
+        },
+    )
+    assert idea.status_code == 200
+    idea_payload = idea.json()
+    assert idea_payload["style_preset"] == "clean_3d_cartoon"
+    assert idea_payload["target_platform"] == "instagram"
+    assert idea_payload["input_config_json"]["caption_tone"] == "friendly coach"
+    assert idea_payload["input_config_json"]["content_format"] == "coding metaphor"
+
+    run = client.post(
+        "/api/pipeline-runs",
+        json={
+            "topic": "Caching",
+            "auto_mode": False,
+            "style_preset": "whiteboard_character",
+            "target_platforms": ["instagram"],
+            "caption_tone": "warm explainer",
+            "duration_preference_seconds": 18,
+            "audience_level": "beginner",
+            "content_format": "quick concept explainer",
+        },
+    )
+    assert run.status_code == 200
+    run_payload = run.json()
+    assert run_payload["pipeline_run"]["style_preset"] == "whiteboard_character"
+    assert run_payload["pipeline_run"]["input_config_json"]["target_platforms"] == ["instagram"]
+    assert run_payload["pipeline_run"]["input_config_json"]["caption_tone"] == "warm explainer"
+    assert run_payload["idea"]["difficulty"] == "beginner"
+    assert run_payload["idea"]["format"] == "quick concept explainer"
+
+
+def test_manual_post_package_uses_brand_tone_hashtags_and_cta_defaults(client):
+    client.patch(
+        "/api/settings/account-defaults",
+        json={
+            "default_caption_tone": "dry and witty",
+            "default_hashtag_set": ["#python", "#testing"],
+            "preferred_cta": "Save this before your next code review.",
+            "emoji_preference": "none",
+            "target_platforms": ["youtube", "instagram"],
+        },
+    )
+    create = client.post("/api/pipeline-runs", json={"topic": "Pytest fixtures", "auto_mode": False})
+    run_id = create.json()["pipeline_run"]["id"]
+    resume = client.post(f"/api/pipeline-runs/{run_id}/resume", json={"review_notes": "Ship it"})
+    assert resume.status_code == 200
+    payload = resume.json()
+    manual_package = payload["manual_post_package"]
+    assert "dry and witty" in manual_package["caption"]
+    assert "Save this before your next code review." in manual_package["caption"]
+    assert manual_package["hashtags_json"] == ["#python", "#testing"]
+    assert manual_package["target_platforms_json"] == ["youtube", "instagram"]
+
+
 def test_idea_queue_creation(client):
     response = client.post(
         "/api/idea-queue",

@@ -10,7 +10,12 @@ from app.models.entities import ManualPostingStatus
 class PipelineRunCreate(BaseModel):
     topic: str
     auto_mode: bool = False
-    style_preset: str = "clean_3d_cartoon"
+    style_preset: str | None = None
+    target_platforms: list[str] | None = None
+    caption_tone: str | None = None
+    duration_preference_seconds: int | None = None
+    audience_level: str | None = None
+    content_format: str | None = None
     priority: PipelinePriority = PipelinePriority.NORMAL
 
 

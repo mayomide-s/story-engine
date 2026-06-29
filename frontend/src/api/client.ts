@@ -11,6 +11,26 @@ export type PipelineRunSummary = {
   created_at: string;
 };
 
+export type AccountDefaults = {
+  account_name: string;
+  niche: string;
+  account_config_json: {
+    default_style_preset: string;
+    target_platforms: string[];
+    default_caption_tone: string;
+    default_hashtag_set: string[];
+    default_duration_seconds: number;
+    default_audience_level: string;
+    default_content_format: string;
+    brand_description: string;
+    preferred_cta: string;
+    avoid_phrases: string[];
+    emoji_preference: string;
+    style_presets: Record<string, { style: string; prompt_modifier: string }>;
+    [key: string]: unknown;
+  };
+};
+
 export type PipelineRunDetail = {
   pipeline_run: Record<string, unknown>;
   idea: Record<string, unknown> | null;
@@ -31,6 +51,7 @@ export type IdeaQueueItem = {
   account_id: string;
   topic: string;
   style_preset: string;
+  input_config_json: Record<string, unknown>;
   target_platform: string;
   priority: string;
   status: string;
@@ -136,11 +157,17 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  getAccountDefaults: () => request<AccountDefaults>("/settings/account-defaults"),
+  updateAccountDefaults: (payload: Record<string, unknown>) =>
+    request<AccountDefaults>("/settings/account-defaults", {
+      method: "PATCH",
+      body: JSON.stringify(payload)
+    }),
   listRuns: () => request<PipelineRunSummary[]>("/pipeline-runs"),
-  createRun: (topic: string, autoMode = false, stylePreset = "clean_3d_cartoon") =>
+  createRun: (payload: Record<string, unknown>) =>
     request<PipelineRunDetail>("/pipeline-runs", {
       method: "POST",
-      body: JSON.stringify({ topic, auto_mode: autoMode, style_preset: stylePreset })
+      body: JSON.stringify(payload)
     }),
   getRun: (runId: string) => request<PipelineRunDetail>(`/pipeline-runs/${runId}`),
   resumeRun: (runId: string, reviewNotes = "") =>

@@ -1,19 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
-import { api, IdeaQueueItem } from "../api/client";
-
-const STYLE_PRESETS = [
-  "clean_3d_cartoon",
-  "neon_club_metaphor",
-  "whiteboard_character",
-  "bug_monster",
-  "office_comedy",
-];
-
-const TARGET_PLATFORMS = ["instagram", "tiktok", "youtube"];
-const PRIORITIES = ["low", "normal", "high"];
-const STATUSES = ["draft", "ready", "generated", "archived"];
+import { api, AccountDefaults, IdeaQueueItem } from "../api/client";
+import { AUDIENCE_LEVELS, CONTENT_FORMATS, IDEA_STATUSES, PRIORITIES, STYLE_PRESETS, TARGET_PLATFORMS } from "../constants";
 
 function formatDate(value?: string | null) {
   if (!value) return "Unscheduled";
@@ -33,12 +22,26 @@ export function IdeaQueuePage() {
   const [topic, setTopic] = useState("Rate limiting");
   const [stylePreset, setStylePreset] = useState("clean_3d_cartoon");
   const [targetPlatform, setTargetPlatform] = useState("instagram");
+  const [captionTone, setCaptionTone] = useState("playful explainer");
+  const [durationPreferenceSeconds, setDurationPreferenceSeconds] = useState(18);
+  const [audienceLevel, setAudienceLevel] = useState("beginner");
+  const [contentFormat, setContentFormat] = useState("coding metaphor");
   const [priority, setPriority] = useState("normal");
   const [status, setStatus] = useState("draft");
   const [notes, setNotes] = useState("");
   const [plannedDate, setPlannedDate] = useState("");
+  const [defaults, setDefaults] = useState<AccountDefaults | null>(null);
   const [error, setError] = useState("");
   const [isSaving, setIsSaving] = useState(false);
+
+  function applyDefaults(config: AccountDefaults["account_config_json"]) {
+    setStylePreset(String(config.default_style_preset ?? "clean_3d_cartoon"));
+    setTargetPlatform(String(config.target_platforms?.[0] ?? "instagram"));
+    setCaptionTone(String(config.default_caption_tone ?? "playful explainer"));
+    setDurationPreferenceSeconds(Number(config.default_duration_seconds ?? 18));
+    setAudienceLevel(String(config.default_audience_level ?? "beginner"));
+    setContentFormat(String(config.default_content_format ?? "coding metaphor"));
+  }
 
   async function loadItems() {
     const data = await api.listIdeaQueue();
@@ -49,6 +52,10 @@ export function IdeaQueuePage() {
   }
 
   useEffect(() => {
+    api.getAccountDefaults().then((data) => {
+      setDefaults(data);
+      applyDefaults(data.account_config_json);
+    }).catch((requestError: Error) => setError(requestError.message));
     loadItems().catch((requestError: Error) => setError(requestError.message));
   }, []);
 
@@ -61,11 +68,15 @@ export function IdeaQueuePage() {
     setTopic(selectedItem.topic);
     setStylePreset(selectedItem.style_preset);
     setTargetPlatform(selectedItem.target_platform);
+    setCaptionTone(String(selectedItem.input_config_json?.caption_tone ?? defaults?.account_config_json.default_caption_tone ?? "playful explainer"));
+    setDurationPreferenceSeconds(Number(selectedItem.input_config_json?.duration_preference_seconds ?? defaults?.account_config_json.default_duration_seconds ?? 18));
+    setAudienceLevel(String(selectedItem.input_config_json?.audience_level ?? defaults?.account_config_json.default_audience_level ?? "beginner"));
+    setContentFormat(String(selectedItem.input_config_json?.content_format ?? defaults?.account_config_json.default_content_format ?? "coding metaphor"));
     setPriority(selectedItem.priority);
     setStatus(selectedItem.status);
     setNotes(selectedItem.notes ?? "");
     setPlannedDate(toDateInputValue(selectedItem.planned_date));
-  }, [selectedItem]);
+  }, [defaults?.account_config_json.default_audience_level, defaults?.account_config_json.default_caption_tone, defaults?.account_config_json.default_content_format, defaults?.account_config_json.default_duration_seconds, selectedItem]);
 
   async function handleCreate() {
     try {
@@ -75,6 +86,10 @@ export function IdeaQueuePage() {
         topic,
         style_preset: stylePreset,
         target_platform: targetPlatform,
+        caption_tone: captionTone,
+        duration_preference_seconds: durationPreferenceSeconds,
+        audience_level: audienceLevel,
+        content_format: contentFormat,
         priority,
         status,
         notes,
@@ -98,6 +113,10 @@ export function IdeaQueuePage() {
         topic,
         style_preset: stylePreset,
         target_platform: targetPlatform,
+        caption_tone: captionTone,
+        duration_preference_seconds: durationPreferenceSeconds,
+        audience_level: audienceLevel,
+        content_format: contentFormat,
         priority,
         status,
         notes,
@@ -144,6 +163,13 @@ export function IdeaQueuePage() {
           <p className="eyebrow">Planning</p>
           <h2>Idea Queue And Manual Calendar</h2>
           <p className="subtle">Plan topics, styles, and platforms before spending anything on video generation.</p>
+          <p className="subtle">
+            New ideas start from brand defaults in
+            {" "}
+            <Link className="inline-link" to="/settings">Settings</Link>
+            {" "}
+            and can still be overridden per idea.
+          </p>
         </div>
         <div className="hero-actions">
           <input value={topic} onChange={(event) => setTopic(event.target.value)} placeholder="Topic" />
@@ -216,6 +242,36 @@ export function IdeaQueuePage() {
                   </select>
                 </label>
                 <label className="field">
+                  <span>Caption Tone</span>
+                  <input value={captionTone} onChange={(event) => setCaptionTone(event.target.value)} />
+                </label>
+                <label className="field">
+                  <span>Duration Preference</span>
+                  <input
+                    type="number"
+                    min={5}
+                    max={30}
+                    value={durationPreferenceSeconds}
+                    onChange={(event) => setDurationPreferenceSeconds(Number(event.target.value))}
+                  />
+                </label>
+                <label className="field">
+                  <span>Audience Level</span>
+                  <select value={audienceLevel} onChange={(event) => setAudienceLevel(event.target.value)}>
+                    {AUDIENCE_LEVELS.map((item) => (
+                      <option key={item} value={item}>{item}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="field">
+                  <span>Content Format</span>
+                  <select value={contentFormat} onChange={(event) => setContentFormat(event.target.value)}>
+                    {CONTENT_FORMATS.map((item) => (
+                      <option key={item} value={item}>{item}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="field">
                   <span>Priority</span>
                   <select value={priority} onChange={(event) => setPriority(event.target.value)}>
                     {PRIORITIES.map((itemPriority) => (
@@ -228,7 +284,7 @@ export function IdeaQueuePage() {
                 <label className="field">
                   <span>Status</span>
                   <select value={status} onChange={(event) => setStatus(event.target.value)}>
-                    {STATUSES.map((itemStatus) => (
+                    {IDEA_STATUSES.map((itemStatus) => (
                       <option key={itemStatus} value={itemStatus}>
                         {itemStatus}
                       </option>
@@ -245,11 +301,25 @@ export function IdeaQueuePage() {
                 </label>
                 <div className="button-row field-wide">
                   <button onClick={handleSave} disabled={isSaving}>{isSaving ? "Saving..." : "Save Idea"}</button>
+                  <button className="secondary" type="button" onClick={() => defaults ? applyDefaults(defaults.account_config_json) : undefined}>
+                    Reset To Defaults
+                  </button>
                   <button className="secondary" onClick={handleGenerateRun} disabled={Boolean(selectedItem.pipeline_run_id)}>
                     {selectedItem.pipeline_run_id ? "Run Already Generated" : "Generate Run From Idea"}
                   </button>
                   <button className="secondary" onClick={handleArchive}>Archive Idea</button>
                 </div>
+                {defaults ? (
+                  <div className="notice-card field-wide">
+                    <strong>Applied Defaults</strong>
+                    <p>
+                      Style: {defaults.account_config_json.default_style_preset} | Platform: {defaults.account_config_json.target_platforms[0] ?? "instagram"} | Tone: {defaults.account_config_json.default_caption_tone}
+                    </p>
+                    <p>
+                      Audience: {defaults.account_config_json.default_audience_level} | Format: {defaults.account_config_json.default_content_format} | Duration: {defaults.account_config_json.default_duration_seconds}s
+                    </p>
+                  </div>
+                ) : null}
               </div>
             ) : (
               <p className="subtle">Create or select an idea to edit it.</p>

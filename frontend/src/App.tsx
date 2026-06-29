@@ -4,6 +4,7 @@ import { DashboardPage } from "./pages/Dashboard";
 import { AssetLibraryPage } from "./pages/AssetLibrary";
 import { IdeaQueuePage } from "./pages/IdeaQueue";
 import { IdeasPage } from "./pages/Ideas";
+import { SettingsPage } from "./pages/Settings";
 import { VideoReviewPage } from "./pages/VideoReview";
 
 export default function App() {
@@ -19,6 +20,7 @@ export default function App() {
           <NavLink to="/">Dashboard</NavLink>
           <NavLink to="/queue">Idea Queue</NavLink>
           <NavLink to="/assets">Asset Library</NavLink>
+          <NavLink to="/settings">Settings</NavLink>
           <NavLink to="/ideas">Ideas</NavLink>
           <NavLink to="/review">Video Review</NavLink>
         </nav>
@@ -28,6 +30,7 @@ export default function App() {
           <Route path="/" element={<DashboardPage />} />
           <Route path="/queue" element={<IdeaQueuePage />} />
           <Route path="/assets" element={<AssetLibraryPage />} />
+          <Route path="/settings" element={<SettingsPage />} />
           <Route path="/ideas" element={<IdeasPage />} />
           <Route path="/review" element={<VideoReviewPage />} />
         </Routes>
