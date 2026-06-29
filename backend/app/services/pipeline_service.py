@@ -500,10 +500,49 @@ def build_video_prompt(run: PipelineRun, db: Session) -> str:
         return run.prompt_override
     script = db.get(Script, run.script_id)
     account = db.get(Account, run.account_id)
+    provider_name = get_settings().video_provider
     run_config = get_run_input_config(run, account.account_config_json if account else {})
     preset = get_style_preset(run, account.account_config_json if account else {})
     avoid_phrases = ", ".join(run_config["avoid_phrases"])
     target_platforms = ", ".join(run_config["target_platforms"])
+    end_tag = build_account_config(account.account_config_json if account else {}).get("end_tag", "Made by CodeToons AI")
+    scenes = script.script_json["scenes"]
+    if provider_name == "runway":
+        scene_prompt = " ".join(
+            f"{scene.get('time', '')} {scene.get('visual', '')} {scene.get('dialogue', '')}".strip()
+            for scene in scenes[:4]
+        )
+        prompt = (
+            f"Create a vertical 9:16 animated video about {run.topic}. "
+            f"Style preset: {run.style_preset}. "
+            f"Visual direction: {preset['style']}. "
+            f"Style notes: {preset['prompt_modifier']} "
+            f"Audience: {run_config['audience_level']}. "
+            f"Format: {run_config['content_format']}. "
+            f"Brand voice: {run_config['brand_description']}. "
+            "Use real motion, expressive characters, and no slideshow effects. "
+            f"Scenes: {scene_prompt}. "
+            f"End tag: {end_tag}"
+        )
+        if len(prompt) > 1000:
+            trimmed_scene_prompt = " ".join(
+                f"{scene.get('time', '')} {str(scene.get('visual', ''))[:48]} {str(scene.get('dialogue', ''))[:36]}".strip()
+                for scene in scenes[:4]
+            )
+            prompt = (
+                f"Create a vertical 9:16 animated video about {run.topic}. "
+                f"Style: {preset['style']}. {preset['prompt_modifier']} "
+                f"Audience: {run_config['audience_level']}. Format: {run_config['content_format']}. "
+                "Use real motion, expressive characters, and no slideshow effects. "
+                f"Scenes: {trimmed_scene_prompt}. "
+                f"End tag: {end_tag}"
+            )
+        if len(prompt) > 1000:
+            overflow = len(prompt) - 997
+            safe_body = prompt[:-overflow].rsplit(" ", 1)[0] if overflow > 0 else prompt
+            prompt = f"{safe_body}..."
+        return prompt
+
     prompt = (
         f"Create a 9:16 animated video about {run.topic}. "
         f"Style preset: {run.style_preset}. "
@@ -516,8 +555,8 @@ def build_video_prompt(run: PipelineRun, db: Session) -> str:
         f"Preferred CTA: {run_config['preferred_cta']}. "
         f"Avoid phrases: {avoid_phrases}. "
         "Use actual motion, expressive characters, no slideshow effects. "
-        f"Scenes: {script.script_json['scenes']} "
-        f"End tag: {build_account_config(account.account_config_json if account else {}).get('end_tag', 'Made by CodeToons AI')}"
+        f"Scenes: {scenes} "
+        f"End tag: {end_tag}"
     )
     return prompt
 

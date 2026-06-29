@@ -109,6 +109,18 @@ def test_runway_storyboard_timings_fit_requested_duration(client, monkeypatch):
     get_settings.cache_clear()
 
 
+def test_runway_prompt_preview_stays_within_provider_limit(client, monkeypatch):
+    monkeypatch.setenv("VIDEO_PROVIDER", "runway")
+    get_settings.cache_clear()
+    response = client.post("/api/pipeline-runs", json={"topic": "Python decorators", "auto_mode": False})
+    assert response.status_code == 200
+    prompt_preview = response.json()["prompt_preview"]
+    assert len(prompt_preview) <= 1000
+    assert "End tag:" in prompt_preview
+    assert "Use real motion" in prompt_preview
+    get_settings.cache_clear()
+
+
 def test_style_preset_selection_updates_prompt_preview(client):
     response = client.post("/api/pipeline-runs", json={"topic": "CORS", "auto_mode": False, "style_preset": "bug_monster"})
     assert response.status_code == 200
