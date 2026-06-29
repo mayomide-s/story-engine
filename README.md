@@ -1,8 +1,15 @@
 # AI Coding Story Engine MVP
 
-This repository is the v1.8 production-hardening checkpoint for the current internal milestone:
+This repository is the `v1 local MVP` checkpoint for the current internal milestone:
 
 `topic -> idea/script/storyboard -> review pause -> video generation -> asset upload -> quality check -> manual posting package -> completed run`
+
+This release is intentionally focused on a manual workflow:
+
+- Manual posting workflow only
+- No auto-posting
+- No analytics
+- No login or subscriptions
 
 Current feature scope through v1.7:
 
