@@ -368,6 +368,14 @@ pre {
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 }
 
+.thumb-preview {
+  width: 100%;
+  aspect-ratio: 9 / 16;
+  object-fit: cover;
+  border-radius: 14px;
+  background: rgba(7, 12, 20, 0.55);
+}
+
 .copy-block pre {
   padding: 0.9rem;
   border-radius: 14px;

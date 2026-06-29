@@ -8,6 +8,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.config import get_settings
 from app.db.session import SessionLocal
+from app.routers.asset_library import router as asset_library_router
 from app.routers.idea_queue import router as idea_queue_router
 from app.routers.pipeline_runs import router as pipeline_runs_router
 from app.services.providers import get_video_provider
@@ -43,6 +44,7 @@ app.add_middleware(
 )
 app.include_router(pipeline_runs_router, prefix=settings.api_prefix)
 app.include_router(idea_queue_router, prefix=settings.api_prefix)
+app.include_router(asset_library_router, prefix=settings.api_prefix)
 Path(settings.local_storage_path).mkdir(parents=True, exist_ok=True)
 app.mount("/assets", StaticFiles(directory=settings.local_storage_path), name="assets")
 

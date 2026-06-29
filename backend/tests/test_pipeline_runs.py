@@ -594,3 +594,100 @@ def test_generate_run_from_idea_queue_item(client):
     assert payload["idea_queue_item"]["status"] == "generated"
     assert payload["pipeline_run"]["topic"] == "JWT"
     assert payload["pipeline_run"]["style_preset"] == "whiteboard_character"
+
+
+def test_asset_library_api_returns_generated_completed_assets(client):
+    create = client.post(
+        "/api/pipeline-runs",
+        json={"topic": "CORS", "auto_mode": False, "style_preset": "office_comedy"},
+    )
+    run_id = create.json()["pipeline_run"]["id"]
+    resume = client.post(f"/api/pipeline-runs/{run_id}/resume", json={"review_notes": "Approved for archive"})
+    assert resume.status_code == 200
+
+    response = client.get("/api/asset-library")
+    assert response.status_code == 200
+    items = response.json()
+    item = next(entry for entry in items if entry["run_id"] == run_id)
+    assert item["provider"] == "mock"
+    assert item["run_status"] == "completed"
+    assert item["video_status"] == "approved"
+    assert item["style_preset"] == "office_comedy"
+    assert item["video_url"]
+
+
+def test_asset_library_filters_by_provider_status_style_and_platform(client):
+    idea = client.post(
+        "/api/idea-queue",
+        json={
+            "topic": "Queues",
+            "style_preset": "bug_monster",
+            "target_platform": "instagram",
+            "priority": "high",
+            "status": "ready",
+        },
+    )
+    item_id = idea.json()["id"]
+    generate = client.post(f"/api/idea-queue/{item_id}/generate-run")
+    run_id = generate.json()["pipeline_run"]["id"]
+    resume = client.post(f"/api/pipeline-runs/{run_id}/resume", json={"review_notes": "Archive this"})
+    assert resume.status_code == 200
+
+    response = client.get(
+        "/api/asset-library",
+        params={
+            "provider": "mock",
+            "status": "approved",
+            "style_preset": "bug_monster",
+            "platform": "instagram",
+        },
+    )
+    assert response.status_code == 200
+    items = response.json()
+    assert any(entry["run_id"] == run_id for entry in items)
+    assert all(entry["provider"] == "mock" for entry in items)
+    assert all(entry["style_preset"] == "bug_monster" for entry in items)
+    assert all(entry["target_platform"] == "instagram" for entry in items)
+
+
+def test_asset_library_detail_includes_prompt_captions_urls_and_quality(client):
+    create = client.post("/api/pipeline-runs", json={"topic": "CORS", "auto_mode": False})
+    run_id = create.json()["pipeline_run"]["id"]
+    resume = client.post(f"/api/pipeline-runs/{run_id}/resume", json={"review_notes": "Ready"})
+    assert resume.status_code == 200
+
+    response = client.get(f"/api/asset-library/{run_id}")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["video"]["prompt_text"]
+    assert payload["video_asset"]["public_url"]
+    assert payload["video_asset"]["mime_type"] == "video/mp4"
+    assert payload["thumbnail_asset"]["public_url"]
+    assert payload["quality_check"]["checks_json"]["aspect_ratio_9_16"] is True
+    assert payload["manual_post_package"]["caption"]
+    assert payload["manual_post_package"]["platform_variants_json"]["instagram"]["caption"]
+
+
+def test_asset_library_detail_includes_linked_idea_queue_metadata(client):
+    idea = client.post(
+        "/api/idea-queue",
+        json={
+            "topic": "Rate limiting",
+            "style_preset": "whiteboard_character",
+            "target_platform": "youtube",
+            "priority": "normal",
+            "status": "ready",
+        },
+    )
+    item_id = idea.json()["id"]
+    generate = client.post(f"/api/idea-queue/{item_id}/generate-run")
+    run_id = generate.json()["pipeline_run"]["id"]
+    resume = client.post(f"/api/pipeline-runs/{run_id}/resume", json={"review_notes": "Ship it"})
+    assert resume.status_code == 200
+
+    response = client.get(f"/api/asset-library/{run_id}")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["idea_queue_item"]["id"] == item_id
+    assert payload["idea_queue_item"]["target_platform"] == "youtube"
+    assert payload["pipeline_run"]["id"] == run_id

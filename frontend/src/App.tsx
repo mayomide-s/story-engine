@@ -1,6 +1,7 @@
 import { NavLink, Route, Routes } from "react-router-dom";
 
 import { DashboardPage } from "./pages/Dashboard";
+import { AssetLibraryPage } from "./pages/AssetLibrary";
 import { IdeaQueuePage } from "./pages/IdeaQueue";
 import { IdeasPage } from "./pages/Ideas";
 import { VideoReviewPage } from "./pages/VideoReview";
@@ -17,6 +18,7 @@ export default function App() {
         <nav className="nav">
           <NavLink to="/">Dashboard</NavLink>
           <NavLink to="/queue">Idea Queue</NavLink>
+          <NavLink to="/assets">Asset Library</NavLink>
           <NavLink to="/ideas">Ideas</NavLink>
           <NavLink to="/review">Video Review</NavLink>
         </nav>
@@ -25,6 +27,7 @@ export default function App() {
         <Routes>
           <Route path="/" element={<DashboardPage />} />
           <Route path="/queue" element={<IdeaQueuePage />} />
+          <Route path="/assets" element={<AssetLibraryPage />} />
           <Route path="/ideas" element={<IdeasPage />} />
           <Route path="/review" element={<VideoReviewPage />} />
         </Routes>

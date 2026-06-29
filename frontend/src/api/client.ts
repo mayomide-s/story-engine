@@ -41,6 +41,33 @@ export type IdeaQueueItem = {
   updated_at: string;
 };
 
+export type AssetLibraryItem = {
+  run_id: string;
+  topic: string;
+  style_preset: string;
+  provider: string;
+  run_status: string;
+  video_status: string;
+  quality_score?: number | null;
+  created_at: string;
+  thumbnail_url?: string | null;
+  video_url: string;
+  target_platform?: string | null;
+  caption?: string | null;
+  prompt_text?: string | null;
+};
+
+export type AssetLibraryDetail = {
+  pipeline_run: Record<string, unknown>;
+  video: Record<string, unknown>;
+  video_asset: Record<string, unknown>;
+  thumbnail_asset: Record<string, unknown> | null;
+  idea: Record<string, unknown> | null;
+  quality_check: Record<string, unknown> | null;
+  manual_post_package: Record<string, unknown> | null;
+  idea_queue_item: Record<string, unknown> | null;
+};
+
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000/api";
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
@@ -125,4 +152,10 @@ export const api = {
     request<{ idea_queue_item: Record<string, unknown>; pipeline_run: Record<string, unknown> }>(`/idea-queue/${itemId}/generate-run`, {
       method: "POST"
     }),
+  listAssetLibrary: (params?: Record<string, string>) => {
+    const search = new URLSearchParams(params ?? {});
+    const suffix = search.toString() ? `?${search.toString()}` : "";
+    return request<AssetLibraryItem[]>(`/asset-library${suffix}`);
+  },
+  getAssetLibraryItem: (runId: string) => request<AssetLibraryDetail>(`/asset-library/${runId}`),
 };
