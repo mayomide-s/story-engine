@@ -31,6 +31,11 @@ from app.services.security import redact_sensitive_data, sanitize_for_json
 
 
 DEFAULT_ACCOUNT_NAME = "CodeToons AI"
+PROMPT_LIMITS = {
+    "runway": {"limit": 1000, "target": 850},
+    "mock": {"limit": 1600, "target": 1200},
+}
+LOW_PREFLIGHT_THRESHOLD = 0.7
 
 
 class UnsafeResumeError(RuntimeError):
@@ -252,6 +257,191 @@ def build_scene_timings(total_duration_seconds: int) -> list[str]:
     return timings
 
 
+def get_prompt_constraints(provider_name: str | None) -> dict[str, int]:
+    return PROMPT_LIMITS.get(provider_name or "mock", PROMPT_LIMITS["mock"])
+
+
+def get_script_scenes(script: Script | None) -> list[dict[str, Any]]:
+    if not script:
+        return []
+    scenes = script.script_json.get("scenes", [])
+    if not isinstance(scenes, list):
+        return []
+    normalized: list[dict[str, Any]] = []
+    for scene in scenes:
+        if isinstance(scene, dict):
+            normalized.append(dict(scene))
+    return normalized
+
+
+def build_scene_templates(topic: str, style_preset: str, target_duration: int, audience_level: str) -> list[dict[str, str]]:
+    timings = build_scene_timings(target_duration)
+    style_label = style_preset.replace("_", " ")
+    return [
+        {
+            "time": timings[0],
+            "visual": f"Open on a {style_label} world where the coding problem feels immediate and visual.",
+            "dialogue": f"Here is why {topic} matters for {audience_level} developers.",
+            "on_screen_text": topic,
+            "motion_camera": "Fast push-in to establish the problem clearly.",
+        },
+        {
+            "time": timings[1],
+            "visual": f"Show the core metaphor for {topic} with one memorable character interaction.",
+            "dialogue": "The rule clicks faster when the metaphor does the explaining.",
+            "on_screen_text": "One rule, one metaphor",
+            "motion_camera": "Side tracking shot that follows the conflict.",
+        },
+        {
+            "time": timings[2],
+            "visual": "Reveal the fix or mental model with cleaner movement and less clutter.",
+            "dialogue": f"This is the part that makes {topic} feel simple instead of random.",
+            "on_screen_text": "Why it works",
+            "motion_camera": "Smooth orbit or dolly move that shows cause and effect.",
+        },
+        {
+            "time": timings[3],
+            "visual": "Land on the solved state with an upbeat final beat and clear payoff.",
+            "dialogue": f"That is {topic}, remembered as a short visual story.",
+            "on_screen_text": "Remember the mental model",
+            "motion_camera": "Settle into a clean hero frame for the final tag.",
+        },
+    ]
+
+
+def default_review_sections(run: PipelineRun, idea: ContentIdea | None, script: Script | None) -> dict[str, str]:
+    scenes = get_script_scenes(script)
+    final_scene = scenes[-1] if scenes else {}
+    return {
+        "concept_clarity": f"Explain {run.topic} with one main mental model and beginner-safe language.",
+        "hook_strength": idea.hook if idea else f"Make {run.topic} feel surprising in the first two seconds.",
+        "visual_metaphor": "Keep one strong metaphor instead of stacking multiple visual ideas.",
+        "scene_timing": ", ".join(str(scene.get("time", "")) for scene in scenes if scene.get("time")) or "Add scene timing before generating video.",
+        "final_cta": f"End with a clean CTA that feels useful, not salesy. {get_run_input_config(run).get('preferred_cta', '')}".strip(),
+        "caption_strength": run.caption_override or f"Caption should sell the hook, stay concise, and reinforce {run.topic}.",
+        "risk_issues": f"Avoid banned claims and keep the explanation readable for short-form video. Final frame: {final_scene.get('on_screen_text', '') or 'Set an end tag frame.'}",
+    }
+
+
+def get_review_sections(run: PipelineRun, idea: ContentIdea | None, script: Script | None) -> dict[str, str]:
+    stored = dict(run.input_config_json or {}).get("review_sections")
+    defaults = default_review_sections(run, idea, script)
+    if isinstance(stored, dict):
+        merged = {**defaults, **{str(key): str(value) for key, value in stored.items() if value is not None}}
+        return merged
+    return defaults
+
+
+def compact_prompt_text(prompt: str, provider_name: str | None, force_target: bool = False) -> str:
+    constraints = get_prompt_constraints(provider_name)
+    limit = constraints["target"] if force_target else constraints["limit"]
+    compact = " ".join(str(prompt).split())
+    if len(compact) <= limit:
+        return compact
+    if "End tag:" in compact:
+        body, end_tag = compact.rsplit("End tag:", 1)
+        suffix = f" End tag:{end_tag.strip()}"
+        body_limit = max(limit - len(suffix) - 4, 1)
+        safe_body = body[:body_limit].rsplit(" ", 1)[0].rstrip(" ,;")
+        return f"{safe_body}...{suffix}"
+    safe_body = compact[:limit].rsplit(" ", 1)[0].rstrip(" ,;")
+    if len(safe_body) >= limit - 3:
+        safe_body = safe_body[: max(limit - 3, 1)].rstrip(" ,;")
+    return f"{safe_body}..."
+
+
+def build_prompt_from_scenes(
+    run: PipelineRun,
+    run_config: dict[str, Any],
+    preset: dict[str, str],
+    scenes: list[dict[str, Any]],
+    end_tag: str,
+    provider_name: str,
+) -> str:
+    scene_prompt = " ".join(
+        (
+            f"{scene.get('time', '')}: "
+            f"visual {scene.get('visual', '')}; "
+            f"text {scene.get('on_screen_text', '')}; "
+            f"motion {scene.get('motion_camera', '')}; "
+            f"line {scene.get('dialogue', '')}"
+        ).strip()
+        for scene in scenes[:4]
+    )
+    if provider_name == "runway":
+        prompt = (
+            f"Vertical 9:16 animated coding mini-story about {run.topic}. "
+            f"Subject: one clear metaphor for {run.topic}. "
+            f"Action: show the problem, the rule, the fix, then the payoff. "
+            f"Camera: dynamic but readable moves that match each scene. "
+            f"Style: {preset['style']}. {preset['prompt_modifier']} "
+            f"Audience: {run_config['audience_level']}. Format: {run_config['content_format']}. "
+            "Use real motion, expressive characters, strong readability, and no slideshow-style frame stitching. "
+            f"Scenes: {scene_prompt} "
+            f"End tag: {end_tag}"
+        )
+        return compact_prompt_text(prompt, provider_name)
+
+    prompt = (
+        f"Create a 9:16 animated video about {run.topic}. "
+        f"Style: {preset['style']}. {preset['prompt_modifier']} "
+        f"Audience: {run_config['audience_level']}. Format: {run_config['content_format']}. "
+        f"CTA: {run_config['preferred_cta']}. "
+        f"Scenes: {scene_prompt} "
+        f"End tag: {end_tag}"
+    )
+    return compact_prompt_text(prompt, provider_name)
+
+
+def build_preflight_review(db: Session, run: PipelineRun) -> dict[str, Any]:
+    idea = db.get(ContentIdea, run.idea_id) if run.idea_id else None
+    script = db.get(Script, run.script_id) if run.script_id else None
+    scenes = get_script_scenes(script)
+    prompt_preview = build_video_prompt(run, db)
+    provider_name = get_settings().video_provider
+    constraints = get_prompt_constraints(provider_name)
+    prompt_length = len(prompt_preview)
+    too_long = prompt_length > constraints["limit"]
+    prompt_target_miss = prompt_length > constraints["target"]
+    caption_text = run.caption_override or ""
+    hook_text = idea.hook if idea else ""
+    clarity_score = round(min(1.0, 0.62 + (0.08 if len(hook_text) <= 96 else 0) + (0.1 if len(scenes) == 4 else 0) + (0.08 if script and script.duration_seconds <= 10 else 0)), 2)
+    visual_score = round(min(1.0, 0.55 + min(0.12 * sum(1 for scene in scenes if scene.get("visual")), 0.24) + min(0.1 * sum(1 for scene in scenes if scene.get("motion_camera")), 0.2)), 2)
+    pacing_score = round(min(1.0, 0.55 + (0.2 if len(scenes) == 4 else 0.05) + (0.12 if all(scene.get("time") for scene in scenes) else 0) - (0.1 if any(len(str(scene.get("dialogue", "")).split()) > 14 for scene in scenes) else 0)), 2)
+    social_hook_score = round(min(1.0, 0.58 + (0.16 if 35 <= len(hook_text) <= 100 else 0.08) + (0.08 if caption_text else 0) + (0.08 if "?" in hook_text or ":" in hook_text else 0)), 2)
+    prompt_safety_score = round(max(0.0, min(1.0, 0.95 - (0.4 if too_long else 0) - (0.12 if prompt_target_miss else 0) - (0.15 if "End tag:" not in prompt_preview else 0))), 2)
+    overall = round((clarity_score + visual_score + pacing_score + social_hook_score + prompt_safety_score) / 5, 2)
+    prompt_valid = bool(prompt_preview.strip()) and "End tag:" in prompt_preview and not too_long
+    return sanitize_for_json(
+        {
+            "scores": {
+                "clarity_score": clarity_score,
+                "visual_score": visual_score,
+                "pacing_score": pacing_score,
+                "social_hook_score": social_hook_score,
+                "prompt_safety_length_score": prompt_safety_score,
+                "overall_preflight_score": overall,
+            },
+            "prompt_length": {
+                "current": prompt_length,
+                "target": constraints["target"],
+                "limit": constraints["limit"],
+                "too_long": too_long,
+                "warning": prompt_target_miss,
+            },
+            "prompt_valid": prompt_valid,
+            "low_score_warning": overall < LOW_PREFLIGHT_THRESHOLD,
+            "summary": (
+                "Prompt is too long for the selected provider."
+                if too_long
+                else "Preflight score is low. Review pacing or clarity before spending credits."
+                if overall < LOW_PREFLIGHT_THRESHOLD
+                else "Preflight looks healthy for generation."
+            ),
+        }
+    )
+
+
 def fail_pipeline_run(
     db: Session,
     run: PipelineRun,
@@ -370,17 +560,12 @@ def generate_script(db: Session, run: PipelineRun):
     provider_name = get_settings().video_provider
     run_config = get_run_input_config(run, account.account_config_json if account else {})
     target_duration = get_target_duration_seconds(run_config, provider_name)
-    scene_timings = build_scene_timings(target_duration)
     prompt = f"Write a short {run_config['content_format']} script for '{idea.title}' aimed at {run_config['audience_level']} viewers."
     result = llm.generate(PipelineStage.SCRIPT_GENERATION.value, prompt, {"idea_id": idea.id, "config": run_config})
+    scenes = build_scene_templates(run.topic, run.style_preset, target_duration, run_config["audience_level"])
     script_json = {
         "hook": idea.hook,
-        "scenes": [
-            {"time": scene_timings[0], "visual": "Frontend arrives at a neon nightclub.", "dialogue": "I need the user data."},
-            {"time": scene_timings[1], "visual": "A CORS bouncer blocks the entrance.", "dialogue": "Where is your allowed-origin pass?"},
-            {"time": scene_timings[2], "visual": "Backend checks the list.", "dialogue": "Only approved websites can enter."},
-            {"time": scene_timings[3], "visual": "A green stamp appears.", "dialogue": f"That is {run.topic}."},
-        ],
+        "scenes": scenes,
         "final_tag": build_account_config(account.account_config_json if account else {}).get("end_tag", "Made by CodeToons AI"),
         "target_duration_seconds": target_duration,
         "audience_level": run_config["audience_level"],
@@ -413,12 +598,16 @@ def generate_storyboard(db: Session, run: PipelineRun):
     run_config = get_run_input_config(run, account.account_config_json if account else {})
     prompt = f"Create storyboard frames from the script in the {run.style_preset} preset."
     result = llm.generate(PipelineStage.STORYBOARD_GENERATION.value, prompt, {"script": script.script_json, "config": run_config})
+    scenes = get_script_scenes(script)
     frames = {
         "storyboard_frames": [
-            {"frame": 1, "description": "Frontend character outside Backend API nightclub"},
-            {"frame": 2, "description": "CORS bouncer blocks entry"},
-            {"frame": 3, "description": "Backend checks approved origins"},
-            {"frame": 4, "description": "Green access stamp appears"},
+            {
+                "frame": index + 1,
+                "description": str(scene.get("visual", "")),
+                "on_screen_text": str(scene.get("on_screen_text", "")),
+                "motion_camera": str(scene.get("motion_camera", "")),
+            }
+            for index, scene in enumerate(scenes[:4])
         ]
     }
     storyboard = Storyboard(pipeline_run_id=run.id, frames_json=frames)
@@ -462,6 +651,7 @@ def generate_content_critique(db: Session, run: PipelineRun):
     scenes = script.script_json.get("scenes", []) if script else []
     dialogue_words = sum(len(str(scene.get("dialogue", "")).split()) for scene in scenes)
     too_much_text = dialogue_words > max(script.duration_seconds * 2, 22) if script else False
+    review_sections = get_review_sections(run, idea, script)
     critique = {
         "beginner_clarity": {"score": 0.9 if script and script.duration_seconds <= 10 else 0.82, "notes": "Clear enough for beginner coders with simple visual language."},
         "metaphor_strength": {"score": 0.88 if idea and "bouncer" in idea.hook.lower() else 0.78, "notes": "Metaphor is memorable and easy to retell."},
@@ -469,6 +659,7 @@ def generate_content_critique(db: Session, run: PipelineRun):
         "social_hook_strength": {"score": 0.86 if idea and len(idea.hook) <= 90 else 0.74, "notes": "Hook is short enough to land in a short-form opener."},
         "audience_fit": {"score": 0.9 if idea and idea.difficulty == run_config["audience_level"] else 0.76, "notes": f"Targeted for {run_config['audience_level']} viewers."},
         "brand_voice_alignment": {"score": 0.85, "notes": f"Caption tone should stay {run_config['caption_tone']} and avoid {', '.join(run_config['avoid_phrases'])}."},
+        "structured_review": review_sections,
         "too_much_text_dialogue_warning": {"flagged": too_much_text, "notes": "Dialogue is getting dense for a short video." if too_much_text else "Dialogue density looks safe for a fast watch."},
         "serious_issue": not scenes,
         "summary": "Looks viable for generation. Tighten dialogue only if you want faster pacing." if scenes else "No scenes found. Fix the script before generating video.",
@@ -503,62 +694,9 @@ def build_video_prompt(run: PipelineRun, db: Session) -> str:
     provider_name = get_settings().video_provider
     run_config = get_run_input_config(run, account.account_config_json if account else {})
     preset = get_style_preset(run, account.account_config_json if account else {})
-    avoid_phrases = ", ".join(run_config["avoid_phrases"])
-    target_platforms = ", ".join(run_config["target_platforms"])
     end_tag = build_account_config(account.account_config_json if account else {}).get("end_tag", "Made by CodeToons AI")
-    scenes = script.script_json["scenes"]
-    if provider_name == "runway":
-        scene_prompt = " ".join(
-            f"{scene.get('time', '')} {scene.get('visual', '')} {scene.get('dialogue', '')}".strip()
-            for scene in scenes[:4]
-        )
-        prompt = (
-            f"Create a vertical 9:16 animated video about {run.topic}. "
-            f"Style preset: {run.style_preset}. "
-            f"Visual direction: {preset['style']}. "
-            f"Style notes: {preset['prompt_modifier']} "
-            f"Audience: {run_config['audience_level']}. "
-            f"Format: {run_config['content_format']}. "
-            f"Brand voice: {run_config['brand_description']}. "
-            "Use real motion, expressive characters, and no slideshow effects. "
-            f"Scenes: {scene_prompt}. "
-            f"End tag: {end_tag}"
-        )
-        if len(prompt) > 1000:
-            trimmed_scene_prompt = " ".join(
-                f"{scene.get('time', '')} {str(scene.get('visual', ''))[:48]} {str(scene.get('dialogue', ''))[:36]}".strip()
-                for scene in scenes[:4]
-            )
-            prompt = (
-                f"Create a vertical 9:16 animated video about {run.topic}. "
-                f"Style: {preset['style']}. {preset['prompt_modifier']} "
-                f"Audience: {run_config['audience_level']}. Format: {run_config['content_format']}. "
-                "Use real motion, expressive characters, and no slideshow effects. "
-                f"Scenes: {trimmed_scene_prompt}. "
-                f"End tag: {end_tag}"
-            )
-        if len(prompt) > 1000:
-            overflow = len(prompt) - 997
-            safe_body = prompt[:-overflow].rsplit(" ", 1)[0] if overflow > 0 else prompt
-            prompt = f"{safe_body}..."
-        return prompt
-
-    prompt = (
-        f"Create a 9:16 animated video about {run.topic}. "
-        f"Style preset: {run.style_preset}. "
-        f"Visual direction: {preset['style']}. "
-        f"Style notes: {preset['prompt_modifier']} "
-        f"Audience level: {run_config['audience_level']}. "
-        f"Content format: {run_config['content_format']}. "
-        f"Brand voice: {run_config['brand_description']}. "
-        f"Target platforms: {target_platforms}. "
-        f"Preferred CTA: {run_config['preferred_cta']}. "
-        f"Avoid phrases: {avoid_phrases}. "
-        "Use actual motion, expressive characters, no slideshow effects. "
-        f"Scenes: {scenes} "
-        f"End tag: {end_tag}"
-    )
-    return prompt
+    scenes = get_script_scenes(script)
+    return build_prompt_from_scenes(run, run_config, preset, scenes, end_tag, provider_name)
 
 
 def enqueue_resume_pipeline_task(run_id: str, countdown: int | None = None) -> None:
@@ -996,6 +1134,10 @@ def resume_pipeline(db: Session, run_id: str, review_notes: str | None = None) -
         raise UnsafeResumeError(f"Run cannot be resumed from status '{run.status.value}'")
     if video and video.status == VideoStatus.SUBMITTING and video.provider_job_id:
         raise UnsafeResumeError("Run already has a submitted provider job. Please wait for polling to continue.")
+    preflight = build_preflight_review(db, run)
+    prompt_length = preflight.get("prompt_length", {})
+    if not preflight.get("prompt_valid") or prompt_length.get("too_long"):
+        raise UnsafeResumeError("Prompt preview is invalid or too long for the selected provider. Fix it in Ideas before resuming.")
     if run.status == PipelineStatus.RUNNING and run.current_stage in {
         PipelineStage.VIDEO_PROMPT_BUILD,
         PipelineStage.VIDEO_GENERATION_SUBMIT,
@@ -1074,17 +1216,145 @@ def recheck_pipeline_assets(db: Session, run_id: str, review_notes: str | None =
     return finalize_post_video_processing(db, run)
 
 
+def ensure_text_review_editable(run: PipelineRun, video: Video | None = None) -> None:
+    if run.status in {PipelineStatus.CANCELLED, PipelineStatus.COMPLETED, PipelineStatus.FAILED}:
+        raise RuntimeError(f"Run cannot be edited in status '{run.status.value}'")
+    if video and video.provider_job_id:
+        raise RuntimeError("Text-only review changes are locked after video generation has been submitted.")
+
+
 def patch_review_config(db: Session, run_id: str, payload: ReviewConfigPatch) -> PipelineRun:
     run = db.get(PipelineRun, run_id)
     if not run:
         raise ValueError("Pipeline run not found")
-    for key, value in payload.model_dump(exclude_none=True).items():
+    video = db.get(Video, run.video_id) if run.video_id else None
+    ensure_text_review_editable(run, video)
+    patch_data = payload.model_dump(exclude_none=True)
+    config_updates = {}
+    for config_key in ("hashtag_set", "review_sections", "ending_frame_guidance"):
+        if config_key in patch_data:
+            config_updates[config_key] = patch_data.pop(config_key)
+    for key, value in patch_data.items():
         setattr(run, key, value)
     if payload.style_preset:
         input_config = dict(run.input_config_json or {})
         input_config["style_preset"] = payload.style_preset
         run.input_config_json = input_config
+    if config_updates:
+        input_config = dict(run.input_config_json or {})
+        if "review_sections" in config_updates:
+            existing_sections = input_config.get("review_sections", {})
+            merged_sections = {
+                **(existing_sections if isinstance(existing_sections, dict) else {}),
+                **(config_updates["review_sections"] or {}),
+            }
+            input_config["review_sections"] = sanitize_for_json(merged_sections)
+        if "hashtag_set" in config_updates:
+            input_config["hashtag_set"] = [str(item) for item in config_updates["hashtag_set"] or []]
+        if "ending_frame_guidance" in config_updates:
+            input_config["ending_frame_guidance"] = str(config_updates["ending_frame_guidance"])
+        run.input_config_json = input_config
     add_event(db, run.id, "review.config_updated", "Review configuration updated", stage=run.current_stage.value)
+    db.commit()
+    return db.get(PipelineRun, run.id)
+
+
+def regenerate_text_only(db: Session, run_id: str, review_notes: str | None = None) -> PipelineRun:
+    run = db.get(PipelineRun, run_id)
+    if not run:
+        raise ValueError("Pipeline run not found")
+    video = db.get(Video, run.video_id) if run.video_id else None
+    ensure_text_review_editable(run, video)
+    account = db.get(Account, run.account_id)
+    run_config = get_run_input_config(run, account.account_config_json if account else {})
+    llm = get_llm_provider()
+    idea = db.get(ContentIdea, run.idea_id)
+    script = db.get(Script, run.script_id)
+    storyboard = db.get(Storyboard, run.storyboard_id)
+    if not idea or not script or not storyboard:
+        raise RuntimeError("Run is missing idea, script, or storyboard data")
+
+    prompt = f"Regenerate text-only review assets for {run.topic} without creating video jobs."
+    result = llm.generate(
+        "text_regeneration",
+        prompt,
+        {"run_id": run.id, "topic": run.topic, "style_preset": run.style_preset, "config": run_config},
+    )
+    target_duration = get_target_duration_seconds(run_config, get_settings().video_provider)
+    refreshed_scenes = build_scene_templates(run.topic, run.style_preset, target_duration, run_config["audience_level"])
+    idea.title = f"{run.topic} visual explainer for {run_config['audience_level']} coders"
+    idea.hook = f"{run.topic} finally clicks when one visual metaphor carries the whole story."
+    idea.concept = f"A {run_config['content_format']} that keeps {run.topic} concise, visual, and easy to retell."
+    script.hook = idea.hook
+    script.duration_seconds = target_duration
+    script.script_json = sanitize_for_json(
+        {
+            **dict(script.script_json or {}),
+            "hook": idea.hook,
+            "scenes": refreshed_scenes,
+            "target_duration_seconds": target_duration,
+            "audience_level": run_config["audience_level"],
+            "content_format": run_config["content_format"],
+        }
+    )
+    storyboard.frames_json = sanitize_for_json(
+        {
+            "storyboard_frames": [
+                {
+                    "frame": index + 1,
+                    "description": scene["visual"],
+                    "on_screen_text": scene["on_screen_text"],
+                    "motion_camera": scene["motion_camera"],
+                }
+                for index, scene in enumerate(refreshed_scenes)
+            ]
+        }
+    )
+    run.caption_override = (
+        f"{run.topic} as a fast {run_config['content_format']} for {run_config['audience_level']} developers. "
+        f"Keep the hook visual and the CTA useful. {run_config['preferred_cta']}"
+    )
+    run.prompt_override = None
+    run.review_notes = review_notes or run.review_notes
+    add_prompt_log(
+        db,
+        run.id,
+        "text_regeneration",
+        llm.name,
+        llm.model,
+        prompt,
+        {"run_id": run.id, "style_preset": run.style_preset},
+        result,
+        idea.hook,
+        result["token_usage"],
+        result["cost_estimate"],
+    )
+    generate_content_critique(db, run)
+    add_event(db, run.id, "review.text_regenerated", "Text-only review content regenerated", stage=PipelineStage.STORYBOARD_GENERATION.value)
+    db.commit()
+    return db.get(PipelineRun, run.id)
+
+
+def prompt_action_pipeline(db: Session, run_id: str, action: str) -> PipelineRun:
+    run = db.get(PipelineRun, run_id)
+    if not run:
+        raise ValueError("Pipeline run not found")
+    video = db.get(Video, run.video_id) if run.video_id else None
+    ensure_text_review_editable(run, video)
+    provider_name = get_settings().video_provider
+    base_prompt = build_video_prompt(run, db)
+    if action == "improve":
+        improved = compact_prompt_text(base_prompt.replace("Create ", "Craft ").replace("animated coding mini-story", "animated vertical coding story"), provider_name)
+        run.prompt_override = improved
+        event_type = "review.prompt_improved"
+        message = "Prompt preview improved for review"
+    elif action == "shorten":
+        run.prompt_override = compact_prompt_text(base_prompt, provider_name, force_target=True)
+        event_type = "review.prompt_shortened"
+        message = "Prompt preview shortened for provider limit"
+    else:
+        raise RuntimeError("Unsupported prompt action")
+    add_event(db, run.id, event_type, message, stage=PipelineStage.VIDEO_PROMPT_BUILD.value)
     db.commit()
     return db.get(PipelineRun, run.id)
 
@@ -1103,6 +1373,8 @@ def cancel_pipeline(db: Session, run_id: str, review_notes: str | None = None) -
 
 def patch_idea(db: Session, run_id: str, payload: ContentIdeaPatch) -> PipelineRun:
     run = db.get(PipelineRun, run_id)
+    video = db.get(Video, run.video_id) if run.video_id else None
+    ensure_text_review_editable(run, video)
     idea = db.get(ContentIdea, run.idea_id)
     for key, value in payload.model_dump(exclude_none=True).items():
         setattr(idea, key, value)
@@ -1113,6 +1385,8 @@ def patch_idea(db: Session, run_id: str, payload: ContentIdeaPatch) -> PipelineR
 
 def patch_script(db: Session, run_id: str, payload: ScriptPatch) -> PipelineRun:
     run = db.get(PipelineRun, run_id)
+    video = db.get(Video, run.video_id) if run.video_id else None
+    ensure_text_review_editable(run, video)
     script = db.get(Script, run.script_id)
     for key, value in payload.model_dump(exclude_none=True).items():
         setattr(script, key, value)
@@ -1123,6 +1397,8 @@ def patch_script(db: Session, run_id: str, payload: ScriptPatch) -> PipelineRun:
 
 def patch_storyboard(db: Session, run_id: str, payload: StoryboardPatch) -> PipelineRun:
     run = db.get(PipelineRun, run_id)
+    video = db.get(Video, run.video_id) if run.video_id else None
+    ensure_text_review_editable(run, video)
     storyboard = db.get(Storyboard, run.storyboard_id)
     for key, value in payload.model_dump(exclude_none=True).items():
         setattr(storyboard, key, value)
@@ -1151,10 +1427,14 @@ def get_pipeline_run_detail(db: Session, run_id: str) -> dict[str, Any]:
         .order_by(PromptLog.created_at.desc())
         .first()
     )
+    idea = db.get(ContentIdea, run.idea_id) if run.idea_id else None
+    script = db.get(Script, run.script_id) if run.script_id else None
+    review_sections = get_review_sections(run, idea, script)
+    preflight = build_preflight_review(db, run) if run.script_id else None
     return {
         "pipeline_run": serialize_model(run),
-        "idea": serialize_model(db.get(ContentIdea, run.idea_id)) if run.idea_id else None,
-        "script": serialize_model(db.get(Script, run.script_id)) if run.script_id else None,
+        "idea": serialize_model(idea) if idea else None,
+        "script": serialize_model(script) if script else None,
         "storyboard": serialize_model(db.get(Storyboard, run.storyboard_id)) if run.storyboard_id else None,
         "video": serialize_model(db.get(Video, run.video_id)) if run.video_id else None,
         "assets": [serialize_model(item) for item in db.query(Asset).filter(Asset.pipeline_run_id == run.id).all()],
@@ -1167,6 +1447,8 @@ def get_pipeline_run_detail(db: Session, run_id: str) -> dict[str, Any]:
         ],
         "prompt_preview": build_video_prompt(run, db),
         "content_critique": critique_log.response_json.get("critique") if critique_log else None,
+        "review_sections": review_sections,
+        "review_preflight": preflight,
     }
 
 

@@ -44,6 +44,20 @@ export type PipelineRunDetail = {
   pipeline_events: Record<string, unknown>[];
   prompt_preview?: string | null;
   content_critique?: Record<string, unknown> | null;
+  review_sections?: Record<string, string> | null;
+  review_preflight?: {
+    scores?: Record<string, number>;
+    prompt_length?: {
+      current: number;
+      target: number;
+      limit: number;
+      too_long: boolean;
+      warning: boolean;
+    };
+    prompt_valid?: boolean;
+    low_score_warning?: boolean;
+    summary?: string;
+  } | null;
 };
 
 export type IdeaQueueItem = {
@@ -240,6 +254,16 @@ export const api = {
     request<PipelineRunDetail>(`/pipeline-runs/${runId}/review-config`, {
       method: "PATCH",
       body: JSON.stringify(patch)
+    }),
+  regenerateRunText: (runId: string, reviewNotes = "") =>
+    request<PipelineRunDetail>(`/pipeline-runs/${runId}/regenerate-text`, {
+      method: "POST",
+      body: JSON.stringify({ review_notes: reviewNotes })
+    }),
+  runPromptAction: (runId: string, action: "improve" | "shorten") =>
+    request<PipelineRunDetail>(`/pipeline-runs/${runId}/prompt-actions`, {
+      method: "POST",
+      body: JSON.stringify({ action })
     }),
   listIdeaQueue: () => request<IdeaQueueItem[]>("/idea-queue"),
   createIdeaQueueItem: (payload: Record<string, unknown>) =>

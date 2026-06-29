@@ -6,6 +6,7 @@ from app.schemas.pipeline_runs import (
     AggregatedPipelineRunResponse,
     ContentIdeaPatch,
     PipelineRunCreate,
+    PromptActionRequest,
     ReviewConfigPatch,
     ReviewAction,
     ScriptPatch,
@@ -19,9 +20,11 @@ from app.services.pipeline_service import (
     get_pipeline_run_summary,
     list_pipeline_runs,
     patch_idea,
+    prompt_action_pipeline,
     patch_review_config,
     patch_script,
     patch_storyboard,
+    regenerate_text_only,
     recheck_pipeline_assets,
     resume_pipeline,
 )
@@ -118,3 +121,25 @@ def update_review_config(run_id: str, payload: ReviewConfigPatch, db: Session = 
         return get_pipeline_run_detail(db, run.id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/{run_id}/regenerate-text")
+def regenerate_run_text(run_id: str, payload: ReviewAction | None = Body(default=None), db: Session = Depends(get_db)):
+    try:
+        run = regenerate_text_only(db, run_id, payload.review_notes if payload else None)
+        return get_pipeline_run_detail(db, run.id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/{run_id}/prompt-actions")
+def run_prompt_action(run_id: str, payload: PromptActionRequest, db: Session = Depends(get_db)):
+    try:
+        run = prompt_action_pipeline(db, run_id, payload.action)
+        return get_pipeline_run_detail(db, run.id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc

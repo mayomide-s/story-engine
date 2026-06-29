@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -41,10 +41,17 @@ class ReviewConfigPatch(BaseModel):
     style_preset: str | None = None
     prompt_override: str | None = None
     caption_override: str | None = None
+    hashtag_set: list[str] | None = None
+    review_sections: dict[str, str] | None = None
+    ending_frame_guidance: str | None = None
 
 
 class ReviewAction(BaseModel):
     review_notes: str | None = None
+
+
+class PromptActionRequest(BaseModel):
+    action: Literal["improve", "shorten"]
 
 
 class ManualPostingUpdate(BaseModel):
@@ -81,3 +88,5 @@ class AggregatedPipelineRunResponse(BaseModel):
     pipeline_events: list[dict[str, Any]] = Field(default_factory=list)
     prompt_preview: str | None = None
     content_critique: dict[str, Any] | None = None
+    review_sections: dict[str, str] | None = None
+    review_preflight: dict[str, Any] | None = None

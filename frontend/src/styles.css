@@ -215,7 +215,8 @@ pre {
 .list,
 .timeline,
 .quality-list,
-.asset-grid {
+.asset-grid,
+.score-grid {
   display: grid;
   gap: 0.9rem;
 }
@@ -427,6 +428,10 @@ pre {
 }
 
 .asset-grid {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.score-grid {
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 }
 

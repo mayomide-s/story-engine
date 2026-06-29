@@ -142,6 +142,73 @@ def test_prompt_preview_uses_saved_edits(client):
     assert payload["pipeline_run"]["caption_override"] == "Custom caption"
 
 
+def test_text_only_regeneration_does_not_create_video_jobs(client):
+    create = client.post("/api/pipeline-runs", json={"topic": "CORS", "auto_mode": False})
+    run_id = create.json()["pipeline_run"]["id"]
+
+    regenerated = client.post(f"/api/pipeline-runs/{run_id}/regenerate-text", json={"review_notes": "Refresh text"})
+    assert regenerated.status_code == 200
+    payload = regenerated.json()
+    assert payload["video"] is None
+    assert payload["pipeline_run"]["video_id"] is None
+    assert payload["pipeline_run"]["status"] == "awaiting_review"
+    assert any(event["event_type"] == "review.text_regenerated" for event in payload["pipeline_events"])
+
+
+def test_improve_prompt_updates_preview_without_calling_runway(client):
+    create = client.post("/api/pipeline-runs", json={"topic": "CORS", "auto_mode": False})
+    run_id = create.json()["pipeline_run"]["id"]
+
+    improved = client.post(f"/api/pipeline-runs/{run_id}/prompt-actions", json={"action": "improve"})
+    assert improved.status_code == 200
+    payload = improved.json()
+    assert payload["pipeline_run"]["video_id"] is None
+    assert payload["prompt_preview"]
+    assert payload["pipeline_run"]["prompt_override"] == payload["prompt_preview"]
+    assert any(event["event_type"] == "review.prompt_improved" for event in payload["pipeline_events"])
+
+
+def test_shorten_prompt_respects_provider_prompt_limits(client, monkeypatch):
+    monkeypatch.setenv("VIDEO_PROVIDER", "runway")
+    get_settings.cache_clear()
+    create = client.post("/api/pipeline-runs", json={"topic": "Long prompt CORS explainer", "auto_mode": False})
+    run_id = create.json()["pipeline_run"]["id"]
+    client.patch(
+        f"/api/pipeline-runs/{run_id}/review-config",
+        json={"prompt_override": " ".join(["verbose-runway-prompt"] * 120)},
+    )
+
+    shortened = client.post(f"/api/pipeline-runs/{run_id}/prompt-actions", json={"action": "shorten"})
+    assert shortened.status_code == 200
+    payload = shortened.json()
+    assert len(payload["prompt_preview"]) <= 850
+    assert payload["review_preflight"]["prompt_length"]["target"] == 850
+    assert payload["review_preflight"]["prompt_length"]["limit"] == 1000
+    get_settings.cache_clear()
+
+
+def test_prompt_length_indicator_uses_correct_limit_and_target(client, monkeypatch):
+    monkeypatch.setenv("VIDEO_PROVIDER", "runway")
+    get_settings.cache_clear()
+    response = client.post("/api/pipeline-runs", json={"topic": "CORS", "auto_mode": False})
+    assert response.status_code == 200
+    preflight = response.json()["review_preflight"]
+    assert preflight["prompt_length"]["limit"] == 1000
+    assert preflight["prompt_length"]["target"] == 850
+    assert preflight["prompt_valid"] is True
+    get_settings.cache_clear()
+
+
+def test_preflight_scoring_appears_in_run_detail(client):
+    response = client.post("/api/pipeline-runs", json={"topic": "CORS", "auto_mode": False})
+    assert response.status_code == 200
+    preflight = response.json()["review_preflight"]
+    assert preflight is not None
+    assert "overall_preflight_score" in preflight["scores"]
+    assert "clarity_score" in preflight["scores"]
+    assert "prompt_length" in preflight
+
+
 def test_critique_data_appears_in_aggregate_response(client):
     response = client.post("/api/pipeline-runs", json={"topic": "CORS", "auto_mode": False})
     assert response.status_code == 200
@@ -398,6 +465,22 @@ def test_resume_rejects_run_with_completed_video(client):
     second_resume = client.post(f"/api/pipeline-runs/{run_id}/resume")
     assert second_resume.status_code == 400
     assert "Open Video Review" in second_resume.json()["detail"]
+
+
+def test_resume_rejects_prompt_that_is_too_long(client, monkeypatch):
+    monkeypatch.setenv("VIDEO_PROVIDER", "runway")
+    get_settings.cache_clear()
+    create = client.post("/api/pipeline-runs", json={"topic": "CORS", "auto_mode": False})
+    run_id = create.json()["pipeline_run"]["id"]
+    client.patch(
+        f"/api/pipeline-runs/{run_id}/review-config",
+        json={"prompt_override": " ".join(["too-long"] * 250)},
+    )
+
+    response = client.post(f"/api/pipeline-runs/{run_id}/resume")
+    assert response.status_code == 400
+    assert "too long" in response.json()["detail"]
+    get_settings.cache_clear()
 
 
 def test_celery_task_registered():

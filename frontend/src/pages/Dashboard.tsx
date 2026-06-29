@@ -132,6 +132,10 @@ export function DashboardPage() {
   const video = detail?.video as Record<string, unknown> | null;
   const runStatus = typeof run?.status === "string" ? run.status : "";
   const hasExistingProviderJob = Boolean(video?.provider_job_id);
+  const preflight = detail?.review_preflight ?? null;
+  const preflightPromptTooLong = Boolean(preflight?.prompt_length?.too_long);
+  const preflightPromptInvalid = preflight?.prompt_valid === false;
+  const lowPreflight = Boolean(preflight?.low_score_warning);
   const canResume = runStatus === "awaiting_review" || (runStatus === "running" && hasExistingProviderJob);
   const canCancel = ["queued", "running", "awaiting_review", "needs_review"].includes(runStatus);
   const resumeLabel = hasExistingProviderJob ? "Continue Existing Generation" : "Resume";
@@ -284,12 +288,18 @@ export function DashboardPage() {
               <div className="stack">
                 <div className="button-row">
                   {canResume ? (
-                    <button onClick={handleResume} disabled={isResuming}>
+                    <button onClick={handleResume} disabled={isResuming || preflightPromptTooLong || preflightPromptInvalid}>
                       {isResuming ? "Processing..." : resumeLabel}
                     </button>
                   ) : null}
                   {canCancel ? <button className="secondary" onClick={handleCancel}>Cancel</button> : null}
                 </div>
+                {canResume && (lowPreflight || preflightPromptTooLong || preflightPromptInvalid) ? (
+                  <div className={`notice-card ${preflightPromptTooLong || preflightPromptInvalid || lowPreflight ? "warning" : ""}`}>
+                    <strong>{preflightPromptTooLong || preflightPromptInvalid ? "Fix review before Resume" : "Low preflight warning"}</strong>
+                    <p>{preflight?.summary ?? "Review the Ideas page before spending credits."}</p>
+                  </div>
+                ) : null}
                 {canResume && isRunwayMode ? (
                   <div className="notice-card warning">
                     <strong>Paid generation warning</strong>
