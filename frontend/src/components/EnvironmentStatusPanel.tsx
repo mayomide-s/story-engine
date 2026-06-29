@@ -17,16 +17,19 @@ function CheckRow({ label, status, detail }: { label: string; status: string; de
 export function EnvironmentStatusPanel() {
   const [details, setDetails] = useState<HealthDetails | null>(null);
   const [error, setError] = useState<string>("");
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     api.getHealthDetails()
       .then((payload) => {
         setDetails(payload);
         setError("");
+        setIsLoading(false);
       })
       .catch((requestError: Error) => {
         setError(requestError.message);
         setDetails(null);
+        setIsLoading(false);
       });
   }, []);
 
@@ -35,15 +38,17 @@ export function EnvironmentStatusPanel() {
       <div className="panel-header">
         <h2>Environment</h2>
         <span className={`status-pill ${details?.status === "ok" ? "success" : "warning"}`}>
-          {details?.status ?? "offline"}
+          {details?.status ?? (isLoading ? "checking" : "offline")}
         </span>
       </div>
+      {!isLoading && !details ? <p className="error-text"><strong>Backend unavailable</strong></p> : null}
       {error ? (
         <div className="notice-card danger">
           <strong>Backend unavailable</strong>
           <p>{error}</p>
         </div>
       ) : null}
+      {isLoading ? <p className="subtle">Checking backend readiness...</p> : null}
       {details ? (
         <div className="stack compact">
           <div className="key-grid">
