@@ -163,6 +163,7 @@ export function DashboardPage() {
                   <div><span>Status</span><strong>{String(run.status)}</strong></div>
                   <div><span>Stage</span><strong>{String(run.current_stage)}</strong></div>
                   <div><span>Provider</span><strong>{String(video?.provider ?? "not started")}</strong></div>
+                  <div><span>Style Preset</span><strong>{String(run.style_preset ?? "clean_3d_cartoon")}</strong></div>
                 </div>
                 {run.error_message ? (
                   <div className="notice-card danger">

@@ -7,6 +7,7 @@ Create Date: 2026-06-29 11:45:00
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
 
 
 revision = "0005_idea_queue"
@@ -28,7 +29,11 @@ def upgrade() -> None:
             sa.Column("topic", sa.String(length=255), nullable=False),
             sa.Column("style_preset", sa.String(length=100), nullable=False),
             sa.Column("target_platform", sa.String(length=50), nullable=False),
-            sa.Column("priority", sa.Enum("LOW", "NORMAL", "HIGH", name="pipelinepriority"), nullable=False),
+            sa.Column(
+                "priority",
+                postgresql.ENUM("LOW", "NORMAL", "HIGH", name="pipelinepriority", create_type=False),
+                nullable=False,
+            ),
             sa.Column("status", sa.Enum("DRAFT", "READY", "GENERATED", "ARCHIVED", name="ideaqueuestatus"), nullable=False),
             sa.Column("notes", sa.Text(), nullable=True),
             sa.Column("planned_date", sa.DateTime(), nullable=True),
