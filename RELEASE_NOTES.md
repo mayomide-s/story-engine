@@ -6,6 +6,14 @@ This release marks the `v1 local MVP` for AI coding mini-story production.
 
 The app supports planning, generating, reviewing, storing, exporting, and manually posting short-form coding videos through a local-first workflow.
 
+`v1.0.1-runway-verified` adds one verified paid-provider checkpoint on top of the local MVP:
+
+- Runway/R2 regression verified end to end
+- Prompt compaction added for the Runway `promptText` size limit
+- Exactly one successful Runway job was submitted after the fix
+- R2 upload, quality check, Video Review, Asset Library, and Export Pack were all re-verified
+- Local `.env` should be returned to safe `mock/r2` mode after paid-provider testing
+
 ## V1 Feature Set
 
 - Dashboard for creating and tracking pipeline runs
@@ -39,6 +47,7 @@ The app supports planning, generating, reviewing, storing, exporting, and manual
 - `VIDEO_PROVIDER=runway` can spend real credits when a run is resumed
 - Do not enable Runway mode unless intentional
 - Duplicate Resume is guarded to avoid creating a second provider job for the same run
+- After any paid-provider regression test, return local `.env` to `VIDEO_PROVIDER=mock` unless you intentionally need Runway mode again
 
 ## Safe Startup Commands
 
