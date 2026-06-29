@@ -48,5 +48,32 @@ class IdeaQueueItemResponse(BaseModel):
     notes: str | None = None
     planned_date: datetime | None = None
     pipeline_run_id: str | None = None
+    idea_score: dict[str, float | str] | None = None
     created_at: datetime
     updated_at: datetime
+
+
+class IdeaQueueBatchUpdate(BaseModel):
+    item_ids: list[str]
+    status: IdeaQueueStatus | None = None
+    target_platform: str | None = None
+    style_preset: str | None = None
+    priority: PipelinePriority | None = None
+    planned_date: datetime | None = None
+    archive_selected: bool = False
+
+
+class IdeaQueueScoreRequest(BaseModel):
+    item_ids: list[str]
+
+
+class IdeaScoreResponse(BaseModel):
+    item_id: str
+    hook_strength: float
+    beginner_clarity: float
+    visual_potential: float
+    platform_fit: float
+    estimated_production_value: float
+    overall_score: float
+    provider: str
+    model: str

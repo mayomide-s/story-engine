@@ -760,6 +760,69 @@ def test_generate_run_from_idea_queue_item(client):
     assert payload["idea_queue_item"]["status"] == "generated"
     assert payload["pipeline_run"]["topic"] == "JWT"
     assert payload["pipeline_run"]["style_preset"] == "whiteboard_character"
+    assert payload["pipeline_run"]["status"] == "awaiting_review"
+
+
+def test_batch_update_idea_queue_items(client):
+    first = client.post("/api/idea-queue", json={"topic": "Caching", "status": "draft"})
+    second = client.post("/api/idea-queue", json={"topic": "Queues", "status": "draft"})
+    payload = {
+        "item_ids": [first.json()["id"], second.json()["id"]],
+        "status": "ready",
+        "target_platform": "youtube",
+        "style_preset": "office_comedy",
+        "priority": "high",
+        "planned_date": "2026-07-20T09:00:00",
+    }
+    response = client.post("/api/idea-queue/batch-update", json=payload)
+    assert response.status_code == 200
+    items = response.json()
+    assert len(items) == 2
+    assert all(item["status"] == "ready" for item in items)
+    assert all(item["target_platform"] == "youtube" for item in items)
+    assert all(item["style_preset"] == "office_comedy" for item in items)
+    assert all(item["priority"] == "high" for item in items)
+    assert all(item["planned_date"] == "2026-07-20T09:00:00" for item in items)
+    assert all(item["input_config_json"]["target_platforms"] == ["youtube"] for item in items)
+
+
+def test_batch_archive_selected_ideas(client):
+    first = client.post("/api/idea-queue", json={"topic": "Retries"})
+    second = client.post("/api/idea-queue", json={"topic": "Workers"})
+    response = client.post(
+        "/api/idea-queue/batch-update",
+        json={"item_ids": [first.json()["id"], second.json()["id"]], "archive_selected": True},
+    )
+    assert response.status_code == 200
+    assert all(item["status"] == "archived" for item in response.json())
+
+
+def test_idea_queue_scoring_does_not_generate_video(client):
+    first = client.post("/api/idea-queue", json={"topic": "Circuit breakers", "priority": "high"})
+    second = client.post("/api/idea-queue", json={"topic": "Cron jobs", "target_platform": "youtube"})
+    response = client.post("/api/idea-queue/score", json={"item_ids": [first.json()["id"], second.json()["id"]]})
+    assert response.status_code == 200
+    scores = response.json()
+    assert len(scores) == 2
+    assert all("overall_score" in item for item in scores)
+    runs = client.get("/api/pipeline-runs").json()
+    assert all(run["topic"] not in {"Circuit breakers", "Cron jobs"} for run in runs)
+
+
+def test_idea_queue_list_includes_scores(client):
+    client.post("/api/idea-queue", json={"topic": "Memory leaks", "priority": "high"})
+    response = client.get("/api/idea-queue")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload[0]["idea_score"] is not None
+    assert "overall_score" in payload[0]["idea_score"]
+
+
+def test_no_bulk_runway_generation_path_exists(client):
+    response = client.post("/api/idea-queue/batch-update", json={"item_ids": ["fake"], "generate_runs": True})
+    assert response.status_code in {404, 422}
+    missing = client.post("/api/idea-queue/batch-generate", json={"item_ids": ["fake"]})
+    assert missing.status_code in {404, 405}
 
 
 def test_asset_library_api_returns_generated_completed_assets(client):

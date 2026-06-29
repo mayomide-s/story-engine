@@ -58,8 +58,21 @@ export type IdeaQueueItem = {
   notes?: string | null;
   planned_date?: string | null;
   pipeline_run_id?: string | null;
+  idea_score?: IdeaScore | null;
   created_at: string;
   updated_at: string;
+};
+
+export type IdeaScore = {
+  item_id: string;
+  hook_strength: number;
+  beginner_clarity: number;
+  visual_potential: number;
+  platform_fit: number;
+  estimated_production_value: number;
+  overall_score: number;
+  provider: string;
+  model: string;
 };
 
 export type AssetLibraryItem = {
@@ -215,6 +228,16 @@ export const api = {
     request<IdeaQueueItem>(`/idea-queue/${itemId}`, {
       method: "PATCH",
       body: JSON.stringify(payload)
+    }),
+  batchUpdateIdeaQueueItems: (payload: Record<string, unknown>) =>
+    request<IdeaQueueItem[]>("/idea-queue/batch-update", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    }),
+  scoreIdeaQueueItems: (itemIds: string[]) =>
+    request<IdeaScore[]>("/idea-queue/score", {
+      method: "POST",
+      body: JSON.stringify({ item_ids: itemIds })
     }),
   archiveIdeaQueueItem: (itemId: string) =>
     request<IdeaQueueItem>(`/idea-queue/${itemId}/archive`, {
