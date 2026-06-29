@@ -31,6 +31,12 @@ from app.services.security import redact_sensitive_data, sanitize_for_json
 
 
 DEFAULT_ACCOUNT_NAME = "CodeToons AI"
+
+
+class UnsafeResumeError(RuntimeError):
+    """Raised when a resume request would create unsafe or duplicate video work."""
+
+
 STYLE_PRESETS = {
     "clean_3d_cartoon": {
         "style": "clean 3D cartoon",
@@ -945,8 +951,12 @@ def resume_pipeline(db: Session, run_id: str, review_notes: str | None = None) -
         raise ValueError("Pipeline run not found")
     video = db.get(Video, run.video_id) if run.video_id else None
 
+    if video and video.status in {VideoStatus.COMPLETED, VideoStatus.APPROVED}:
+        raise UnsafeResumeError("Run already has a generated video. Open Video Review or re-run quality check instead of resuming.")
     if run.status in {PipelineStatus.COMPLETED, PipelineStatus.CANCELLED, PipelineStatus.FAILED}:
-        raise RuntimeError(f"Run cannot be resumed from status '{run.status.value}'")
+        raise UnsafeResumeError(f"Run cannot be resumed from status '{run.status.value}'")
+    if video and video.status == VideoStatus.SUBMITTING and video.provider_job_id:
+        raise UnsafeResumeError("Run already has a submitted provider job. Please wait for polling to continue.")
     if run.status == PipelineStatus.RUNNING and run.current_stage in {
         PipelineStage.VIDEO_PROMPT_BUILD,
         PipelineStage.VIDEO_GENERATION_SUBMIT,
@@ -958,6 +968,25 @@ def resume_pipeline(db: Session, run_id: str, review_notes: str | None = None) -
         return run
     if video and video.provider_job_id and run.status == PipelineStatus.RUNNING:
         return run
+    if video and video.provider_job_id and video.status in {VideoStatus.QUEUED, VideoStatus.GENERATING, VideoStatus.PENDING_REVIEW}:
+        run.review_notes = review_notes or run.review_notes
+        run.status = PipelineStatus.RUNNING
+        run.resumed_at = now_utc()
+        run.paused_at = None
+        run.current_stage = PipelineStage.VIDEO_GENERATION_POLLING
+        add_event(
+            db,
+            run.id,
+            "pipeline.resumed_existing_generation",
+            "Run resumed with existing provider job",
+            stage=PipelineStage.VIDEO_GENERATION_POLLING.value,
+        )
+        db.commit()
+        if get_settings().video_provider == "runway":
+            enqueue_resume_pipeline_task(run.id)
+            return db.get(PipelineRun, run.id)
+        continue_pipeline_after_review(db, db.get(PipelineRun, run.id) or run)
+        return db.get(PipelineRun, run.id)
 
     run.review_notes = review_notes
     run.status = PipelineStatus.RUNNING

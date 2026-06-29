@@ -14,18 +14,21 @@ from app.routers.pipeline_runs import router as pipeline_runs_router
 from app.routers.settings import router as settings_router
 from app.services.providers import get_video_provider
 from app.services.pipeline_service import seed_default_account
+from app.services.system_service import collect_health_details
 
 logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    runtime_settings = get_settings()
+    runtime_settings.validate_configuration()
     db = SessionLocal()
     try:
         seed_default_account(db)
     finally:
         db.close()
-    if settings.video_provider == "runway":
+    if runtime_settings.video_provider == "runway":
         try:
             provider = get_video_provider()
             logger.info("Runway provider validation succeeded using %s", getattr(provider, "sdk_version", "unknown"))
@@ -54,3 +57,8 @@ app.mount("/assets", StaticFiles(directory=settings.local_storage_path), name="a
 @app.get("/health")
 def healthcheck():
     return {"status": "ok"}
+
+
+@app.get("/health/details")
+def health_details():
+    return collect_health_details(get_settings())

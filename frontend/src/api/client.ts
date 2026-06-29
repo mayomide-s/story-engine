@@ -148,12 +148,33 @@ export type AssetExportPack = {
 };
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000/api";
+const BACKEND_BASE = API_BASE.replace(/\/api\/?$/, "");
 
-async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`, {
-    headers: { "Content-Type": "application/json" },
-    ...options
-  });
+export type HealthCheck = {
+  status: string;
+};
+
+export type HealthDetails = {
+  status: string;
+  backend_reachable: boolean;
+  environment: string;
+  video_provider: string;
+  storage_provider: string;
+  runway_mode_enabled: boolean;
+  r2_public_base_url_configured: boolean;
+  checks: Record<string, { status: string; detail: string; errors?: string[]; mode?: string; provider?: string; sdk_version?: string | null }>;
+};
+
+async function request<T>(path: string, options?: RequestInit, baseUrl = API_BASE): Promise<T> {
+  let response: Response;
+  try {
+    response = await fetch(`${baseUrl}${path}`, {
+      headers: { "Content-Type": "application/json", ...(options?.headers ?? {}) },
+      ...options
+    });
+  } catch {
+    throw new Error("Backend unavailable");
+  }
   if (!response.ok) {
     let detail = `Request failed: ${response.status}`;
     try {
@@ -170,6 +191,8 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  getHealth: () => request<HealthCheck>("/health", undefined, BACKEND_BASE),
+  getHealthDetails: () => request<HealthDetails>("/health/details", undefined, BACKEND_BASE),
   getAccountDefaults: () => request<AccountDefaults>("/settings/account-defaults"),
   updateAccountDefaults: (payload: Record<string, unknown>) =>
     request<AccountDefaults>("/settings/account-defaults", {

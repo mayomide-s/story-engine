@@ -27,14 +27,17 @@ export function IdeasPage() {
 
   useEffect(() => {
     const requestedRunId = searchParams.get("run");
-    api.listRuns().then((data) => {
-      setRuns(data);
-      if (requestedRunId && data.some((run) => run.id === requestedRunId)) {
-        setSelectedRunId(requestedRunId);
-      } else if (data[0]) {
-        setSelectedRunId(data[0].id);
-      }
-    });
+    api.listRuns()
+      .then((data) => {
+        setRuns(data);
+        setError("");
+        if (requestedRunId && data.some((run) => run.id === requestedRunId)) {
+          setSelectedRunId(requestedRunId);
+        } else if (data[0]) {
+          setSelectedRunId(data[0].id);
+        }
+      })
+      .catch((requestError: Error) => setError(requestError.message));
   }, [searchParams]);
 
   useEffect(() => {

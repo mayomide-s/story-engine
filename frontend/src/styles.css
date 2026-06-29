@@ -76,6 +76,9 @@ pre {
   border-right: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(6, 9, 14, 0.55);
   backdrop-filter: blur(16px);
+  display: grid;
+  gap: 1.25rem;
+  align-content: start;
 }
 
 .nav {
@@ -333,6 +336,28 @@ pre {
   padding: 1rem;
   display: grid;
   gap: 0.45rem;
+}
+
+.env-panel {
+  padding: 1rem;
+}
+
+.env-check-row {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 0.9rem;
+  padding: 0.8rem 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.env-check-row:first-of-type {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.env-check-row p {
+  margin: 0.35rem 0 0;
 }
 
 .form-grid {

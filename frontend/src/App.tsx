@@ -1,5 +1,6 @@
 import { NavLink, Route, Routes } from "react-router-dom";
 
+import { EnvironmentStatusPanel } from "./components/EnvironmentStatusPanel";
 import { DashboardPage } from "./pages/Dashboard";
 import { AssetLibraryPage } from "./pages/AssetLibrary";
 import { IdeaQueuePage } from "./pages/IdeaQueue";
@@ -24,6 +25,7 @@ export default function App() {
           <NavLink to="/ideas">Ideas</NavLink>
           <NavLink to="/review">Video Review</NavLink>
         </nav>
+        <EnvironmentStatusPanel />
       </aside>
       <main className="content">
         <Routes>

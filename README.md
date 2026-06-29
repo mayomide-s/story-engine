@@ -1,8 +1,18 @@
 # AI Coding Story Engine MVP
 
-This repository is the v1 stability checkpoint for the first end-to-end milestone:
+This repository is the v1.8 production-hardening checkpoint for the current internal milestone:
 
-`topic -> idea/script/storyboard -> review pause -> Runway generation -> Celery polling -> MP4 download -> thumbnail -> R2 upload -> quality check -> approved video -> manual posting package -> completed run`
+`topic -> idea/script/storyboard -> review pause -> video generation -> asset upload -> quality check -> manual posting package -> completed run`
+
+Current feature scope through v1.7:
+
+- Dashboard run creation and review-aware pipeline tracking
+- Idea editing, prompt preview, and critique guidance
+- Mock and Runway video generation behind the same provider interface
+- Local and Cloudflare R2 asset storage
+- Quality checks and recheck flow without re-spending Runway credits
+- Idea Queue, manual content calendar, brand defaults, and batch planning controls
+- Asset Library, export pack, and manual posting metadata
 
 ## Stack
 
@@ -13,76 +23,106 @@ This repository is the v1 stability checkpoint for the first end-to-end mileston
 - Storage: local filesystem or Cloudflare R2
 - Video providers: `mock` and `runway`
 
-## Configuration
+## Environment Variables
 
-Copy `.env.example` to `.env` and fill in only the values you need.
+Copy `.env.example` to `.env` and fill in only the mode you intend to run.
 
-Important variables:
+Always required:
 
 - `DATABASE_URL`
 - `REDIS_URL`
 - `VIDEO_PROVIDER`
 - `STORAGE_PROVIDER`
-- `RUNWAY_API_KEY`
+
+Required for `STORAGE_PROVIDER=r2`:
+
 - `R2_ACCOUNT_ID`
 - `R2_ACCESS_KEY_ID`
 - `R2_SECRET_ACCESS_KEY`
 - `R2_BUCKET_NAME`
 - `R2_PUBLIC_BASE_URL`
 
-## Modes
+Required for `VIDEO_PROVIDER=runway`:
+
+- `RUNWAY_API_KEY`
+
+## Running Modes
 
 ### Local mock mode
 
-- Set `VIDEO_PROVIDER=mock`
-- Set `STORAGE_PROVIDER=local`
-- Start with `docker-compose up --build`
-
-This is the cheapest and safest mode for normal development.
+- `VIDEO_PROVIDER=mock`
+- `STORAGE_PROVIDER=local`
+- Cheapest and safest mode for development
+- Recommended for smoke testing and UI iteration
 
 ### Mock + R2 mode
 
-- Set `VIDEO_PROVIDER=mock`
-- Set `STORAGE_PROVIDER=r2`
-- Fill in the R2 variables
-- Start with `docker-compose up --build`
-
-Use this when you want real R2 uploads without spending Runway credits.
+- `VIDEO_PROVIDER=mock`
+- `STORAGE_PROVIDER=r2`
+- Uses real R2 uploads without spending Runway credits
 
 ### Runway + R2 mode
 
-- Set `VIDEO_PROVIDER=runway`
-- Set `STORAGE_PROVIDER=r2`
-- Fill in `RUNWAY_API_KEY` and all R2 variables
-- Start with `docker-compose up --build`
+- `VIDEO_PROVIDER=runway`
+- `STORAGE_PROVIDER=r2`
+- Real paid generation path
 
-This is the real paid path.
+## Runway Cost Warning
 
-## Credit Warning
+Do not enable `VIDEO_PROVIDER=runway` unless intentional.
 
-Do not run `VIDEO_PROVIDER=runway` unless intentional.
+- Resume in Runway mode can spend credits
+- Bulk Runway generation is intentionally not implemented
+- Duplicate Resume is blocked from creating a second provider job for the same run
+- If a provider job already exists, the UI should continue existing generation instead of submitting again
 
-Resuming a run in Runway mode can spend credits. The UI now shows a warning before Resume when `VIDEO_PROVIDER=runway`, and duplicate Resume should not submit a second Runway job for the same run.
+## Local Startup
 
-## Runbook
-
-### Start the stack
+Start everything:
 
 ```bash
 docker-compose up --build
 ```
 
+Stop everything:
+
+```bash
+docker-compose down
+```
+
 The backend seeds `CodeToons AI` automatically on startup if missing.
 
-### Create a run
+## Optional Demo Seed
 
-From the UI:
+For local mock-only testing, you can add sample queue items and one paused run:
 
-- Open Dashboard
+```bash
+docker-compose exec backend python -m app.scripts.seed_demo
+```
+
+This command is intentionally blocked unless:
+
+- `VIDEO_PROVIDER=mock`
+- `STORAGE_PROVIDER=local`
+
+## Create And Resume Runs
+
+Create a run from the UI:
+
+- Open `Dashboard`
 - Enter a topic such as `CORS`
 - Click `Create Run`
 
-From the API:
+The run will pause at storyboard review in `awaiting_review`.
+
+Resume from the UI:
+
+- Open `Dashboard`
+- Select an `awaiting_review` run
+- Review prompt/storyboard edits in `Ideas` if needed
+- Click `Resume`
+
+Create via API:
 
 ```bash
 curl -X POST http://localhost:8000/api/pipeline-runs ^
@@ -90,17 +130,7 @@ curl -X POST http://localhost:8000/api/pipeline-runs ^
   -d "{\"topic\":\"CORS\",\"auto_mode\":false}"
 ```
 
-The run will stop at storyboard review in `awaiting_review`.
-
-### Resume a run
-
-From the UI:
-
-- Open Dashboard
-- Select an `awaiting_review` run
-- Click `Resume`
-
-From the API:
+Resume via API:
 
 ```bash
 curl -X POST http://localhost:8000/api/pipeline-runs/RUN_ID/resume ^
@@ -108,17 +138,9 @@ curl -X POST http://localhost:8000/api/pipeline-runs/RUN_ID/resume ^
   -d "{\"review_notes\":\"Approved from dashboard\"}"
 ```
 
-### Re-run quality check without spending Runway credits
+## Re-Run Quality Check Without Spending Credits
 
-Use this when the assets already exist and you only want to re-run quality/manual package logic.
-
-From the UI:
-
-- Open `Video Review`
-- Select a rejected or `needs_review` run with existing assets
-- Click `Re-run Quality Check`
-
-From the API:
+Use this when assets already exist and you only want to re-run review logic:
 
 ```bash
 curl -X POST http://localhost:8000/api/pipeline-runs/RUN_ID/recheck ^
@@ -128,13 +150,93 @@ curl -X POST http://localhost:8000/api/pipeline-runs/RUN_ID/recheck ^
 
 This does not submit a new Runway job.
 
-### Inspect logs
+## Health And Debugging
+
+Basic health:
+
+- `GET /health` -> simple liveness check
+
+Detailed health:
+
+- `GET /health/details` -> DB, Redis, storage, provider, and configuration readiness
+- Does not expose secrets
+- Drives the in-app environment panel
+
+Useful logs:
 
 ```bash
 docker-compose logs backend --tail=250
 docker-compose logs celery_worker --tail=250
 docker-compose logs celery_beat --tail=250
 ```
+
+## Migration Safety Runbook
+
+Apply migrations:
+
+```bash
+docker-compose exec backend alembic upgrade head
+```
+
+Inspect current revision:
+
+```bash
+docker-compose exec backend alembic current
+docker-compose exec backend alembic history --verbose
+```
+
+Do not do these unless intentional:
+
+- Do not delete the Postgres volume just to fix a migration mismatch
+- Do not hand-edit `alembic_version` without understanding the current revision chain
+- Do not rewrite already-applied migrations in a way that breaks existing local databases
+
+## Backup And Preservation Notes
+
+Preserve configuration:
+
+- Keep a copy of `.env`
+- Treat `.env` as sensitive and never commit real secrets
+
+Preserve Postgres data:
+
+- Back up the Postgres volume with Docker Desktop or your preferred Docker volume backup flow
+- Or run a normal `pg_dump` from the backend/postgres containers
+
+Preserve R2 assets:
+
+- R2 objects are not stored in the Postgres volume
+- Keep bucket configuration, credentials, and public base URL documented
+- Avoid deleting or rotating buckets without confirming existing asset URLs are still valid
+
+## Troubleshooting
+
+### Backend unavailable in the UI
+
+Check:
+
+- `docker-compose ps`
+- `docker-compose logs backend --tail=250`
+- `docker-compose logs postgres --tail=250`
+- `docker-compose logs redis --tail=250`
+
+If startup fails, the backend now validates configuration early and should log which required settings are missing for the active mode.
+
+### Docker Desktop issues
+
+Common recovery steps:
+
+- Confirm Docker Desktop is fully started
+- Re-run `docker-compose up --build`
+- Check that Postgres and Redis are healthy before inspecting app-level failures
+
+### Runway mode safety
+
+Before clicking Resume:
+
+- Confirm `VIDEO_PROVIDER=runway` is intentional
+- Confirm the run does not already have an approved/completed video
+- Confirm you are not trying to bulk-generate paid videos
 
 ## Known Safe Commands
 
@@ -147,21 +249,7 @@ pytest -q
 npm run build
 ```
 
-## Cleanup
-
-There is no archive/delete UI in this checkpoint. Use cleanup commands intentionally instead of building a management layer yet.
-
-Examples:
-
-```bash
-docker-compose down
-docker volume ls
-docker ps -a
-```
-
-For application-level cleanup, use SQL or a DB client carefully against local development data only.
-
-## API Endpoints
+## API Surface
 
 - `POST /api/pipeline-runs`
 - `GET /api/pipeline-runs`
@@ -172,9 +260,29 @@ For application-level cleanup, use SQL or a DB client carefully against local de
 - `PATCH /api/pipeline-runs/{id}/idea`
 - `PATCH /api/pipeline-runs/{id}/script`
 - `PATCH /api/pipeline-runs/{id}/storyboard`
+- `GET /api/idea-queue`
+- `GET /api/asset-library`
+- `GET /health`
+- `GET /health/details`
 
-## Notes
+## Development Checks
 
-- `POST /api/pipeline-runs` defaults to `auto_mode=false`.
-- Prompt logs redact secrets, API keys, access tokens, signed URLs, and provider credentials before persistence.
-- `VIDEO_PROVIDER=mock` is still the default and recommended default for development.
+Backend:
+
+```bash
+cd backend
+pytest -q
+```
+
+Frontend:
+
+```bash
+cd frontend
+npm run build
+```
+
+## Security And Logging Notes
+
+- Prompt logs redact secrets, API keys, access tokens, signed URLs, and provider credentials before persistence
+- Health details report readiness and missing setting names only, never secret values
+- `VIDEO_PROVIDER=mock` remains the safest default for development

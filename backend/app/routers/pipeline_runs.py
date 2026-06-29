@@ -12,6 +12,7 @@ from app.schemas.pipeline_runs import (
     StoryboardPatch,
 )
 from app.services.pipeline_service import (
+    UnsafeResumeError,
     cancel_pipeline,
     create_pipeline_run,
     get_pipeline_run_detail,
@@ -57,6 +58,8 @@ def resume_run(run_id: str, payload: ReviewAction | None = Body(default=None), d
         return get_pipeline_run_detail(db, run.id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except UnsafeResumeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 

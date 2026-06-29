@@ -1,9 +1,10 @@
 from datetime import UTC, datetime
 from pathlib import Path
+import json
 import tempfile
 from uuid import uuid4
 
-from app.config import get_settings
+from app.config import Settings, get_settings
 from app.db.session import SessionLocal
 from app.providers.storage.r2_provider import R2StorageProvider
 from app.providers.video.runway_provider import RunwayVideoProvider
@@ -50,6 +51,51 @@ def test_resume_run_accepts_no_body(client):
     payload = resume.json()
     assert payload["pipeline_run"]["status"] == "completed"
     assert payload["pipeline_run"]["review_notes"] == "Approved from dashboard"
+
+
+def test_config_validation_accepts_mock_local_mode():
+    settings = Settings(
+        _env_file=None,
+        database_url="sqlite:///./test.db",
+        redis_url="redis://redis:6379/0",
+        video_provider="mock",
+        storage_provider="local",
+    )
+
+    assert settings.configuration_errors() == []
+
+
+def test_config_validation_requires_r2_and_runway_settings():
+    settings = Settings(
+        _env_file=None,
+        database_url="sqlite:///./test.db",
+        redis_url="redis://redis:6379/0",
+        video_provider="runway",
+        storage_provider="r2",
+        r2_account_id="",
+        r2_access_key_id="",
+        r2_secret_access_key="",
+        r2_bucket_name="",
+        r2_public_base_url="",
+        runway_api_key="",
+    )
+
+    errors = settings.configuration_errors()
+    assert any("R2_ACCOUNT_ID" in error for error in errors)
+    assert any("RUNWAY_API_KEY" in error for error in errors)
+
+
+def test_health_details_endpoint_returns_safe_readiness_data(client, monkeypatch):
+    monkeypatch.setenv("RUNWAY_API_KEY", "super-secret-runway-key")
+    response = client.get("/health/details")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["backend_reachable"] is True
+    assert payload["video_provider"] in {"mock", "runway"}
+    assert "checks" in payload
+    serialized = json.dumps(payload)
+    assert "super-secret-runway-key" not in serialized
 
 
 def test_runway_storyboard_timings_fit_requested_duration(client, monkeypatch):
@@ -328,6 +374,18 @@ def test_duplicate_resume_does_not_create_second_submission(client, monkeypatch)
     assert second.status_code == 200
     assert queued["count"] == 1
     get_settings.cache_clear()
+
+
+def test_resume_rejects_run_with_completed_video(client):
+    create = client.post("/api/pipeline-runs", json={"topic": "CORS", "auto_mode": False})
+    run_id = create.json()["pipeline_run"]["id"]
+
+    first_resume = client.post(f"/api/pipeline-runs/{run_id}/resume")
+    assert first_resume.status_code == 200
+
+    second_resume = client.post(f"/api/pipeline-runs/{run_id}/resume")
+    assert second_resume.status_code == 400
+    assert "Open Video Review" in second_resume.json()["detail"]
 
 
 def test_celery_task_registered():
