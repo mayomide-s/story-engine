@@ -3,6 +3,10 @@ export type PipelineRunSummary = {
   topic: string;
   status: string;
   current_stage: string;
+  provider?: string | null;
+  video_status?: string | null;
+  provider_job_id?: string | null;
+  error_message?: string | null;
   review_notes?: string | null;
   created_at: string;
 };

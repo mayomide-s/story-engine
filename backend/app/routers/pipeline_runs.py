@@ -14,6 +14,7 @@ from app.services.pipeline_service import (
     cancel_pipeline,
     create_pipeline_run,
     get_pipeline_run_detail,
+    get_pipeline_run_summary,
     list_pipeline_runs,
     patch_idea,
     patch_script,
@@ -35,7 +36,7 @@ def create_run(payload: PipelineRunCreate, db: Session = Depends(get_db)):
 
 @router.get("")
 def get_runs(db: Session = Depends(get_db)):
-    return [get_pipeline_run_detail(db, run.id)["pipeline_run"] for run in list_pipeline_runs(db)]
+    return [get_pipeline_run_summary(db, run) for run in list_pipeline_runs(db)]
 
 
 @router.get("/{run_id}", response_model=AggregatedPipelineRunResponse)

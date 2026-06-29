@@ -4,6 +4,29 @@ import { Link, useSearchParams } from "react-router-dom";
 import { api, PipelineRunDetail, PipelineRunSummary } from "../api/client";
 import { EventTimeline } from "../components/EventTimeline";
 
+const videoProvider = import.meta.env.VITE_VIDEO_PROVIDER ?? "mock";
+const storageProvider = import.meta.env.VITE_STORAGE_PROVIDER ?? "local";
+
+function CopyButton({ text, label }: { text: string; label: string }) {
+  const [copied, setCopied] = useState(false);
+
+  async function handleCopy() {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      setCopied(false);
+    }
+  }
+
+  return (
+    <button type="button" className="secondary" onClick={handleCopy}>
+      {copied ? `${label} copied` : `Copy ${label}`}
+    </button>
+  );
+}
+
 export function VideoReviewPage() {
   const [searchParams] = useSearchParams();
   const [runs, setRuns] = useState<PipelineRunSummary[]>([]);
@@ -39,15 +62,21 @@ export function VideoReviewPage() {
   const videoAsset = assets.find((asset) => asset.asset_type === "video_mp4");
   const thumbnailAsset = assets.find((asset) => asset.asset_type === "thumbnail");
   const platformVariants = (manualPackage?.platform_variants_json as Record<string, unknown> | undefined) ?? {};
-  const qualityEntries = latestQualityCheck?.checks_json && typeof latestQualityCheck.checks_json === "object"
-    ? Object.entries(latestQualityCheck.checks_json as Record<string, unknown>)
-    : [];
+  const rawQualityChecks = latestQualityCheck?.checks_json && typeof latestQualityCheck.checks_json === "object"
+    ? latestQualityCheck.checks_json as Record<string, unknown>
+    : {};
+  const qualityChecklist = Object.entries(rawQualityChecks).filter(([key]) => !key.endsWith("_seconds"));
+  const durationInfo = {
+    requested: rawQualityChecks.requested_duration_seconds,
+    actual: rawQualityChecks.actual_duration_seconds,
+  };
   const canRecheck = Boolean(
     selectedRunId &&
     videoAsset &&
     video &&
     (String(run?.status ?? "") === "needs_review" || String(video.status ?? "") === "rejected"),
   );
+  const badgeLabel = `${videoProvider}/${storageProvider.toUpperCase()}`;
 
   async function handleRecheck() {
     if (!selectedRunId) {
@@ -65,19 +94,28 @@ export function VideoReviewPage() {
     }
   }
 
+  const packageCaption = String(manualPackage?.caption ?? "");
+  const packageHashtags = Array.isArray(manualPackage?.hashtags_json) ? manualPackage.hashtags_json.join(" ") : "";
+  const instagramVariant = platformVariants.instagram as Record<string, unknown> | undefined;
+  const tiktokVariant = platformVariants.tiktok as Record<string, unknown> | undefined;
+  const youtubeVariant = platformVariants.youtube as Record<string, unknown> | undefined;
+
   return (
     <div className="page grid review-grid">
       <section className="panel">
         <div className="panel-header">
           <h2>Video Review</h2>
-          <select value={selectedRunId} onChange={(event) => setSelectedRunId(event.target.value)}>
-            <option value="">Select a run</option>
-            {runs.map((run) => (
-              <option key={run.id} value={run.id}>
-                {run.topic}
-              </option>
-            ))}
-          </select>
+          <div className="panel-actions">
+            <span className="status-pill success">{badgeLabel}</span>
+            <select value={selectedRunId} onChange={(event) => setSelectedRunId(event.target.value)}>
+              <option value="">Select a run</option>
+              {runs.map((run) => (
+                <option key={run.id} value={run.id}>
+                  {run.topic}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
         {error ? <p className="error-text">{error}</p> : null}
         {video ? (
@@ -103,89 +141,135 @@ export function VideoReviewPage() {
               </div>
               <p className="subtle">{String(video.prompt_text)}</p>
               <p><strong>Review Notes:</strong> {String(video.review_notes ?? run?.review_notes ?? "No review notes yet.")}</p>
+              {run?.error_message ? (
+                <div className="notice-card danger">
+                  <strong>Latest Error</strong>
+                  <p>{String(run.error_message)}</p>
+                </div>
+              ) : null}
             </div>
+
+            {videoAsset ? (
+              <div className="panel inset feature-video">
+                <div className="panel-header">
+                  <h3>Generated Video</h3>
+                  <span className="subtle">{String(videoAsset.public_url)}</span>
+                </div>
+                <video
+                  className="video-player large"
+                  controls
+                  preload="metadata"
+                  poster={thumbnailAsset ? String(thumbnailAsset.public_url) : undefined}
+                  src={String(videoAsset.public_url)}
+                >
+                  Your browser does not support the video preview.
+                </video>
+              </div>
+            ) : null}
+
             <div className="panel inset">
               <h3>Generated Assets</h3>
-              <div className="stack">
+              <div className="asset-grid">
                 {videoAsset ? (
                   <div className="content-card">
                     <div className="content-meta">
                       <strong>Video MP4</strong>
-                      <span>{String(videoAsset.public_url)}</span>
+                      <span>{String(videoAsset.mime_type)}</span>
                     </div>
-                    <video
-                      className="video-player"
-                      controls
-                      preload="metadata"
-                      poster={thumbnailAsset ? String(thumbnailAsset.public_url) : undefined}
-                      src={String(videoAsset.public_url)}
-                    >
-                      Your browser does not support the video preview.
-                    </video>
                     <p><strong>Storage Key:</strong> {String(videoAsset.storage_key)}</p>
-                    <p><strong>Mime Type:</strong> {String(videoAsset.mime_type)}</p>
                     <p><strong>Dimensions:</strong> {String(videoAsset.width)} x {String(videoAsset.height)}</p>
+                    <p><strong>Duration:</strong> {String(videoAsset.duration_seconds)}s</p>
                   </div>
                 ) : null}
                 {thumbnailAsset ? (
                   <div className="content-card">
                     <div className="content-meta">
                       <strong>Thumbnail</strong>
-                      <span>{String(thumbnailAsset.public_url)}</span>
+                      <span>{String(thumbnailAsset.mime_type)}</span>
                     </div>
                     <p><strong>Storage Key:</strong> {String(thumbnailAsset.storage_key)}</p>
-                    <p><strong>Mime Type:</strong> {String(thumbnailAsset.mime_type)}</p>
+                    <p><strong>URL:</strong> {String(thumbnailAsset.public_url)}</p>
                   </div>
                 ) : null}
               </div>
             </div>
+
             <div className="panel inset">
-              <h3>Quality Check Result</h3>
+              <h3>Quality Check</h3>
               {latestQualityCheck ? (
                 <div className="stack">
                   <div className="key-grid">
-                    <div><span>Passed</span><strong>{String(latestQualityCheck.passed)}</strong></div>
+                    <div><span>Result</span><strong>{latestQualityCheck.passed ? "Pass" : "Fail"}</strong></div>
                     <div><span>Score</span><strong>{String(latestQualityCheck.score)}</strong></div>
+                    <div><span>Requested</span><strong>{String(durationInfo.requested ?? "n/a")}s</strong></div>
+                    <div><span>Actual</span><strong>{String(durationInfo.actual ?? "n/a")}s</strong></div>
                   </div>
                   <p>{String(latestQualityCheck.llm_critique)}</p>
-                  <div className="stack compact">
-                    {qualityEntries.map(([key, value]) => (
-                      <div key={key} className="content-card">
-                        <div className="content-meta">
-                          <strong>{key}</strong>
-                          <span>{String(value)}</span>
+                  <div className="quality-list">
+                    {qualityChecklist.map(([key, value]) => {
+                      const passed = Boolean(value);
+                      return (
+                        <div key={key} className={`quality-item ${passed ? "pass" : "fail"}`}>
+                          <strong>{key.split("_").join(" ")}</strong>
+                          <span>{passed ? "Pass" : "Fail"}</span>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               ) : (
                 <p className="subtle">No quality check found for this run.</p>
               )}
             </div>
+
             <div className="panel inset">
               <h3>Manual Posting Package</h3>
               {manualPackage ? (
                 <div className="stack">
-                  <p><strong>Caption:</strong> {String(manualPackage.caption)}</p>
-                  <p><strong>Hashtags:</strong> {Array.isArray(manualPackage.hashtags_json) ? manualPackage.hashtags_json.join(" ") : ""}</p>
-                  <p><strong>Target Platforms:</strong> {Array.isArray(manualPackage.target_platforms_json) ? manualPackage.target_platforms_json.join(", ") : ""}</p>
-                  <div className="stack compact">
-                    {Object.entries(platformVariants).map(([platform, variant]) => {
-                      const typedVariant = variant as Record<string, unknown>;
-                      return (
-                        <div key={platform} className="content-card">
-                          <div className="content-meta">
-                            <strong>{platform}</strong>
-                          </div>
-                          {"title" in typedVariant ? <p><strong>Title:</strong> {String(typedVariant.title)}</p> : null}
-                          {"caption" in typedVariant ? <p><strong>Caption:</strong> {String(typedVariant.caption)}</p> : null}
-                          {"description" in typedVariant ? <p><strong>Description:</strong> {String(typedVariant.description)}</p> : null}
-                          <p><strong>Hashtags:</strong> {Array.isArray(typedVariant.hashtags) ? typedVariant.hashtags.join(" ") : ""}</p>
-                        </div>
-                      );
-                    })}
+                  <div className="copy-block">
+                    <div className="content-meta">
+                      <strong>Shared Caption</strong>
+                      <CopyButton text={packageCaption} label="caption" />
+                    </div>
+                    <pre>{packageCaption}</pre>
                   </div>
+                  <div className="copy-block">
+                    <div className="content-meta">
+                      <strong>Shared Hashtags</strong>
+                      <CopyButton text={packageHashtags} label="hashtags" />
+                    </div>
+                    <pre>{packageHashtags}</pre>
+                  </div>
+                  {instagramVariant ? (
+                    <div className="copy-block">
+                      <div className="content-meta">
+                        <strong>Instagram</strong>
+                        <CopyButton text={String(instagramVariant.caption ?? "")} label="Instagram caption" />
+                      </div>
+                      <pre>{String(instagramVariant.caption ?? "")}</pre>
+                    </div>
+                  ) : null}
+                  {tiktokVariant ? (
+                    <div className="copy-block">
+                      <div className="content-meta">
+                        <strong>TikTok</strong>
+                        <CopyButton text={String(tiktokVariant.caption ?? "")} label="TikTok caption" />
+                      </div>
+                      <pre>{String(tiktokVariant.caption ?? "")}</pre>
+                    </div>
+                  ) : null}
+                  {youtubeVariant ? (
+                    <div className="copy-block">
+                      <div className="content-meta">
+                        <strong>YouTube</strong>
+                        <CopyButton
+                          text={`Title: ${String(youtubeVariant.title ?? "")}\n\nDescription:\n${String(youtubeVariant.description ?? "")}`}
+                          label="YouTube title/description"
+                        />
+                      </div>
+                      <pre>{`Title: ${String(youtubeVariant.title ?? "")}\n\nDescription:\n${String(youtubeVariant.description ?? "")}`}</pre>
+                    </div>
+                  ) : null}
                 </div>
               ) : (
                 <p className="subtle">No manual posting package available yet.</p>

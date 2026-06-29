@@ -870,5 +870,14 @@ def get_pipeline_run_detail(db: Session, run_id: str) -> dict[str, Any]:
     }
 
 
+def get_pipeline_run_summary(db: Session, run: PipelineRun) -> dict[str, Any]:
+    summary = serialize_model(run) or {}
+    video = db.get(Video, run.video_id) if run.video_id else None
+    summary["provider"] = video.provider if video else None
+    summary["video_status"] = video.status.value if video and hasattr(video.status, "value") else (video.status if video else None)
+    summary["provider_job_id"] = video.provider_job_id if video else None
+    return summary
+
+
 def list_pipeline_runs(db: Session) -> list[PipelineRun]:
     return db.query(PipelineRun).order_by(PipelineRun.created_at.desc()).all()
