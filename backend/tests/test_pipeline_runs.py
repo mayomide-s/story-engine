@@ -538,3 +538,59 @@ def test_cancel_run_sets_cancelled_status(client):
     cancel = client.post(f"/api/pipeline-runs/{run_id}/cancel", json={"review_notes": "Stop this"})
     assert cancel.status_code == 200
     assert cancel.json()["pipeline_run"]["status"] == "cancelled"
+
+
+def test_idea_queue_creation(client):
+    response = client.post(
+        "/api/idea-queue",
+        json={
+            "topic": "Event loop",
+            "style_preset": "office_comedy",
+            "target_platform": "youtube",
+            "priority": "high",
+            "status": "ready",
+            "notes": "Great for a queue of explainer ideas",
+            "planned_date": "2026-07-02T09:00:00",
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["topic"] == "Event loop"
+    assert payload["style_preset"] == "office_comedy"
+    assert payload["status"] == "ready"
+
+
+def test_idea_queue_editing(client):
+    create = client.post("/api/idea-queue", json={"topic": "Caching", "style_preset": "clean_3d_cartoon"})
+    item_id = create.json()["id"]
+    update = client.patch(
+        f"/api/idea-queue/{item_id}",
+        json={"notes": "Shift this toward Instagram", "target_platform": "instagram", "status": "ready"},
+    )
+    assert update.status_code == 200
+    payload = update.json()
+    assert payload["notes"] == "Shift this toward Instagram"
+    assert payload["target_platform"] == "instagram"
+    assert payload["status"] == "ready"
+
+
+def test_idea_queue_archiving(client):
+    create = client.post("/api/idea-queue", json={"topic": "Webhooks"})
+    item_id = create.json()["id"]
+    archive = client.post(f"/api/idea-queue/{item_id}/archive")
+    assert archive.status_code == 200
+    assert archive.json()["status"] == "archived"
+
+
+def test_generate_run_from_idea_queue_item(client):
+    create = client.post(
+        "/api/idea-queue",
+        json={"topic": "JWT", "style_preset": "whiteboard_character", "target_platform": "tiktok", "priority": "high", "status": "ready"},
+    )
+    item_id = create.json()["id"]
+    generate = client.post(f"/api/idea-queue/{item_id}/generate-run")
+    assert generate.status_code == 200
+    payload = generate.json()
+    assert payload["idea_queue_item"]["status"] == "generated"
+    assert payload["pipeline_run"]["topic"] == "JWT"
+    assert payload["pipeline_run"]["style_preset"] == "whiteboard_character"

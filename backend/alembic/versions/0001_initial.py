@@ -193,6 +193,21 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(), nullable=False),
         sa.Column("updated_at", sa.DateTime(), nullable=False),
     )
+    op.create_table(
+        "idea_queue_items",
+        sa.Column("id", sa.String(length=36), primary_key=True),
+        sa.Column("account_id", sa.String(length=36), sa.ForeignKey("accounts.id"), nullable=False),
+        sa.Column("topic", sa.String(length=255), nullable=False),
+        sa.Column("style_preset", sa.String(length=100), nullable=False),
+        sa.Column("target_platform", sa.String(length=50), nullable=False),
+        sa.Column("priority", sa.Enum("LOW", "NORMAL", "HIGH", name="pipelinepriority"), nullable=False),
+        sa.Column("status", sa.Enum("DRAFT", "READY", "GENERATED", "ARCHIVED", name="ideaqueuestatus"), nullable=False),
+        sa.Column("notes", sa.Text(), nullable=True),
+        sa.Column("planned_date", sa.DateTime(), nullable=True),
+        sa.Column("pipeline_run_id", sa.String(length=36), sa.ForeignKey("pipeline_runs.id"), nullable=True),
+        sa.Column("created_at", sa.DateTime(), nullable=False),
+        sa.Column("updated_at", sa.DateTime(), nullable=False),
+    )
 
     op.create_foreign_key(None, "pipeline_runs", "content_ideas", ["idea_id"], ["id"])
     op.create_foreign_key(None, "pipeline_runs", "scripts", ["script_id"], ["id"])
@@ -203,6 +218,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_table("quality_checks")
+    op.drop_table("idea_queue_items")
     op.drop_table("generation_costs")
     op.drop_table("prompt_logs")
     op.drop_table("assets")

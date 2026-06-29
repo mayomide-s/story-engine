@@ -60,6 +60,13 @@ class ManualPackageStatus(str, enum.Enum):
     ARCHIVED = "archived"
 
 
+class IdeaQueueStatus(str, enum.Enum):
+    DRAFT = "draft"
+    READY = "ready"
+    GENERATED = "generated"
+    ARCHIVED = "archived"
+
+
 class Account(Base):
     __tablename__ = "accounts"
 
@@ -257,5 +264,22 @@ class QualityCheck(Base):
     score: Mapped[float] = mapped_column(Float, default=0.0)
     checks_json: Mapped[dict] = mapped_column(JSON, default=dict)
     llm_critique: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class IdeaQueueItem(Base):
+    __tablename__ = "idea_queue_items"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    account_id: Mapped[str] = mapped_column(ForeignKey("accounts.id"), nullable=False)
+    topic: Mapped[str] = mapped_column(String(255), nullable=False)
+    style_preset: Mapped[str] = mapped_column(String(100), default="clean_3d_cartoon")
+    target_platform: Mapped[str] = mapped_column(String(50), default="instagram")
+    priority: Mapped[PipelinePriority] = mapped_column(Enum(PipelinePriority), default=PipelinePriority.NORMAL)
+    status: Mapped[IdeaQueueStatus] = mapped_column(Enum(IdeaQueueStatus), default=IdeaQueueStatus.DRAFT)
+    notes: Mapped[str | None] = mapped_column(Text)
+    planned_date: Mapped[datetime | None] = mapped_column(DateTime)
+    pipeline_run_id: Mapped[str | None] = mapped_column(ForeignKey("pipeline_runs.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)

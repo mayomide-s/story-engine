@@ -26,6 +26,21 @@ export type PipelineRunDetail = {
   content_critique?: Record<string, unknown> | null;
 };
 
+export type IdeaQueueItem = {
+  id: string;
+  account_id: string;
+  topic: string;
+  style_preset: string;
+  target_platform: string;
+  priority: string;
+  status: string;
+  notes?: string | null;
+  planned_date?: string | null;
+  pipeline_run_id?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000/api";
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
@@ -90,5 +105,24 @@ export const api = {
     request<PipelineRunDetail>(`/pipeline-runs/${runId}/review-config`, {
       method: "PATCH",
       body: JSON.stringify(patch)
-    })
+    }),
+  listIdeaQueue: () => request<IdeaQueueItem[]>("/idea-queue"),
+  createIdeaQueueItem: (payload: Record<string, unknown>) =>
+    request<IdeaQueueItem>("/idea-queue", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    }),
+  patchIdeaQueueItem: (itemId: string, payload: Record<string, unknown>) =>
+    request<IdeaQueueItem>(`/idea-queue/${itemId}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload)
+    }),
+  archiveIdeaQueueItem: (itemId: string) =>
+    request<IdeaQueueItem>(`/idea-queue/${itemId}/archive`, {
+      method: "POST"
+    }),
+  generateRunFromIdeaQueueItem: (itemId: string) =>
+    request<{ idea_queue_item: Record<string, unknown>; pipeline_run: Record<string, unknown> }>(`/idea-queue/${itemId}/generate-run`, {
+      method: "POST"
+    }),
 };
