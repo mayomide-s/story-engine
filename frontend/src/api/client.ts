@@ -235,15 +235,15 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ review_notes: reviewNotes })
     }),
-  patchScript: (runId: string, scriptJson: Record<string, unknown>) =>
+  patchScript: (runId: string, patch: Record<string, unknown>) =>
     request<PipelineRunDetail>(`/pipeline-runs/${runId}/script`, {
       method: "PATCH",
-      body: JSON.stringify({ script_json: scriptJson })
+      body: JSON.stringify(patch)
     }),
-  patchStoryboard: (runId: string, framesJson: Record<string, unknown>) =>
+  patchStoryboard: (runId: string, patch: Record<string, unknown>) =>
     request<PipelineRunDetail>(`/pipeline-runs/${runId}/storyboard`, {
       method: "PATCH",
-      body: JSON.stringify({ frames_json: framesJson })
+      body: JSON.stringify(patch)
     }),
   patchIdea: (runId: string, patch: Record<string, unknown>) =>
     request<PipelineRunDetail>(`/pipeline-runs/${runId}/idea`, {
