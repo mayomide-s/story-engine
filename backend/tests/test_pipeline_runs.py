@@ -664,6 +664,7 @@ def test_run_and_idea_overrides_take_priority_over_brand_defaults(client):
     assert run_payload["pipeline_run"]["input_config_json"]["caption_tone"] == "warm explainer"
     assert run_payload["idea"]["difficulty"] == "beginner"
     assert run_payload["idea"]["format"] == "quick concept explainer"
+    assert run_payload["pipeline_run"]["input_config_json"]["target_platforms"] == ["instagram"]
 
 
 def test_manual_post_package_uses_brand_tone_hashtags_and_cta_defaults(client):
@@ -687,6 +688,22 @@ def test_manual_post_package_uses_brand_tone_hashtags_and_cta_defaults(client):
     assert "Save this before your next code review." in manual_package["caption"]
     assert manual_package["hashtags_json"] == ["#python", "#testing"]
     assert manual_package["target_platforms_json"] == ["youtube", "instagram"]
+
+
+def test_mock_provider_respects_default_duration_and_completes(client):
+    client.patch(
+        "/api/settings/account-defaults",
+        json={"default_duration_seconds": 22},
+    )
+    create = client.post("/api/pipeline-runs", json={"topic": "Semaphore", "auto_mode": False})
+    run_id = create.json()["pipeline_run"]["id"]
+    resume = client.post(f"/api/pipeline-runs/{run_id}/resume", json={"review_notes": "duration smoke"})
+    assert resume.status_code == 200
+    payload = resume.json()
+    assert payload["pipeline_run"]["status"] == "completed"
+    assert payload["video"]["requested_duration_seconds"] == 22
+    assert payload["video"]["duration_seconds"] == 22
+    assert payload["manual_post_package"] is not None
 
 
 def test_idea_queue_creation(client):

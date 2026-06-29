@@ -119,9 +119,10 @@ def build_idea_input_config(account_config: dict[str, Any], payload: dict[str, A
     config = build_account_config(account_config)
     source = {**(existing or {}), **{key: value for key, value in payload.items() if value is not None}}
     target_platform = source.get("target_platform") or (source.get("target_platforms") or config["target_platforms"])[0]
+    target_platforms = [target_platform] if source.get("target_platform") else (source.get("target_platforms") or [target_platform])
     return {
         "style_preset": source.get("style_preset") or config["default_style_preset"],
-        "target_platforms": source.get("target_platforms") or [target_platform],
+        "target_platforms": target_platforms,
         "caption_tone": source.get("caption_tone") or config["default_caption_tone"],
         "hashtag_set": source.get("hashtag_set") or config["default_hashtag_set"],
         "duration_preference_seconds": source.get("duration_preference_seconds") or config["default_duration_seconds"],

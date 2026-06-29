@@ -11,9 +11,15 @@ class MockVideoProvider:
     name = "mock"
 
     def create_video(self, prompt: str, settings: dict) -> dict:
+        job_id = str(uuid.uuid4())
+        request_id = str(uuid.uuid4())
+        working_dir = Path(tempfile.gettempdir()) / "story-engine-mock-assets" / job_id
+        working_dir.mkdir(parents=True, exist_ok=True)
+        metadata_path = working_dir / "request.json"
+        metadata_path.write_text(json.dumps({"prompt": prompt, "settings": settings}), encoding="utf-8")
         return {
-            "job_id": str(uuid.uuid4()),
-            "request_id": str(uuid.uuid4()),
+            "job_id": job_id,
+            "request_id": request_id,
             "status": "queued",
             "response": {"prompt_preview": prompt[:120], "settings": settings},
         }
@@ -26,9 +32,10 @@ class MockVideoProvider:
         working_dir.mkdir(parents=True, exist_ok=True)
         video_path = working_dir / f"{job_id}.mp4"
         thumbnail_path = working_dir / f"{job_id}.jpg"
+        requested_duration = self._read_requested_duration(working_dir)
 
         if not video_path.exists():
-            self._generate_video(video_path)
+            self._generate_video(video_path, requested_duration)
         if not thumbnail_path.exists():
             self._generate_thumbnail(video_path, thumbnail_path)
 
@@ -53,7 +60,17 @@ class MockVideoProvider:
             },
         }
 
-    def _generate_video(self, destination: Path) -> None:
+    def _read_requested_duration(self, working_dir: Path) -> int:
+        metadata_path = working_dir / "request.json"
+        if not metadata_path.exists():
+            return 18
+        try:
+            payload = json.loads(metadata_path.read_text(encoding="utf-8"))
+            return max(5, int(payload.get("settings", {}).get("duration_seconds", 18)))
+        except (ValueError, TypeError):
+            return 18
+
+    def _generate_video(self, destination: Path, duration_seconds: int) -> None:
         filter_graph = (
             "drawbox=x=mod(t*70\\,420):y=220:w=120:h=120:color=0x7ee0ff@0.9:t=fill,"
             "drawbox=x=420-mod(t*55\\,420):y=520:w=100:h=100:color=0xff8c42@0.9:t=fill,"
@@ -65,7 +82,7 @@ class MockVideoProvider:
             "-f",
             "lavfi",
             "-i",
-            "color=c=0x172033:s=540x960:d=18:r=12",
+            f"color=c=0x172033:s=540x960:d={duration_seconds}:r=12",
             "-vf",
             filter_graph,
             "-an",
