@@ -33,6 +33,20 @@ function formatCreatedAt(value: string) {
   }).format(date);
 }
 
+function ThumbnailPreview({ src, topic }: { src?: string | null; topic: string }) {
+  const [failed, setFailed] = useState(false);
+
+  if (!src || failed) {
+    return (
+      <div className="thumb-preview thumb-fallback" aria-label={`${topic} thumbnail unavailable`}>
+        <strong>{topic.slice(0, 1).toUpperCase()}</strong>
+      </div>
+    );
+  }
+
+  return <img className="thumb-preview" src={src} alt={topic} onError={() => setFailed(true)} />;
+}
+
 const PROVIDERS = ["all", "mock", "runway"];
 const STATUSES = ["all", "approved", "rejected", "needs_review"];
 const STYLES = ["all", "clean_3d_cartoon", "neon_club_metaphor", "whiteboard_character", "bug_monster", "office_comedy"];
@@ -150,7 +164,7 @@ export function AssetLibraryPage() {
               className={`run-card ${selectedRunId === item.run_id ? "active" : ""}`}
               onClick={() => setSelectedRunId(item.run_id)}
             >
-              {item.thumbnail_url ? <img className="thumb-preview" src={item.thumbnail_url} alt={item.topic} /> : null}
+              <ThumbnailPreview src={item.thumbnail_url} topic={item.topic} />
               <div className="content-meta">
                 <strong>{item.topic}</strong>
                 <span>{formatCreatedAt(item.created_at)}</span>

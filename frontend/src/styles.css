@@ -376,6 +376,15 @@ pre {
   background: rgba(7, 12, 20, 0.55);
 }
 
+.thumb-fallback {
+  display: grid;
+  place-items: center;
+  border: 1px dashed rgba(126, 224, 255, 0.22);
+  color: #7ee0ff;
+  font-size: 2.4rem;
+  letter-spacing: 0.08em;
+}
+
 .copy-block pre {
   padding: 0.9rem;
   border-radius: 14px;
