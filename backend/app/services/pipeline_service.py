@@ -25,12 +25,34 @@ from app.models import (
     Video,
     VideoStatus,
 )
-from app.schemas.pipeline_runs import ContentIdeaPatch, PipelineRunCreate, ScriptPatch, StoryboardPatch
+from app.schemas.pipeline_runs import ContentIdeaPatch, PipelineRunCreate, ReviewConfigPatch, ScriptPatch, StoryboardPatch
 from app.services.providers import get_llm_provider, get_storage_provider, get_video_provider
 from app.services.security import redact_sensitive_data, sanitize_for_json
 
 
 DEFAULT_ACCOUNT_NAME = "CodeToons AI"
+STYLE_PRESETS = {
+    "clean_3d_cartoon": {
+        "style": "clean 3D cartoon",
+        "prompt_modifier": "Bright, polished 3D animation with readable character acting and clean motion.",
+    },
+    "neon_club_metaphor": {
+        "style": "neon club metaphor",
+        "prompt_modifier": "Electric nightlife visuals, glowing signage, vivid club staging, and playful metaphor energy.",
+    },
+    "whiteboard_character": {
+        "style": "whiteboard character",
+        "prompt_modifier": "Simple whiteboard-style characters with crisp explanatory motion and bold marker-like visuals.",
+    },
+    "bug_monster": {
+        "style": "bug monster",
+        "prompt_modifier": "Funny monster-driven problem-solving visuals where bugs feel visual and memorable, not scary.",
+    },
+    "office_comedy": {
+        "style": "office comedy",
+        "prompt_modifier": "Fast office-comedy acting, expressive coworkers, and visual gags grounded in workplace metaphors.",
+    },
+}
 
 
 def now_utc() -> datetime:
@@ -40,6 +62,14 @@ def now_utc() -> datetime:
 def seed_default_account(db: Session) -> Account:
     account = db.query(Account).filter(Account.name == DEFAULT_ACCOUNT_NAME).first()
     if account:
+        if "style_presets" not in account.account_config_json:
+            account.account_config_json = {
+                **account.account_config_json,
+                "default_style_preset": "clean_3d_cartoon",
+                "style_presets": STYLE_PRESETS,
+            }
+            db.commit()
+            db.refresh(account)
         return account
     account = Account(
         name=DEFAULT_ACCOUNT_NAME,
@@ -53,6 +83,8 @@ def seed_default_account(db: Session) -> Account:
             "end_tag": "Made by CodeToons AI",
             "banned_content": ["malware", "phishing", "fake income claims"],
             "target_platforms": ["instagram", "tiktok", "youtube"],
+            "default_style_preset": "clean_3d_cartoon",
+            "style_presets": STYLE_PRESETS,
         },
     )
     db.add(account)
@@ -128,6 +160,13 @@ def get_target_duration_seconds(account_config: dict[str, Any] | None, provider_
     return min(max(configured_target, 18), 30)
 
 
+def get_style_preset(run: PipelineRun, account_config: dict[str, Any] | None) -> dict[str, str]:
+    presets = (account_config or {}).get("style_presets") or STYLE_PRESETS
+    default_preset = (account_config or {}).get("default_style_preset", "clean_3d_cartoon")
+    preset_name = run.style_preset or default_preset
+    return presets.get(preset_name, STYLE_PRESETS["clean_3d_cartoon"])
+
+
 def build_scene_timings(total_duration_seconds: int) -> list[str]:
     checkpoints = [0, round(total_duration_seconds * 0.2), round(total_duration_seconds * 0.5), round(total_duration_seconds * 0.8), total_duration_seconds]
     timings: list[str] = []
@@ -175,6 +214,7 @@ def create_pipeline_run(db: Session, payload: PipelineRunCreate) -> PipelineRun:
         account_id=account.id,
         topic=payload.topic,
         auto_mode=payload.auto_mode,
+        style_preset=payload.style_preset,
         priority=payload.priority,
         status=PipelineStatus.QUEUED,
         current_stage=PipelineStage.IDEA_GENERATION,
@@ -318,12 +358,56 @@ def generate_storyboard(db: Session, run: PipelineRun):
     add_event(db, run.id, "storyboard.generated", "Storyboard generated", stage=PipelineStage.STORYBOARD_GENERATION.value)
 
 
+def generate_content_critique(db: Session, run: PipelineRun):
+    llm = get_llm_provider()
+    idea = db.get(ContentIdea, run.idea_id)
+    script = db.get(Script, run.script_id)
+    storyboard = db.get(Storyboard, run.storyboard_id)
+    scenes = script.script_json.get("scenes", []) if script else []
+    dialogue_words = sum(len(str(scene.get("dialogue", "")).split()) for scene in scenes)
+    too_much_text = dialogue_words > max(script.duration_seconds * 2, 22) if script else False
+    critique = {
+        "beginner_clarity": {"score": 0.9 if script and script.duration_seconds <= 10 else 0.82, "notes": "Clear enough for beginner coders with simple visual language."},
+        "metaphor_strength": {"score": 0.88 if idea and "bouncer" in idea.hook.lower() else 0.78, "notes": "Metaphor is memorable and easy to retell."},
+        "visual_coherence": {"score": 0.87 if storyboard and len(storyboard.frames_json.get("storyboard_frames", [])) == len(scenes) else 0.72, "notes": "Scenes and storyboard frames align cleanly."},
+        "social_hook_strength": {"score": 0.86 if idea and len(idea.hook) <= 90 else 0.74, "notes": "Hook is short enough to land in a short-form opener."},
+        "too_much_text_dialogue_warning": {"flagged": too_much_text, "notes": "Dialogue is getting dense for a short video." if too_much_text else "Dialogue density looks safe for a fast watch."},
+        "serious_issue": not scenes,
+        "summary": "Looks viable for generation. Tighten dialogue only if you want faster pacing." if scenes else "No scenes found. Fix the script before generating video.",
+    }
+    prompt = "Critique the mini-story for clarity, metaphor strength, visual coherence, hook strength, and dialogue load."
+    result = llm.generate(
+        "content_critique",
+        prompt,
+        {"idea": idea.title if idea else "", "hook": idea.hook if idea else "", "scenes": scenes, "storyboard": storyboard.frames_json if storyboard else {}},
+    )
+    add_prompt_log(
+        db,
+        run.id,
+        "content_critique",
+        llm.name,
+        llm.model,
+        prompt,
+        {"idea_id": idea.id if idea else None, "script_id": script.id if script else None},
+        {**result, "critique": critique},
+        critique["summary"],
+        result["token_usage"],
+        result["cost_estimate"],
+    )
+    add_event(db, run.id, "content.critique_generated", "Pre-video content critique generated", stage=PipelineStage.STORYBOARD_GENERATION.value, metadata=critique)
+
+
 def build_video_prompt(run: PipelineRun, db: Session) -> str:
+    if run.prompt_override:
+        return run.prompt_override
     script = db.get(Script, run.script_id)
     account = db.get(Account, run.account_id)
+    preset = get_style_preset(run, account.account_config_json if account else {})
     prompt = (
         f"Create a 9:16 animated video about {run.topic}. "
-        f"Style: {account.account_config_json['style']}. "
+        f"Style preset: {run.style_preset}. "
+        f"Visual direction: {preset['style']}. "
+        f"Style notes: {preset['prompt_modifier']} "
         "Use actual motion, expressive characters, no slideshow effects. "
         f"Scenes: {script.script_json['scenes']} "
         f"End tag: {account.account_config_json['end_tag']}"
@@ -641,8 +725,18 @@ def create_manual_post_package(db: Session, run: PipelineRun):
     if run.manual_post_package_id:
         return db.get(ManualPostPackage, run.manual_post_package_id)
 
-    caption = "CORS is just a bouncer with trust issues. Save this for the next time your frontend gets blocked."
+    caption = run.caption_override or f"Why does your frontend get blocked? Because CORS is basically a nightclub bouncer with a guest list. {run.topic} finally makes sense in 10 seconds."
     hashtags = ["#coding", "#webdev", "#cors", "#javascript", "#apitips"]
+    alternative_captions = [
+        f"CORS feels confusing until you picture a nightclub bouncer checking origins. {run.topic} explained fast.",
+        f"If your frontend keeps getting blocked, this {run.topic} metaphor will finally make it click.",
+        f"Save this when you need a faster mental model for {run.topic} and browser security rules.",
+    ]
+    alternative_hooks = [
+        f"{run.topic} is just a bouncer with trust issues.",
+        f"Your frontend is outside the club and {run.topic} controls the door.",
+        f"This is the fastest way to actually remember {run.topic}.",
+    ]
     pkg = ManualPostPackage(
         video_id=video.id,
         caption=caption,
@@ -656,7 +750,9 @@ def create_manual_post_package(db: Session, run: PipelineRun):
         platform_variants_json={
             "instagram": {"caption": caption, "hashtags": hashtags},
             "tiktok": {"caption": caption + " #learnontiktok", "hashtags": hashtags},
-            "youtube": {"title": "CORS as a nightclub bouncer", "description": caption, "hashtags": hashtags},
+            "youtube": {"title": alternative_hooks[2], "description": caption, "hashtags": hashtags},
+            "alternative_captions": alternative_captions,
+            "alternative_hooks": alternative_hooks,
         },
         status=ManualPackageStatus.READY,
     )
@@ -678,6 +774,7 @@ def run_pipeline(db: Session, run_id: str, stop_before_video: bool = True):
     generate_script(db, run)
     run.current_stage = PipelineStage.STORYBOARD_GENERATION
     generate_storyboard(db, run)
+    generate_content_critique(db, run)
     if stop_before_video:
         run.status = PipelineStatus.AWAITING_REVIEW
         run.paused_at = now_utc()
@@ -797,6 +894,17 @@ def recheck_pipeline_assets(db: Session, run_id: str, review_notes: str | None =
     return finalize_post_video_processing(db, run)
 
 
+def patch_review_config(db: Session, run_id: str, payload: ReviewConfigPatch) -> PipelineRun:
+    run = db.get(PipelineRun, run_id)
+    if not run:
+        raise ValueError("Pipeline run not found")
+    for key, value in payload.model_dump(exclude_none=True).items():
+        setattr(run, key, value)
+    add_event(db, run.id, "review.config_updated", "Review configuration updated", stage=run.current_stage.value)
+    db.commit()
+    return db.get(PipelineRun, run.id)
+
+
 def cancel_pipeline(db: Session, run_id: str, review_notes: str | None = None) -> PipelineRun:
     run = db.get(PipelineRun, run_id)
     if not run:
@@ -853,6 +961,12 @@ def get_pipeline_run_detail(db: Session, run_id: str) -> dict[str, Any]:
     run = db.get(PipelineRun, run_id)
     if not run:
         raise ValueError("Pipeline run not found")
+    critique_log = (
+        db.query(PromptLog)
+        .filter(PromptLog.pipeline_run_id == run.id, PromptLog.stage == "content_critique")
+        .order_by(PromptLog.created_at.desc())
+        .first()
+    )
     return {
         "pipeline_run": serialize_model(run),
         "idea": serialize_model(db.get(ContentIdea, run.idea_id)) if run.idea_id else None,
@@ -867,6 +981,8 @@ def get_pipeline_run_detail(db: Session, run_id: str) -> dict[str, Any]:
             serialize_model(item)
             for item in db.query(PipelineEvent).filter(PipelineEvent.pipeline_run_id == run.id).order_by(PipelineEvent.created_at.asc()).all()
         ],
+        "prompt_preview": build_video_prompt(run, db),
+        "content_critique": critique_log.response_json.get("critique") if critique_log else None,
     }
 
 

@@ -22,6 +22,8 @@ export type PipelineRunDetail = {
   quality_checks: Record<string, unknown>[];
   manual_post_package: Record<string, unknown> | null;
   pipeline_events: Record<string, unknown>[];
+  prompt_preview?: string | null;
+  content_critique?: Record<string, unknown> | null;
 };
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000/api";
@@ -48,10 +50,10 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 
 export const api = {
   listRuns: () => request<PipelineRunSummary[]>("/pipeline-runs"),
-  createRun: (topic: string, autoMode = false) =>
+  createRun: (topic: string, autoMode = false, stylePreset = "clean_3d_cartoon") =>
     request<PipelineRunDetail>("/pipeline-runs", {
       method: "POST",
-      body: JSON.stringify({ topic, auto_mode: autoMode })
+      body: JSON.stringify({ topic, auto_mode: autoMode, style_preset: stylePreset })
     }),
   getRun: (runId: string) => request<PipelineRunDetail>(`/pipeline-runs/${runId}`),
   resumeRun: (runId: string, reviewNotes = "") =>
@@ -78,5 +80,15 @@ export const api = {
     request<PipelineRunDetail>(`/pipeline-runs/${runId}/storyboard`, {
       method: "PATCH",
       body: JSON.stringify({ frames_json: framesJson })
+    }),
+  patchIdea: (runId: string, patch: Record<string, unknown>) =>
+    request<PipelineRunDetail>(`/pipeline-runs/${runId}/idea`, {
+      method: "PATCH",
+      body: JSON.stringify(patch)
+    }),
+  patchReviewConfig: (runId: string, patch: Record<string, unknown>) =>
+    request<PipelineRunDetail>(`/pipeline-runs/${runId}/review-config`, {
+      method: "PATCH",
+      body: JSON.stringify(patch)
     })
 };

@@ -9,6 +9,7 @@ from app.models import PipelinePriority, PipelineStage, PipelineStatus
 class PipelineRunCreate(BaseModel):
     topic: str
     auto_mode: bool = False
+    style_preset: str = "clean_3d_cartoon"
     priority: PipelinePriority = PipelinePriority.NORMAL
 
 
@@ -28,6 +29,12 @@ class ScriptPatch(BaseModel):
 
 class StoryboardPatch(BaseModel):
     frames_json: dict[str, Any] | None = None
+
+
+class ReviewConfigPatch(BaseModel):
+    style_preset: str | None = None
+    prompt_override: str | None = None
+    caption_override: str | None = None
 
 
 class ReviewAction(BaseModel):
@@ -59,3 +66,5 @@ class AggregatedPipelineRunResponse(BaseModel):
     quality_checks: list[dict[str, Any]] = Field(default_factory=list)
     manual_post_package: dict[str, Any] | None = None
     pipeline_events: list[dict[str, Any]] = Field(default_factory=list)
+    prompt_preview: str | None = None
+    content_critique: dict[str, Any] | None = None

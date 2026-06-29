@@ -18,7 +18,8 @@ body {
 
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
 }
 
@@ -43,12 +44,19 @@ button.secondary {
 }
 
 input,
-select {
+select,
+textarea {
   border: 1px solid rgba(255, 255, 255, 0.15);
   background: rgba(255, 255, 255, 0.07);
   color: inherit;
   padding: 0.8rem 1rem;
   border-radius: 999px;
+}
+
+textarea {
+  border-radius: 18px;
+  resize: vertical;
+  min-height: 120px;
 }
 
 pre {
@@ -290,6 +298,34 @@ pre {
   gap: 0.45rem;
 }
 
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.field {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.field span {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #9bb0cb;
+}
+
+.field-wide {
+  grid-column: 1 / -1;
+}
+
+.preview-block {
+  padding: 1rem;
+  border-radius: 16px;
+  background: rgba(7, 12, 20, 0.55);
+}
+
 .notice-card.warning {
   border-color: rgba(255, 140, 66, 0.3);
   background: rgba(255, 140, 66, 0.08);
@@ -368,5 +404,9 @@ pre {
   .title-row {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .form-grid {
+    grid-template-columns: 1fr;
   }
 }

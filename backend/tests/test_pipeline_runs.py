@@ -20,6 +20,7 @@ def test_create_run_pauses_before_video(client):
     assert payload["script"] is not None
     assert payload["storyboard"] is not None
     assert payload["video"] is None
+    assert payload["content_critique"] is not None
 
 
 def test_resume_run_completes_and_returns_aggregate(client):
@@ -60,6 +61,36 @@ def test_runway_storyboard_timings_fit_requested_duration(client, monkeypatch):
     assert [scene["time"] for scene in scenes] == ["0-2s", "2-5s", "5-8s", "8-10s"]
     assert response.json()["script"]["duration_seconds"] == 10
     get_settings.cache_clear()
+
+
+def test_style_preset_selection_updates_prompt_preview(client):
+    response = client.post("/api/pipeline-runs", json={"topic": "CORS", "auto_mode": False, "style_preset": "bug_monster"})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["pipeline_run"]["style_preset"] == "bug_monster"
+    assert "bug monster" in payload["prompt_preview"].lower()
+
+
+def test_prompt_preview_uses_saved_edits(client):
+    create = client.post("/api/pipeline-runs", json={"topic": "CORS", "auto_mode": False})
+    run_id = create.json()["pipeline_run"]["id"]
+    patch = client.patch(
+        f"/api/pipeline-runs/{run_id}/review-config",
+        json={"prompt_override": "Custom paid Runway prompt", "caption_override": "Custom caption", "style_preset": "office_comedy"},
+    )
+    assert patch.status_code == 200
+    payload = patch.json()
+    assert payload["prompt_preview"] == "Custom paid Runway prompt"
+    assert payload["pipeline_run"]["caption_override"] == "Custom caption"
+
+
+def test_critique_data_appears_in_aggregate_response(client):
+    response = client.post("/api/pipeline-runs", json={"topic": "CORS", "auto_mode": False})
+    assert response.status_code == 200
+    critique = response.json()["content_critique"]
+    assert critique is not None
+    assert "beginner_clarity" in critique
+    assert "social_hook_strength" in critique
 
 
 def test_r2_storage_provider_returns_public_url(monkeypatch):
@@ -471,6 +502,17 @@ def test_recheck_endpoint_returns_completed_run_for_existing_runway_asset(client
     payload = response.json()
     assert payload["pipeline_run"]["status"] == "completed"
     assert payload["video"]["status"] == "approved"
+
+
+def test_manual_package_alternatives_generated(client):
+    create = client.post("/api/pipeline-runs", json={"topic": "CORS", "auto_mode": False})
+    run_id = create.json()["pipeline_run"]["id"]
+    resume = client.post(f"/api/pipeline-runs/{run_id}/resume", json={"review_notes": "Looks good"})
+    assert resume.status_code == 200
+    payload = resume.json()
+    variants = payload["manual_post_package"]["platform_variants_json"]
+    assert len(variants["alternative_captions"]) == 3
+    assert len(variants["alternative_hooks"]) == 3
 
 
 def test_sanitize_for_json_handles_datetime_uuid_and_objects():

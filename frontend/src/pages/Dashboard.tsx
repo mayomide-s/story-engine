@@ -9,9 +9,17 @@ const videoProvider = import.meta.env.VITE_VIDEO_PROVIDER ?? "mock";
 const storageProvider = import.meta.env.VITE_STORAGE_PROVIDER ?? "local";
 const providerBadge = `${videoProvider}/${storageProvider.toUpperCase()}`;
 const isRunwayMode = videoProvider === "runway";
+const STYLE_PRESETS = [
+  "clean_3d_cartoon",
+  "neon_club_metaphor",
+  "whiteboard_character",
+  "bug_monster",
+  "office_comedy",
+];
 
 export function DashboardPage() {
   const [topic, setTopic] = useState("CORS");
+  const [stylePreset, setStylePreset] = useState("clean_3d_cartoon");
   const [runs, setRuns] = useState<PipelineRunSummary[]>([]);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [detail, setDetail] = useState<PipelineRunDetail | null>(null);
@@ -44,7 +52,7 @@ export function DashboardPage() {
   async function handleCreateRun() {
     try {
       setError(null);
-      const created = await api.createRun(topic, false);
+      const created = await api.createRun(topic, false, stylePreset);
       setDetail(created);
       setSelectedRunId(String(created.pipeline_run.id));
       await loadRuns();
@@ -130,6 +138,13 @@ export function DashboardPage() {
         </div>
         <div className="hero-actions">
           <input value={topic} onChange={(event) => setTopic(event.target.value)} placeholder="Topic" />
+          <select value={stylePreset} onChange={(event) => setStylePreset(event.target.value)}>
+            {STYLE_PRESETS.map((preset) => (
+              <option key={preset} value={preset}>
+                {preset}
+              </option>
+            ))}
+          </select>
           <button onClick={handleCreateRun}>Create Run</button>
         </div>
       </section>

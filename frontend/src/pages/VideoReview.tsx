@@ -99,6 +99,8 @@ export function VideoReviewPage() {
   const instagramVariant = platformVariants.instagram as Record<string, unknown> | undefined;
   const tiktokVariant = platformVariants.tiktok as Record<string, unknown> | undefined;
   const youtubeVariant = platformVariants.youtube as Record<string, unknown> | undefined;
+  const alternativeCaptions = Array.isArray(platformVariants.alternative_captions) ? platformVariants.alternative_captions : [];
+  const alternativeHooks = Array.isArray(platformVariants.alternative_hooks) ? platformVariants.alternative_hooks : [];
 
   return (
     <div className="page grid review-grid">
@@ -268,6 +270,22 @@ export function VideoReviewPage() {
                         />
                       </div>
                       <pre>{`Title: ${String(youtubeVariant.title ?? "")}\n\nDescription:\n${String(youtubeVariant.description ?? "")}`}</pre>
+                    </div>
+                  ) : null}
+                  {alternativeCaptions.length > 0 ? (
+                    <div className="copy-block">
+                      <div className="content-meta">
+                        <strong>Alternative Captions</strong>
+                      </div>
+                      <pre>{alternativeCaptions.map((caption, index) => `${index + 1}. ${String(caption)}`).join("\n\n")}</pre>
+                    </div>
+                  ) : null}
+                  {alternativeHooks.length > 0 ? (
+                    <div className="copy-block">
+                      <div className="content-meta">
+                        <strong>Alternative Hooks</strong>
+                      </div>
+                      <pre>{alternativeHooks.map((hook, index) => `${index + 1}. ${String(hook)}`).join("\n\n")}</pre>
                     </div>
                   ) : null}
                 </div>

@@ -6,6 +6,7 @@ from app.schemas.pipeline_runs import (
     AggregatedPipelineRunResponse,
     ContentIdeaPatch,
     PipelineRunCreate,
+    ReviewConfigPatch,
     ReviewAction,
     ScriptPatch,
     StoryboardPatch,
@@ -17,6 +18,7 @@ from app.services.pipeline_service import (
     get_pipeline_run_summary,
     list_pipeline_runs,
     patch_idea,
+    patch_review_config,
     patch_script,
     patch_storyboard,
     recheck_pipeline_assets,
@@ -101,6 +103,15 @@ def update_script(run_id: str, payload: ScriptPatch, db: Session = Depends(get_d
 def update_storyboard(run_id: str, payload: StoryboardPatch, db: Session = Depends(get_db)):
     try:
         run = patch_storyboard(db, run_id, payload)
+        return get_pipeline_run_detail(db, run.id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.patch("/{run_id}/review-config")
+def update_review_config(run_id: str, payload: ReviewConfigPatch, db: Session = Depends(get_db)):
+    try:
+        run = patch_review_config(db, run_id, payload)
         return get_pipeline_run_detail(db, run.id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
