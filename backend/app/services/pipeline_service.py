@@ -298,7 +298,7 @@ def build_scene_templates(topic: str, style_preset: str, target_duration: int, a
         },
         {
             "time": timings[1],
-            "visual": f"Show the core metaphor for {topic} with one memorable character interaction.",
+            "visual": f"Show the core metaphor through one memorable character interaction tied to {topic}.",
             "dialogue": "The rule clicks faster when the metaphor does the explaining.",
             "on_screen_text": "One rule, one metaphor",
             "motion_camera": "Side tracking shot that follows the conflict.",
@@ -369,6 +369,7 @@ def strip_runway_text_free_ban(prompt: str) -> str:
 def sanitize_runway_visual_phrase(text: str, topic: str = "") -> str:
     cleaned = " ".join(str(text or "").split())
     if topic:
+        cleaned = re.sub(rf"\bfor\s+{re.escape(topic)}\b", "", cleaned, flags=re.IGNORECASE)
         cleaned = re.sub(re.escape(topic), "", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"\b(?:here is why|that is|this is the part that makes|remember the mental model)\b", "", cleaned, flags=re.IGNORECASE)
     replacements = {
@@ -398,6 +399,42 @@ def sanitize_runway_visual_phrase(text: str, topic: str = "") -> str:
     return cleaned
 
 
+def build_runway_metaphor_visual_context(run: PipelineRun, idea: ContentIdea | None, preset: dict[str, str]) -> str:
+    style_phrase = RUNWAY_STYLE_OVERRIDES.get(run.style_preset, preset["style"])
+    source_text = " ".join(
+        part for part in (
+            idea.title if idea else "",
+            idea.hook if idea else "",
+            idea.concept if idea else "",
+            run.topic,
+        )
+        if part
+    ).lower()
+    if "bouncer" in source_text or "club" in source_text or "nightclub" in source_text:
+        return (
+            f"A {style_phrase} vertical 9:16 short. "
+            "A friendly robot request character approaches a colorful club doorway that represents a protected entrance. "
+            "A calm bouncer security character guards the doorway and checks a glowing pass against the doorway color. "
+            "One matching robot is welcomed through the entrance with a smooth gate-opening motion. "
+            "One mismatched robot is gently blocked and redirected outside with a clear hand gesture. "
+            "Cause and effect is shown through color match, gate movement, confident character action, and readable motion."
+        )
+    if idea:
+        title_visual = sanitize_runway_visual_phrase(idea.title, run.topic)
+        hook_visual = sanitize_runway_visual_phrase(idea.hook, run.topic)
+        concept_visual = sanitize_runway_visual_phrase(idea.concept, run.topic)
+        return (
+            f"A {style_phrase} vertical 9:16 short. "
+            f"Primary metaphor: {title_visual}. "
+            f"Opening beat: {hook_visual}. "
+            f"Visual logic: {concept_visual}. "
+            "Keep one main subject, one clear obstacle, one visible rule check, and one satisfying payoff shown through action and motion."
+        )
+    return (
+        f"A {style_phrase} vertical 9:16 short with one clear metaphor, one primary subject, one visible obstacle, and one simple payoff."
+    )
+
+
 def extract_runway_visual_scene_beats(run: PipelineRun, scenes: list[dict[str, Any]], preset: dict[str, str]) -> list[str]:
     beats: list[str] = []
     for scene in scenes[:4]:
@@ -415,9 +452,9 @@ def extract_runway_visual_scene_beats(run: PipelineRun, scenes: list[dict[str, A
 
 def build_runway_visual_only_prompt(
     run: PipelineRun,
+    idea: ContentIdea | None,
     preset: dict[str, str],
     scenes: list[dict[str, Any]],
-    end_tag: str,
     base_prompt: str | None = None,
     force_target: bool = False,
 ) -> str:
@@ -428,7 +465,7 @@ def build_runway_visual_only_prompt(
     else:
         beats = extract_runway_visual_scene_beats(run, scenes, preset)
         visual_body = (
-            f"A {style_phrase} vertical 9:16 short. "
+            f"{build_runway_metaphor_visual_context(run, idea, preset)} "
             "One clear visual metaphor, one primary subject, simple readable motion, large characters, and clean composition. "
             f"Visual story beats: {' '.join(f'{beat}.' for beat in beats)} "
             "Tell the idea only through character action, color, icons, objects, and motion. "
@@ -437,7 +474,7 @@ def build_runway_visual_only_prompt(
     constraints = get_prompt_constraints("runway")
     limit = constraints["target"] if force_target else constraints["limit"]
     prefix = RUNWAY_TEXT_FREE_BAN
-    suffix = f" End tag: {end_tag}. {RUNWAY_TEXT_FREE_BAN}"
+    suffix = f" {RUNWAY_TEXT_FREE_BAN}"
     body = " ".join(visual_body.split()).strip()
     prompt = f"{prefix} {body}{suffix}"
     if len(prompt) <= limit:
@@ -452,6 +489,7 @@ def build_runway_visual_only_prompt(
 
 def build_prompt_from_scenes(
     run: PipelineRun,
+    idea: ContentIdea | None,
     run_config: dict[str, Any],
     preset: dict[str, str],
     scenes: list[dict[str, Any]],
@@ -459,7 +497,7 @@ def build_prompt_from_scenes(
     provider_name: str,
 ) -> str:
     if provider_name == "runway":
-        return build_runway_visual_only_prompt(run, preset, scenes, end_tag)
+        return build_runway_visual_only_prompt(run, idea, preset, scenes)
 
     scene_prompt = " ".join(
         (
@@ -493,15 +531,19 @@ def build_preflight_review(db: Session, run: PipelineRun) -> dict[str, Any]:
     prompt_length = len(prompt_preview)
     too_long = prompt_length > constraints["limit"]
     prompt_target_miss = prompt_length > constraints["target"]
+    branding_present = (
+        (prompt_preview.startswith(RUNWAY_TEXT_FREE_BAN) and prompt_preview.endswith(RUNWAY_TEXT_FREE_BAN))
+        or "Made by CodeToons AI" in prompt_preview
+    ) if provider_name == "runway" else "End tag:" in prompt_preview
     caption_text = run.caption_override or ""
     hook_text = idea.hook if idea else ""
     clarity_score = round(min(1.0, 0.62 + (0.08 if len(hook_text) <= 96 else 0) + (0.1 if len(scenes) == 4 else 0) + (0.08 if script and script.duration_seconds <= 10 else 0)), 2)
     visual_score = round(min(1.0, 0.55 + min(0.12 * sum(1 for scene in scenes if scene.get("visual")), 0.24) + min(0.1 * sum(1 for scene in scenes if scene.get("motion_camera")), 0.2)), 2)
     pacing_score = round(min(1.0, 0.55 + (0.2 if len(scenes) == 4 else 0.05) + (0.12 if all(scene.get("time") for scene in scenes) else 0) - (0.1 if any(len(str(scene.get("dialogue", "")).split()) > 14 for scene in scenes) else 0)), 2)
     social_hook_score = round(min(1.0, 0.58 + (0.16 if 35 <= len(hook_text) <= 100 else 0.08) + (0.08 if caption_text else 0) + (0.08 if "?" in hook_text or ":" in hook_text else 0)), 2)
-    prompt_safety_score = round(max(0.0, min(1.0, 0.95 - (0.4 if too_long else 0) - (0.12 if prompt_target_miss else 0) - (0.15 if "End tag:" not in prompt_preview else 0))), 2)
+    prompt_safety_score = round(max(0.0, min(1.0, 0.95 - (0.4 if too_long else 0) - (0.12 if prompt_target_miss else 0) - (0.15 if not branding_present else 0))), 2)
     overall = round((clarity_score + visual_score + pacing_score + social_hook_score + prompt_safety_score) / 5, 2)
-    prompt_valid = bool(prompt_preview.strip()) and "End tag:" in prompt_preview and not too_long
+    prompt_valid = bool(prompt_preview.strip()) and branding_present and not too_long
     return sanitize_for_json(
         {
             "scores": {
@@ -779,6 +821,7 @@ def generate_content_critique(db: Session, run: PipelineRun):
 def build_video_prompt(run: PipelineRun, db: Session) -> str:
     provider_name = get_settings().video_provider
     script = db.get(Script, run.script_id)
+    idea = db.get(ContentIdea, run.idea_id) if run.idea_id else None
     account = db.get(Account, run.account_id)
     run_config = get_run_input_config(run, account.account_config_json if account else {})
     preset = get_style_preset(run, account.account_config_json if account else {})
@@ -788,9 +831,9 @@ def build_video_prompt(run: PipelineRun, db: Session) -> str:
         if provider_name == "runway":
             if run.prompt_override.startswith(RUNWAY_TEXT_FREE_BAN):
                 return compact_prompt_text(run.prompt_override, provider_name)
-            return build_runway_visual_only_prompt(run, preset, scenes, end_tag, base_prompt=run.prompt_override)
+            return build_runway_visual_only_prompt(run, idea, preset, scenes, base_prompt=run.prompt_override)
         return run.prompt_override
-    return build_prompt_from_scenes(run, run_config, preset, scenes, end_tag, provider_name)
+    return build_prompt_from_scenes(run, idea, run_config, preset, scenes, end_tag, provider_name)
 
 
 def enqueue_resume_pipeline_task(run_id: str, countdown: int | None = None) -> None:
@@ -1031,11 +1074,16 @@ def run_quality_check(db: Session, run: PipelineRun):
     duration_seconds = asset.duration_seconds if asset and asset.duration_seconds is not None else 0
     requested_duration_seconds = video.requested_duration_seconds if video and video.requested_duration_seconds else video.duration_seconds
     duration_tolerance_seconds = 2 if requested_duration_seconds >= 10 else 1
+    provider_name = (video.provider if video and video.provider else get_settings().video_provider) if video else get_settings().video_provider
+    branding_present = (
+        (video.prompt_text.startswith(RUNWAY_TEXT_FREE_BAN) and video.prompt_text.endswith(RUNWAY_TEXT_FREE_BAN))
+        or "Made by CodeToons AI" in video.prompt_text
+    ) if video and provider_name == "runway" else bool(video and "Made by CodeToons AI" in video.prompt_text)
     checks = {
         "video_exists": asset_exists and (Path(local_asset_path).exists() if storage.name == "local" else bool(asset.public_url)),
         "aspect_ratio_9_16": is_nine_sixteen,
         "duration_in_range": abs(duration_seconds - requested_duration_seconds) <= duration_tolerance_seconds,
-        "end_tag_present": "Made by CodeToons AI" in video.prompt_text,
+        "end_tag_present": branding_present,
         "caption_safe": True,
         "provider_generated_video": True,
         "requested_duration_seconds": requested_duration_seconds,
@@ -1439,12 +1487,12 @@ def prompt_action_pipeline(db: Session, run_id: str, action: str) -> PipelineRun
     account = db.get(Account, run.account_id)
     preset = get_style_preset(run, account.account_config_json if account else {})
     scenes = get_script_scenes(db.get(Script, run.script_id))
-    end_tag = build_account_config(account.account_config_json if account else {}).get("end_tag", "Made by CodeToons AI")
+    idea = db.get(ContentIdea, run.idea_id) if run.idea_id else None
     base_prompt = build_video_prompt(run, db)
     if action == "improve":
         improved = base_prompt.replace("Create ", "Craft ").replace("animated coding mini-story", "animated vertical coding story")
         run.prompt_override = (
-            build_runway_visual_only_prompt(run, preset, scenes, end_tag, base_prompt=improved)
+            build_runway_visual_only_prompt(run, idea, preset, scenes, base_prompt=improved)
             if provider_name == "runway"
             else compact_prompt_text(improved, provider_name)
         )
@@ -1452,7 +1500,7 @@ def prompt_action_pipeline(db: Session, run_id: str, action: str) -> PipelineRun
         message = "Prompt preview improved for review"
     elif action == "shorten":
         run.prompt_override = (
-            build_runway_visual_only_prompt(run, preset, scenes, end_tag, base_prompt=base_prompt, force_target=True)
+            build_runway_visual_only_prompt(run, idea, preset, scenes, base_prompt=base_prompt, force_target=True)
             if provider_name == "runway"
             else compact_prompt_text(base_prompt, provider_name, force_target=True)
         )

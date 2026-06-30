@@ -123,11 +123,13 @@ def test_runway_prompt_preview_stays_within_provider_limit(client, monkeypatch):
     assert len(prompt_preview) <= 1000
     assert prompt_preview.startswith("TEXT-FREE VIDEO.")
     assert prompt_preview.endswith("or subtitles.")
-    assert "End tag:" in prompt_preview
+    assert "End tag:" not in prompt_preview
+    assert "Made by CodeToons AI" not in prompt_preview
     assert "Here is why" not in prompt_preview
     assert "That is" not in prompt_preview
     assert "One rule, one metaphor" not in prompt_preview
     assert "Remember the mental model" not in prompt_preview
+    assert "core metaphor for with" not in prompt_preview.lower()
     positive_body = _runway_positive_prompt_body(prompt_preview)
     for banned_term in ("caption", "subtitle", "terminal", "code snippet", "whiteboard"):
         assert banned_term not in positive_body
@@ -173,6 +175,20 @@ def test_runway_prompt_preview_does_not_include_script_narration_lines(client, m
     assert "dialogue" not in prompt_preview.lower()
     assert "here is why cors matters" not in prompt_preview.lower()
     assert "this is the part that makes cors feel simple instead of random" not in prompt_preview.lower()
+    get_settings.cache_clear()
+
+
+def test_runway_prompt_preserves_cors_bouncer_metaphor_visually(client, monkeypatch):
+    monkeypatch.setenv("VIDEO_PROVIDER", "runway")
+    get_settings.cache_clear()
+    response = client.post("/api/pipeline-runs", json={"topic": "CORS", "auto_mode": False})
+    assert response.status_code == 200
+    prompt_preview = response.json()["prompt_preview"].lower()
+    for expected_term in ("bouncer", "doorway", "pass", "matching", "blocked"):
+        assert expected_term in prompt_preview
+    assert "nightclub" not in prompt_preview or "club doorway" in prompt_preview
+    assert "Made by CodeToons AI" not in prompt_preview
+    assert "core metaphor for with" not in prompt_preview
     get_settings.cache_clear()
 
 
