@@ -12,6 +12,11 @@ from app.services.security import sanitize_for_json
 from app.workers.celery_app import celery_app
 
 
+def _runway_positive_prompt_body(prompt_preview: str) -> str:
+    marker = "TEXT-FREE VIDEO. Do not render any words, letters, numbers, labels, captions, signs, logos, UI text, code, or subtitles."
+    return prompt_preview.replace(marker, "").strip().lower()
+
+
 def test_create_run_pauses_before_video(client):
     response = client.post("/api/pipeline-runs", json={"topic": "CORS", "auto_mode": False})
     assert response.status_code == 200
@@ -116,10 +121,16 @@ def test_runway_prompt_preview_stays_within_provider_limit(client, monkeypatch):
     assert response.status_code == 200
     prompt_preview = response.json()["prompt_preview"]
     assert len(prompt_preview) <= 1000
+    assert prompt_preview.startswith("TEXT-FREE VIDEO.")
+    assert prompt_preview.endswith("or subtitles.")
     assert "End tag:" in prompt_preview
-    assert "Use real motion" in prompt_preview
-    assert "Runway visual guardrails:" in prompt_preview
-    assert "No readable on-screen text" in prompt_preview or "Do not generate signs" in prompt_preview
+    assert "Here is why" not in prompt_preview
+    assert "That is" not in prompt_preview
+    assert "One rule, one metaphor" not in prompt_preview
+    assert "Remember the mental model" not in prompt_preview
+    positive_body = _runway_positive_prompt_body(prompt_preview)
+    for banned_term in ("caption", "subtitle", "terminal", "code snippet", "whiteboard"):
+        assert banned_term not in positive_body
     get_settings.cache_clear()
 
 
@@ -127,8 +138,8 @@ def test_mock_prompt_preview_omits_runway_visual_guardrails(client):
     response = client.post("/api/pipeline-runs", json={"topic": "Python decorators", "auto_mode": False})
     assert response.status_code == 200
     prompt_preview = response.json()["prompt_preview"]
-    assert "Runway visual guardrails:" not in prompt_preview
-    assert "Do not generate signs" not in prompt_preview
+    assert "TEXT-FREE VIDEO." not in prompt_preview
+    assert "Do not render any words, letters, numbers" not in prompt_preview
 
 
 def test_style_preset_selection_updates_prompt_preview(client):
@@ -150,6 +161,19 @@ def test_prompt_preview_uses_saved_edits(client):
     payload = patch.json()
     assert payload["prompt_preview"] == "Custom paid Runway prompt"
     assert payload["pipeline_run"]["caption_override"] == "Custom caption"
+
+
+def test_runway_prompt_preview_does_not_include_script_narration_lines(client, monkeypatch):
+    monkeypatch.setenv("VIDEO_PROVIDER", "runway")
+    get_settings.cache_clear()
+    response = client.post("/api/pipeline-runs", json={"topic": "CORS", "auto_mode": False})
+    assert response.status_code == 200
+    prompt_preview = response.json()["prompt_preview"]
+    assert "line " not in prompt_preview.lower()
+    assert "dialogue" not in prompt_preview.lower()
+    assert "here is why cors matters" not in prompt_preview.lower()
+    assert "this is the part that makes cors feel simple instead of random" not in prompt_preview.lower()
+    get_settings.cache_clear()
 
 
 def test_text_only_regeneration_does_not_create_video_jobs(client):
@@ -477,19 +501,20 @@ def test_resume_rejects_run_with_completed_video(client):
     assert "Open Video Review" in second_resume.json()["detail"]
 
 
-def test_resume_rejects_prompt_that_is_too_long(client, monkeypatch):
+def test_runway_long_prompt_override_is_compacted_to_safe_limit(client, monkeypatch):
     monkeypatch.setenv("VIDEO_PROVIDER", "runway")
     get_settings.cache_clear()
     create = client.post("/api/pipeline-runs", json={"topic": "CORS", "auto_mode": False})
     run_id = create.json()["pipeline_run"]["id"]
-    client.patch(
+    response = client.patch(
         f"/api/pipeline-runs/{run_id}/review-config",
         json={"prompt_override": " ".join(["too-long"] * 250)},
     )
-
-    response = client.post(f"/api/pipeline-runs/{run_id}/resume")
-    assert response.status_code == 400
-    assert "too long" in response.json()["detail"]
+    assert response.status_code == 200
+    payload = response.json()
+    assert len(payload["prompt_preview"]) <= 1000
+    assert payload["review_preflight"]["prompt_length"]["too_long"] is False
+    assert payload["prompt_preview"].startswith("TEXT-FREE VIDEO.")
     get_settings.cache_clear()
 
 
