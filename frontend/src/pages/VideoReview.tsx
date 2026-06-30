@@ -4,6 +4,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { api, PipelineRunDetail, PipelineRunSummary } from "../api/client";
 import { ExportPackPanel } from "../components/ExportPackPanel";
 import { EventTimeline } from "../components/EventTimeline";
+import { normalizeQualityChecklist } from "../qualityChecklist";
 
 const videoProvider = import.meta.env.VITE_VIDEO_PROVIDER ?? "mock";
 const storageProvider = import.meta.env.VITE_STORAGE_PROVIDER ?? "local";
@@ -86,7 +87,7 @@ export function VideoReviewPage() {
   const rawQualityChecks = latestQualityCheck?.checks_json && typeof latestQualityCheck.checks_json === "object"
     ? latestQualityCheck.checks_json as Record<string, unknown>
     : {};
-  const qualityChecklist = Object.entries(rawQualityChecks).filter(([key]) => !key.endsWith("_seconds"));
+  const qualityChecklist = normalizeQualityChecklist(rawQualityChecks, String(video?.provider ?? ""));
   const durationInfo = {
     requested: rawQualityChecks.requested_duration_seconds,
     actual: rawQualityChecks.actual_duration_seconds,

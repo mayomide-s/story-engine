@@ -1148,6 +1148,152 @@ def test_asset_export_pack_api_returns_manual_posting_bundle(client):
     assert payload["alternative_hooks"]
 
 
+def test_runway_quality_checklist_uses_provider_aware_branding_item(client, monkeypatch):
+    from app.models import Asset, ManualPostPackage, PipelineRun, PipelineStage, PipelineStatus, QualityCheck, Video, VideoStatus
+    from app.services import pipeline_service
+    from app.services.pipeline_service import create_manual_post_package, now_utc, run_quality_check
+
+    class FakeR2Storage:
+        name = "r2"
+
+        def resolve_path(self, storage_key: str) -> str:
+            return storage_key
+
+    monkeypatch.setattr(pipeline_service, "get_storage_provider", lambda: FakeR2Storage())
+
+    create = client.post("/api/pipeline-runs", json={"topic": "CORS", "auto_mode": False})
+    run_id = create.json()["pipeline_run"]["id"]
+
+    with SessionLocal() as db:
+        run = db.get(PipelineRun, run_id)
+        video = Video(
+            pipeline_run_id=run.id,
+            provider="runway",
+            provider_job_id="job-runway-checklist",
+            provider_status="SUCCEEDED",
+            provider_response_json={"job_id": "job-runway-checklist"},
+            prompt_text="TEXT-FREE VIDEO. Do not render any words, letters, numbers, labels, captions, signs, logos, UI text, code, or subtitles. A clean 3D cartoon short with a bouncer and matching pass. TEXT-FREE VIDEO. Do not render any words, letters, numbers, labels, captions, signs, logos, UI text, code, or subtitles.",
+            status=VideoStatus.COMPLETED,
+            aspect_ratio="9:16",
+            requested_duration_seconds=10,
+            duration_seconds=10,
+            completed_at=now_utc(),
+        )
+        db.add(video)
+        db.flush()
+        run.video_id = video.id
+        run.status = PipelineStatus.RUNNING
+        run.current_stage = PipelineStage.QUALITY_CHECK
+        db.add(
+            Asset(
+                pipeline_run_id=run.id,
+                asset_type="video_mp4",
+                created_by_stage="video_generation",
+                storage_key="videos/runway-quality.mp4",
+                public_url="https://cdn.example.com/videos/runway-quality.mp4",
+                mime_type="video/mp4",
+                size_bytes=1024,
+                duration_seconds=10,
+                width=720,
+                height=1280,
+            )
+        )
+        db.commit()
+
+        run_quality_check(db, run)
+        db.commit()
+        create_manual_post_package(db, run)
+        db.commit()
+
+        refreshed_run = db.get(PipelineRun, run_id)
+        quality = db.query(QualityCheck).filter(QualityCheck.pipeline_run_id == run_id).order_by(QualityCheck.created_at.desc()).first()
+        manual_package = db.get(ManualPostPackage, refreshed_run.manual_post_package_id)
+
+        assert "end_tag_present" not in quality.checks_json
+        assert quality.checks_json["branding_handled_separately"] is True
+        assert "Confirm the thumbnail and opening frame look clean" in manual_package.checklist_json
+        assert "Confirm end tag visibility" not in manual_package.checklist_json
+
+
+def test_runway_export_pack_instructions_omit_end_tag_language(client, monkeypatch):
+    from app.models import Asset, PipelineRun, PipelineStage, PipelineStatus, Video, VideoStatus
+    from app.services import pipeline_service
+    from app.services.asset_library_service import get_asset_export_pack
+    from app.services.pipeline_service import create_manual_post_package, now_utc, run_quality_check
+
+    class FakeR2Storage:
+        name = "r2"
+
+        def resolve_path(self, storage_key: str) -> str:
+            return storage_key
+
+    monkeypatch.setattr(pipeline_service, "get_storage_provider", lambda: FakeR2Storage())
+
+    create = client.post("/api/pipeline-runs", json={"topic": "CORS", "auto_mode": False})
+    run_id = create.json()["pipeline_run"]["id"]
+
+    with SessionLocal() as db:
+        run = db.get(PipelineRun, run_id)
+        video = Video(
+            pipeline_run_id=run.id,
+            provider="runway",
+            provider_job_id="job-runway-export",
+            provider_status="SUCCEEDED",
+            provider_response_json={"job_id": "job-runway-export"},
+            prompt_text="TEXT-FREE VIDEO. Do not render any words, letters, numbers, labels, captions, signs, logos, UI text, code, or subtitles. A robot bouncer metaphor short. TEXT-FREE VIDEO. Do not render any words, letters, numbers, labels, captions, signs, logos, UI text, code, or subtitles.",
+            status=VideoStatus.COMPLETED,
+            aspect_ratio="9:16",
+            requested_duration_seconds=10,
+            duration_seconds=10,
+            completed_at=now_utc(),
+        )
+        db.add(video)
+        db.flush()
+        run.video_id = video.id
+        run.status = PipelineStatus.RUNNING
+        run.current_stage = PipelineStage.QUALITY_CHECK
+        db.add(
+            Asset(
+                pipeline_run_id=run.id,
+                asset_type="video_mp4",
+                created_by_stage="video_generation",
+                storage_key="videos/runway-export.mp4",
+                public_url="https://cdn.example.com/videos/runway-export.mp4",
+                mime_type="video/mp4",
+                size_bytes=1024,
+                duration_seconds=10,
+                width=720,
+                height=1280,
+            )
+        )
+        db.commit()
+
+        run_quality_check(db, run)
+        db.commit()
+        create_manual_post_package(db, run)
+        db.commit()
+
+        export_pack = get_asset_export_pack(db, run_id)
+        assert "end_tag_present" not in export_pack["quality_checklist"]
+        assert export_pack["quality_checklist"]["branding_handled_separately"] is True
+        assert all("end tag" not in step.lower() for step in export_pack["platform_sections"]["youtube_shorts"]["checklist"])
+        assert any("opening frame" in step.lower() for step in export_pack["platform_sections"]["youtube_shorts"]["checklist"])
+
+
+def test_mock_export_pack_instructions_keep_end_tag_language(client):
+    create = client.post("/api/pipeline-runs", json={"topic": "Mock Export Pack", "auto_mode": False})
+    run_id = create.json()["pipeline_run"]["id"]
+    resume = client.post(f"/api/pipeline-runs/{run_id}/resume", json={"review_notes": "Ready to export"})
+    assert resume.status_code == 200
+
+    response = client.get(f"/api/asset-library/{run_id}/export-pack")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["quality_checklist"]["end_tag_present"] is True
+    assert "branding_handled_separately" not in payload["quality_checklist"]
+    assert any("end tag" in step.lower() for step in payload["platform_sections"]["youtube_shorts"]["checklist"])
+
+
 def test_manual_posting_status_update_and_url_storage(client):
     create = client.post("/api/pipeline-runs", json={"topic": "Manual Posting", "auto_mode": False})
     run_id = create.json()["pipeline_run"]["id"]

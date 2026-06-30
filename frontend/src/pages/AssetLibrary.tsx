@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 
 import { api, AssetLibraryDetail, AssetLibraryItem } from "../api/client";
 import { ExportPackPanel } from "../components/ExportPackPanel";
+import { normalizeQualityChecklist } from "../qualityChecklist";
 
 function CopyButton({ text, label }: { text: string; label: string }) {
   const [copied, setCopied] = useState(false);
@@ -117,7 +118,10 @@ export function AssetLibraryPage() {
   const qualityCheck = detail?.quality_check as Record<string, unknown> | null;
   const qualityEntries =
     qualityCheck?.checks_json && typeof qualityCheck.checks_json === "object"
-      ? Object.entries(qualityCheck.checks_json as Record<string, unknown>)
+      ? normalizeQualityChecklist(
+        qualityCheck.checks_json as Record<string, unknown>,
+        typeof detail?.video?.provider === "string" ? detail.video.provider : null,
+      )
       : [];
 
   return (

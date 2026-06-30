@@ -1079,25 +1079,30 @@ def run_quality_check(db: Session, run: PipelineRun):
         (video.prompt_text.startswith(RUNWAY_TEXT_FREE_BAN) and video.prompt_text.endswith(RUNWAY_TEXT_FREE_BAN))
         or "Made by CodeToons AI" in video.prompt_text
     ) if video and provider_name == "runway" else bool(video and "Made by CodeToons AI" in video.prompt_text)
-    checks = {
+    checks: dict[str, Any] = {
         "video_exists": asset_exists and (Path(local_asset_path).exists() if storage.name == "local" else bool(asset.public_url)),
         "aspect_ratio_9_16": is_nine_sixteen,
         "duration_in_range": abs(duration_seconds - requested_duration_seconds) <= duration_tolerance_seconds,
-        "end_tag_present": branding_present,
         "caption_safe": True,
         "provider_generated_video": True,
         "requested_duration_seconds": requested_duration_seconds,
         "actual_duration_seconds": duration_seconds,
     }
+    if provider_name == "runway":
+        checks["branding_handled_separately"] = bool(
+            checks["video_exists"] and checks["aspect_ratio_9_16"] and checks["duration_in_range"] and checks["provider_generated_video"]
+        )
+    else:
+        checks["end_tag_present"] = branding_present
     passed = all(
         bool(checks[key])
         for key in (
             "video_exists",
             "aspect_ratio_9_16",
             "duration_in_range",
-            "end_tag_present",
             "caption_safe",
             "provider_generated_video",
+            "branding_handled_separately" if provider_name == "runway" else "end_tag_present",
         )
     )
     score = 0.92 if passed else 0.4
@@ -1173,6 +1178,7 @@ def create_manual_post_package(db: Session, run: PipelineRun):
         f"A {run_config['content_format']} is the fastest way to remember {run.topic}.",
         f"{run.topic} clicks faster when the story stays visual.",
     ]
+    is_runway_video = bool(video and video.provider == "runway")
     pkg = ManualPostPackage(
         video_id=video.id,
         caption=caption,
@@ -1180,7 +1186,7 @@ def create_manual_post_package(db: Session, run: PipelineRun):
         target_platforms_json=target_platforms,
         checklist_json=[
             "Review the video for motion and clarity",
-            "Confirm end tag visibility",
+            "Confirm the thumbnail and opening frame look clean" if is_runway_video else "Confirm end tag visibility",
             "Upload manually to each platform",
             f"Use CTA: {run_config['preferred_cta']}",
         ],

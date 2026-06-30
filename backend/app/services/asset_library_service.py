@@ -25,6 +25,24 @@ PLATFORM_CHECKLISTS = {
     ],
 }
 
+RUNWAY_PLATFORM_CHECKLISTS = {
+    "tiktok": [
+        "Upload the MP4 in 9:16 format.",
+        "Paste the caption and hashtags, then confirm the hook lands in the first line.",
+        "Choose the cover thumbnail and confirm the opening frame looks clean.",
+    ],
+    "instagram_reels": [
+        "Upload the MP4 as a Reel in 9:16 format.",
+        "Paste the caption and hashtags, then confirm the thumbnail crop looks clean.",
+        "Review the opening frame and profile grid placement before publishing.",
+    ],
+    "youtube_shorts": [
+        "Upload the MP4 as a Short.",
+        "Set title, description, and hashtags before publishing.",
+        "Confirm the thumbnail and opening frame look clean in preview.",
+    ],
+}
+
 
 def _find_video_asset(db: Session, run_id: str, asset_type: str) -> Asset | None:
     return (
@@ -79,6 +97,7 @@ def _build_platform_section(
     shared_caption: str,
     shared_hashtags: list[str],
     post_url: str | None,
+    provider_name: str,
 ) -> dict[str, Any]:
     variant = variant or {}
     hashtags = variant.get("hashtags") if isinstance(variant.get("hashtags"), list) else shared_hashtags
@@ -94,10 +113,25 @@ def _build_platform_section(
         "hashtags": hashtags,
         "title": title or None,
         "description": description if label == "youtube_shorts" else None,
-        "checklist": PLATFORM_CHECKLISTS[label],
+        "checklist": (RUNWAY_PLATFORM_CHECKLISTS if provider_name == "runway" else PLATFORM_CHECKLISTS)[label],
         "full_post_text": full_post_text,
         "manual_post_url": post_url,
     }
+
+
+def _normalize_quality_checklist(checks: dict[str, Any] | None, provider_name: str) -> dict[str, Any]:
+    raw_checks = dict(checks or {})
+    if provider_name != "runway":
+        return raw_checks
+    normalized = {key: value for key, value in raw_checks.items() if key != "end_tag_present"}
+    if "branding_handled_separately" not in normalized:
+        normalized["branding_handled_separately"] = bool(
+            normalized.get("video_exists")
+            and normalized.get("aspect_ratio_9_16")
+            and normalized.get("duration_in_range")
+            and normalized.get("provider_generated_video")
+        )
+    return normalized
 
 
 def _build_export_pack(
@@ -125,6 +159,7 @@ def _build_export_pack(
         manual_package.caption if manual_package else "",
         hashtags,
         manual_package.tiktok_post_url if manual_package else None,
+        video.provider,
     )
     instagram_section = _build_platform_section(
         "instagram_reels",
@@ -132,6 +167,7 @@ def _build_export_pack(
         manual_package.caption if manual_package else "",
         hashtags,
         manual_package.instagram_post_url if manual_package else None,
+        video.provider,
     )
     youtube_section = _build_platform_section(
         "youtube_shorts",
@@ -139,6 +175,7 @@ def _build_export_pack(
         manual_package.caption if manual_package else "",
         hashtags,
         manual_package.youtube_post_url if manual_package else None,
+        video.provider,
     )
     return {
         "run_id": run.id,
@@ -152,7 +189,7 @@ def _build_export_pack(
         "hashtags": hashtags,
         "final_prompt_used": video.prompt_text,
         "quality_score": video.quality_score,
-        "quality_checklist": quality_check.checks_json if quality_check else {},
+        "quality_checklist": _normalize_quality_checklist(quality_check.checks_json if quality_check else {}, video.provider),
         "quality_critique": quality_check.llm_critique if quality_check else None,
         "idea_title": idea.title if idea else None,
         "idea_hook": idea.hook if idea else None,
