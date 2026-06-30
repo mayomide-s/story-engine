@@ -1,4 +1,4 @@
-import os
+﻿import os
 import tempfile
 
 import pytest
@@ -21,3 +21,30 @@ def client():
     with TestClient(app) as test_client:
         yield test_client
     get_settings.cache_clear()
+
+@pytest.fixture(autouse=True)
+def isolate_provider_environment(monkeypatch):
+    """Keep CI/staging environment variables from leaking into unit tests."""
+    from app.config import get_settings
+
+    provider_env_keys = [
+        "VIDEO_PROVIDER",
+        "STORAGE_PROVIDER",
+        "AUTH_ENABLED",
+        "APP_ACCESS_PASSWORD",
+        "APP_SESSION_SECRET",
+        "RUNWAY_API_KEY",
+        "R2_ACCOUNT_ID",
+        "R2_ACCESS_KEY_ID",
+        "R2_SECRET_ACCESS_KEY",
+        "R2_BUCKET_NAME",
+        "R2_PUBLIC_BASE_URL",
+    ]
+
+    for key in provider_env_keys:
+        monkeypatch.delenv(key, raising=False)
+
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
+
