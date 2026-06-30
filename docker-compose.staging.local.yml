@@ -1,0 +1,88 @@
+services:
+  backend:
+    build:
+      context: ./backend
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://postgres:postgres@postgres:5432/sociopost}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      R2_ACCOUNT_ID: ${R2_ACCOUNT_ID:-}
+      R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID:-}
+      R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY:-}
+      R2_BUCKET_NAME: ${R2_BUCKET_NAME:-socipost-assets}
+      R2_PUBLIC_BASE_URL: ${R2_PUBLIC_BASE_URL:-http://localhost:8001/assets}
+      RUNWAY_API_KEY: ${RUNWAY_API_KEY:-}
+      VIDEO_PROVIDER: ${VIDEO_PROVIDER:-mock}
+      STORAGE_PROVIDER: ${STORAGE_PROVIDER:-r2}
+      AUTH_ENABLED: ${AUTH_ENABLED:-true}
+      APP_ACCESS_PASSWORD: ${APP_ACCESS_PASSWORD:-local-staging-password}
+      APP_SESSION_SECRET: ${APP_SESSION_SECRET:-local-staging-session-secret}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5174,http://127.0.0.1:5174}
+    ports:
+      - "8001:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
+  frontend:
+    build:
+      context: ./frontend
+    environment:
+      VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8001/api}
+      VITE_VIDEO_PROVIDER: ${VIDEO_PROVIDER:-mock}
+      VITE_STORAGE_PROVIDER: ${STORAGE_PROVIDER:-r2}
+    ports:
+      - "5174:5173"
+    depends_on:
+      - backend
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-sociopost}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    ports:
+      - "5433:5432"
+    volumes:
+      - staging_local_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-sociopost}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6380:6379"
+
+  celery_worker:
+    build:
+      context: ./backend
+    command: celery -A app.workers.celery_app.celery_app worker --loglevel=info
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://postgres:postgres@postgres:5432/sociopost}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      R2_ACCOUNT_ID: ${R2_ACCOUNT_ID:-}
+      R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID:-}
+      R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY:-}
+      R2_BUCKET_NAME: ${R2_BUCKET_NAME:-socipost-assets}
+      R2_PUBLIC_BASE_URL: ${R2_PUBLIC_BASE_URL:-http://localhost:8001/assets}
+      RUNWAY_API_KEY: ${RUNWAY_API_KEY:-}
+      VIDEO_PROVIDER: ${VIDEO_PROVIDER:-mock}
+      STORAGE_PROVIDER: ${STORAGE_PROVIDER:-r2}
+      AUTH_ENABLED: ${AUTH_ENABLED:-true}
+      APP_ACCESS_PASSWORD: ${APP_ACCESS_PASSWORD:-local-staging-password}
+      APP_SESSION_SECRET: ${APP_SESSION_SECRET:-local-staging-session-secret}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5174,http://127.0.0.1:5174}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
+volumes:
+  staging_local_postgres_data:

@@ -2,7 +2,7 @@
 
 ## Goal
 
-This guide prepares a private single-VPS staging deployment for the current `v1.0.1` app without changing product behavior.
+This guide prepares a private single-VPS staging deployment for the current `v2.1` app without changing product behavior.
 
 Recommended staging sequence:
 
@@ -90,6 +90,13 @@ Required for Runway staging:
 
 - `RUNWAY_API_KEY`
 
+Required for private staging access:
+
+- `AUTH_ENABLED=true`
+- `APP_ACCESS_PASSWORD`
+- optional `APP_SESSION_SECRET`
+- `CORS_ALLOWED_ORIGINS`
+
 Never commit `.env`.
 
 ## Docker Compose Startup
@@ -105,6 +112,26 @@ Inspect container state:
 ```bash
 docker-compose ps
 ```
+
+## Local Rehearsal Before VPS
+
+You can rehearse a staging-like setup locally without touching the main dev stack by using:
+
+- `docker-compose.staging.local.yml`
+- alternate local ports: frontend `5174`, backend `8001`, Postgres `5433`, Redis `6380`
+
+Example:
+
+```bash
+docker-compose -p sociopost_staginglocal -f docker-compose.staging.local.yml up --build -d
+docker-compose -p sociopost_staginglocal -f docker-compose.staging.local.yml down
+```
+
+Recommended local rehearsal mode:
+
+- `AUTH_ENABLED=true`
+- `VIDEO_PROVIDER=mock`
+- `STORAGE_PROVIDER=r2`
 
 ## Migration Flow
 
@@ -203,9 +230,16 @@ Example:
 
 ## Backend CORS Allowed Origins
 
-The backend currently allows all origins.
+Set this explicitly for staging.
 
-Before exposing staging on the public internet, decide whether to keep permissive CORS for simplicity or restrict it to the staging frontend origin.
+Recommended:
+
+- only the frontend staging origin
+- no wildcard origins
+
+Example:
+
+- `CORS_ALLOWED_ORIGINS=https://staging.example.com`
 
 ## R2 Public URL
 
@@ -300,6 +334,8 @@ Known release checkpoints:
 
 - `v1.0-local-mvp`
 - `v1.0.1-runway-verified`
+- `v2.0-review-quality`
+- `v2.1-private-access`
 
 Example rollback:
 
