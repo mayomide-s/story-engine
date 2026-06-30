@@ -13,8 +13,9 @@ from app.services.idea_queue_service import (
     score_idea_queue_items,
     serialize_idea_queue_item_response,
 )
+from app.services.access_service import require_app_access
 
-router = APIRouter(prefix="/idea-queue", tags=["idea-queue"])
+router = APIRouter(prefix="/idea-queue", tags=["idea-queue"], dependencies=[Depends(require_app_access)])
 
 
 @router.get("", response_model=list[IdeaQueueItemResponse])

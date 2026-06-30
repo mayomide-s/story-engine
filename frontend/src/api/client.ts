@@ -161,9 +161,6 @@ export type AssetExportPack = {
   };
 };
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000/api";
-const BACKEND_BASE = API_BASE.replace(/\/api\/?$/, "");
-
 export type HealthCheck = {
   status: string;
 };
@@ -172,6 +169,7 @@ export type HealthDetails = {
   status: string;
   backend_reachable: boolean;
   environment: string;
+  auth_enabled: boolean;
   video_provider: string;
   storage_provider: string;
   runway_mode_enabled: boolean;
@@ -179,11 +177,46 @@ export type HealthDetails = {
   checks: Record<string, { status: string; detail: string; errors?: string[]; mode?: string; provider?: string; sdk_version?: string | null }>;
 };
 
+export type AccessStatus = {
+  auth_enabled: boolean;
+  authenticated: boolean;
+  environment: string;
+};
+
+export type AccessLoginResponse = {
+  auth_enabled: boolean;
+  token: string;
+};
+
+const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000/api";
+const BACKEND_BASE = API_BASE.replace(/\/api\/?$/, "");
+const ACCESS_TOKEN_KEY = "story-engine-access-token";
+
+export function getStoredAccessToken() {
+  return window.localStorage.getItem(ACCESS_TOKEN_KEY);
+}
+
+export function setStoredAccessToken(token: string) {
+  window.localStorage.setItem(ACCESS_TOKEN_KEY, token);
+}
+
+export function clearStoredAccessToken() {
+  window.localStorage.removeItem(ACCESS_TOKEN_KEY);
+}
+
 async function request<T>(path: string, options?: RequestInit, baseUrl = API_BASE): Promise<T> {
   let response: Response;
   try {
+    const token = getStoredAccessToken();
+    const headers = new Headers(options?.headers ?? {});
+    if (!headers.has("Content-Type")) {
+      headers.set("Content-Type", "application/json");
+    }
+    if (token && !headers.has("Authorization")) {
+      headers.set("Authorization", `Bearer ${token}`);
+    }
     response = await fetch(`${baseUrl}${path}`, {
-      headers: { "Content-Type": "application/json", ...(options?.headers ?? {}) },
+      headers,
       ...options
     });
   } catch {
@@ -199,12 +232,22 @@ async function request<T>(path: string, options?: RequestInit, baseUrl = API_BAS
     } catch {
       // ignore non-json error bodies
     }
+    if (response.status === 401) {
+      clearStoredAccessToken();
+      window.dispatchEvent(new CustomEvent("app-access-expired"));
+    }
     throw new Error(detail);
   }
   return response.json();
 }
 
 export const api = {
+  getAccessStatus: () => request<AccessStatus>("/access/status"),
+  login: (password: string) =>
+    request<AccessLoginResponse>("/access/login", {
+      method: "POST",
+      body: JSON.stringify({ password })
+    }),
   getHealth: () => request<HealthCheck>("/health", undefined, BACKEND_BASE),
   getHealthDetails: () => request<HealthDetails>("/health/details", undefined, BACKEND_BASE),
   getAccountDefaults: () => request<AccountDefaults>("/settings/account-defaults"),

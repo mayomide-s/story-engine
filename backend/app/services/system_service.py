@@ -36,6 +36,7 @@ def collect_health_details(settings: Settings) -> dict:
         "status": "degraded" if degraded else "ok",
         "backend_reachable": True,
         "environment": settings.environment,
+        "auth_enabled": settings.auth_enabled,
         "video_provider": settings.video_provider,
         "storage_provider": settings.storage_provider,
         "runway_mode_enabled": settings.video_provider == "runway",

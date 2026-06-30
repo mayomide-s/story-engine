@@ -11,6 +11,13 @@ class Settings(BaseSettings):
     app_name: str = "AI Coding Story Engine"
     environment: str = "development"
     api_prefix: str = "/api"
+    auth_enabled: bool = Field(default=False, alias="AUTH_ENABLED")
+    app_access_password: str = Field(default="", alias="APP_ACCESS_PASSWORD")
+    app_session_secret: str = Field(default="", alias="APP_SESSION_SECRET")
+    cors_allowed_origins: str = Field(
+        default="http://localhost:5173,http://127.0.0.1:5173",
+        alias="CORS_ALLOWED_ORIGINS",
+    )
 
     database_url: str = Field(default="sqlite:///./socipost.db", alias="DATABASE_URL")
     redis_url: str = Field(default="redis://redis:6379/0", alias="REDIS_URL")
@@ -35,12 +42,24 @@ class Settings(BaseSettings):
     def active_mode_label(self) -> str:
         return f"{self.video_provider}/{self.storage_provider}"
 
+    def cors_allowed_origins_list(self) -> list[str]:
+        return [origin.strip() for origin in self.cors_allowed_origins.split(",") if origin.strip()]
+
+    def auth_status_label(self) -> str:
+        return "enabled" if self.auth_enabled else "disabled"
+
+    def session_secret_value(self) -> str:
+        return self.app_session_secret or self.app_access_password
+
     def missing_configuration(self) -> dict[str, list[str]]:
         required = {
             "base": ["DATABASE_URL", "REDIS_URL", "VIDEO_PROVIDER", "STORAGE_PROVIDER"],
+            "auth": [],
             "storage": [],
             "video": [],
         }
+        if self.auth_enabled:
+            required["auth"] = ["APP_ACCESS_PASSWORD"]
         if self.storage_provider == "r2":
             required["storage"] = [
                 "R2_ACCOUNT_ID",
@@ -57,6 +76,7 @@ class Settings(BaseSettings):
             "REDIS_URL": self.redis_url,
             "VIDEO_PROVIDER": self.video_provider,
             "STORAGE_PROVIDER": self.storage_provider,
+            "APP_ACCESS_PASSWORD": self.app_access_password,
             "R2_ACCOUNT_ID": self.r2_account_id,
             "R2_ACCESS_KEY_ID": self.r2_access_key_id,
             "R2_SECRET_ACCESS_KEY": self.r2_secret_access_key,
@@ -78,6 +98,8 @@ class Settings(BaseSettings):
         mode_label = self.active_mode_label()
         if missing.get("base"):
             errors.append(f"Missing required base settings for {mode_label}: {', '.join(missing['base'])}")
+        if missing.get("auth"):
+            errors.append(f"Missing required auth settings for {mode_label}: {', '.join(missing['auth'])}")
         if missing.get("storage"):
             errors.append(f"Missing required storage settings for {mode_label}: {', '.join(missing['storage'])}")
         if missing.get("video"):

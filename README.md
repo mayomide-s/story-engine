@@ -9,9 +9,10 @@ This release is intentionally focused on a manual workflow:
 - Manual posting workflow only
 - No auto-posting
 - No analytics
-- No login or subscriptions
+- No public signup, billing, or subscriptions
+- Optional private access gate for local/private staging only
 
-Current feature scope through v1.7:
+Current feature scope through v2.1:
 
 - Dashboard run creation and review-aware pipeline tracking
 - Idea editing, prompt preview, and critique guidance
@@ -20,6 +21,7 @@ Current feature scope through v1.7:
 - Quality checks and recheck flow without re-spending Runway credits
 - Idea Queue, manual content calendar, brand defaults, and batch planning controls
 - Asset Library, export pack, and manual posting metadata
+- Optional private staging access gate with protected APIs and logout
 
 ## Stack
 
@@ -40,6 +42,13 @@ Always required:
 - `REDIS_URL`
 - `VIDEO_PROVIDER`
 - `STORAGE_PROVIDER`
+- `CORS_ALLOWED_ORIGINS`
+
+Optional for private staging mode:
+
+- `AUTH_ENABLED`
+- `APP_ACCESS_PASSWORD`
+- `APP_SESSION_SECRET` (recommended for staging, optional for local)
 
 Required for `STORAGE_PROVIDER=r2`:
 
@@ -52,6 +61,23 @@ Required for `STORAGE_PROVIDER=r2`:
 Required for `VIDEO_PROVIDER=runway`:
 
 - `RUNWAY_API_KEY`
+
+## Private Access Mode
+
+This repo now includes a lightweight private access mode for solo-developer staging.
+
+- `AUTH_ENABLED=false` keeps local development behavior unchanged
+- `AUTH_ENABLED=true` enables a simple password gate in the frontend and bearer-token protection on app APIs
+- `/health` stays public
+- `/health/details` stays safe and secret-free
+
+This is intentionally not full SaaS auth yet:
+
+- No public signup
+- No user accounts table
+- No OAuth
+- No teams/roles
+- No subscriptions or billing
 
 ## Running Modes
 
@@ -73,6 +99,13 @@ Required for `VIDEO_PROVIDER=runway`:
 - `VIDEO_PROVIDER=runway`
 - `STORAGE_PROVIDER=r2`
 - Real paid generation path
+
+### Private staging mode
+
+- `AUTH_ENABLED=true`
+- Set `APP_ACCESS_PASSWORD` to a strong private password
+- Set `APP_SESSION_SECRET` for staging if you want the access token signing secret separate from the password
+- Set `CORS_ALLOWED_ORIGINS` to your exact frontend origin list, for example `https://staging.example.com`
 
 ## Runway Cost Warning
 
@@ -237,6 +270,15 @@ Common recovery steps:
 - Re-run `docker-compose up --build`
 - Check that Postgres and Redis are healthy before inspecting app-level failures
 
+### Private staging access
+
+If protected API calls return `401`:
+
+- Confirm `AUTH_ENABLED=true` is intentional
+- Confirm the frontend origin is included in `CORS_ALLOWED_ORIGINS`
+- Confirm `APP_ACCESS_PASSWORD` is set on the backend
+- Re-enter the access password in the app if the local access session expired
+
 ### Runway mode safety
 
 Before clicking Resume:
@@ -293,3 +335,5 @@ npm run build
 - Prompt logs redact secrets, API keys, access tokens, signed URLs, and provider credentials before persistence
 - Health details report readiness and missing setting names only, never secret values
 - `VIDEO_PROVIDER=mock` remains the safest default for development
+- Never commit `.env`, real `APP_ACCESS_PASSWORD`, `APP_SESSION_SECRET`, Runway keys, or R2 credentials
+- The private access gate is meant for private staging only, not public launch or multi-user SaaS auth

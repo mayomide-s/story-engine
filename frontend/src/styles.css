@@ -71,6 +71,17 @@ pre {
   min-height: 100vh;
 }
 
+.access-shell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 2rem;
+}
+
+.access-panel {
+  width: min(100%, 480px);
+}
+
 .sidebar {
   padding: 2rem;
   border-right: 1px solid rgba(255, 255, 255, 0.08);

@@ -28,8 +28,9 @@ from app.services.pipeline_service import (
     recheck_pipeline_assets,
     resume_pipeline,
 )
+from app.services.access_service import require_app_access
 
-router = APIRouter(prefix="/pipeline-runs", tags=["pipeline-runs"])
+router = APIRouter(prefix="/pipeline-runs", tags=["pipeline-runs"], dependencies=[Depends(require_app_access)])
 
 
 @router.post("")

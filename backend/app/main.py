@@ -3,11 +3,16 @@ import logging
 from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.middleware import Middleware
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
+from starlette.responses import Response
 from fastapi.staticfiles import StaticFiles
 
 from app.config import get_settings
 from app.db.session import SessionLocal
+from app.routers.access import router as access_router
 from app.routers.asset_library import router as asset_library_router
 from app.routers.idea_queue import router as idea_queue_router
 from app.routers.pipeline_runs import router as pipeline_runs_router
@@ -17,6 +22,16 @@ from app.services.pipeline_service import seed_default_account
 from app.services.system_service import collect_health_details
 
 logger = logging.getLogger(__name__)
+
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        response: Response = await call_next(request)
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("Referrer-Policy", "same-origin")
+        response.headers.setdefault("Cross-Origin-Resource-Policy", "same-site")
+        return response
 
 
 @asynccontextmanager
@@ -38,14 +53,19 @@ async def lifespan(app: FastAPI):
 
 
 settings = get_settings()
-app = FastAPI(title=settings.app_name, lifespan=lifespan)
+app = FastAPI(
+    title=settings.app_name,
+    lifespan=lifespan,
+    middleware=[Middleware(SecurityHeadersMiddleware)],
+)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.cors_allowed_origins_list(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.include_router(access_router, prefix=settings.api_prefix)
 app.include_router(pipeline_runs_router, prefix=settings.api_prefix)
 app.include_router(idea_queue_router, prefix=settings.api_prefix)
 app.include_router(asset_library_router, prefix=settings.api_prefix)
