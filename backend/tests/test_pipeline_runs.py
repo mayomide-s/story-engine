@@ -118,7 +118,17 @@ def test_runway_prompt_preview_stays_within_provider_limit(client, monkeypatch):
     assert len(prompt_preview) <= 1000
     assert "End tag:" in prompt_preview
     assert "Use real motion" in prompt_preview
+    assert "Runway visual guardrails:" in prompt_preview
+    assert "No readable on-screen text" in prompt_preview or "Do not generate signs" in prompt_preview
     get_settings.cache_clear()
+
+
+def test_mock_prompt_preview_omits_runway_visual_guardrails(client):
+    response = client.post("/api/pipeline-runs", json={"topic": "Python decorators", "auto_mode": False})
+    assert response.status_code == 200
+    prompt_preview = response.json()["prompt_preview"]
+    assert "Runway visual guardrails:" not in prompt_preview
+    assert "Do not generate signs" not in prompt_preview
 
 
 def test_style_preset_selection_updates_prompt_preview(client):

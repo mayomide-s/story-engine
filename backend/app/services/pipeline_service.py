@@ -350,6 +350,50 @@ def compact_prompt_text(prompt: str, provider_name: str | None, force_target: bo
     return f"{safe_body}..."
 
 
+def build_runway_visual_guardrails() -> str:
+    return (
+        "Runway visual guardrails: Vertical 9:16 mobile short. "
+        "Use one clear visual metaphor and one primary subject. "
+        "No readable on-screen text except, at most, one short title of 1-3 words. "
+        "No signs, labels, subtitles, UI, terminal or code text, captions, menus, posters, whiteboard writing, or background text. "
+        "Avoid busy scenes and tiny elements. "
+        "Use large simple shapes, clean composition, strong subject separation, clear action, and readable motion. "
+        "Tell the story through action, icons, colors, objects, and gestures instead of written text."
+    )
+
+
+def strip_runway_visual_guardrails(prompt: str) -> str:
+    cleaned = " ".join(str(prompt).replace(build_runway_visual_guardrails(), "").split())
+    return cleaned.strip()
+
+
+def apply_provider_prompt_guardrails(prompt: str, provider_name: str, force_target: bool = False) -> str:
+    if provider_name != "runway":
+        return compact_prompt_text(prompt, provider_name, force_target=force_target)
+    constraints = get_prompt_constraints(provider_name)
+    limit = constraints["target"] if force_target else constraints["limit"]
+    guardrails = build_runway_visual_guardrails()
+    base_prompt = strip_runway_visual_guardrails(prompt)
+
+    if "End tag:" in base_prompt:
+        body, end_tag = base_prompt.rsplit("End tag:", 1)
+        suffix = f" {guardrails} End tag:{end_tag.strip()}"
+    else:
+        body = base_prompt
+        suffix = f" {guardrails}"
+
+    body = " ".join(str(body).split()).strip()
+    full_prompt = f"{body}{suffix}".strip()
+    if len(full_prompt) <= limit:
+        return full_prompt
+
+    body_limit = max(limit - len(suffix) - 3, 1)
+    safe_body = body[:body_limit].rsplit(" ", 1)[0].rstrip(" ,;")
+    if not safe_body:
+        return compact_prompt_text(guardrails if "End tag:" not in base_prompt else f"{guardrails} End tag:{end_tag.strip()}", provider_name, force_target=force_target)
+    return f"{safe_body}...{suffix}".strip()
+
+
 def build_prompt_from_scenes(
     run: PipelineRun,
     run_config: dict[str, Any],
@@ -380,7 +424,7 @@ def build_prompt_from_scenes(
             f"Scenes: {scene_prompt} "
             f"End tag: {end_tag}"
         )
-        return compact_prompt_text(prompt, provider_name)
+        return apply_provider_prompt_guardrails(prompt, provider_name)
 
     prompt = (
         f"Create a 9:16 animated video about {run.topic}. "
@@ -390,7 +434,7 @@ def build_prompt_from_scenes(
         f"Scenes: {scene_prompt} "
         f"End tag: {end_tag}"
     )
-    return compact_prompt_text(prompt, provider_name)
+    return apply_provider_prompt_guardrails(prompt, provider_name)
 
 
 def build_preflight_review(db: Session, run: PipelineRun) -> dict[str, Any]:
@@ -687,11 +731,11 @@ def generate_content_critique(db: Session, run: PipelineRun):
 
 
 def build_video_prompt(run: PipelineRun, db: Session) -> str:
+    provider_name = get_settings().video_provider
     if run.prompt_override:
-        return run.prompt_override
+        return apply_provider_prompt_guardrails(run.prompt_override, provider_name)
     script = db.get(Script, run.script_id)
     account = db.get(Account, run.account_id)
-    provider_name = get_settings().video_provider
     run_config = get_run_input_config(run, account.account_config_json if account else {})
     preset = get_style_preset(run, account.account_config_json if account else {})
     end_tag = build_account_config(account.account_config_json if account else {}).get("end_tag", "Made by CodeToons AI")
@@ -1344,12 +1388,14 @@ def prompt_action_pipeline(db: Session, run_id: str, action: str) -> PipelineRun
     provider_name = get_settings().video_provider
     base_prompt = build_video_prompt(run, db)
     if action == "improve":
-        improved = compact_prompt_text(base_prompt.replace("Create ", "Craft ").replace("animated coding mini-story", "animated vertical coding story"), provider_name)
-        run.prompt_override = improved
+        improved = strip_runway_visual_guardrails(
+            base_prompt.replace("Create ", "Craft ").replace("animated coding mini-story", "animated vertical coding story")
+        )
+        run.prompt_override = apply_provider_prompt_guardrails(improved, provider_name)
         event_type = "review.prompt_improved"
         message = "Prompt preview improved for review"
     elif action == "shorten":
-        run.prompt_override = compact_prompt_text(base_prompt, provider_name, force_target=True)
+        run.prompt_override = apply_provider_prompt_guardrails(base_prompt, provider_name, force_target=True)
         event_type = "review.prompt_shortened"
         message = "Prompt preview shortened for provider limit"
     else:
