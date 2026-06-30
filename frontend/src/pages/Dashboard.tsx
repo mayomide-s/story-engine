@@ -94,18 +94,20 @@ export function DashboardPage() {
 
   async function handleResume() {
     if (!selectedRunId) return;
+    let confirmPaidGeneration = false;
     if (isRunwayMode) {
       const confirmed = window.confirm(
-        "VIDEO_PROVIDER=runway is active. Continuing this run may spend Runway credits if a provider job has not already been submitted. Continue?",
+        "This will submit one video to Runway and may spend real provider credits. Continue?",
       );
       if (!confirmed) {
         return;
       }
+      confirmPaidGeneration = true;
     }
     try {
       setError(null);
       setIsResuming(true);
-      const resumed = await api.resumeRun(selectedRunId, "Approved from dashboard");
+      const resumed = await api.resumeRun(selectedRunId, "Approved from dashboard", confirmPaidGeneration);
       setDetail(resumed);
       await loadRuns();
     } catch (err) {
@@ -131,14 +133,13 @@ export function DashboardPage() {
   const run = detail?.pipeline_run as Record<string, unknown> | null;
   const video = detail?.video as Record<string, unknown> | null;
   const runStatus = typeof run?.status === "string" ? run.status : "";
-  const hasExistingProviderJob = Boolean(video?.provider_job_id);
   const preflight = detail?.review_preflight ?? null;
   const preflightPromptTooLong = Boolean(preflight?.prompt_length?.too_long);
   const preflightPromptInvalid = preflight?.prompt_valid === false;
   const lowPreflight = Boolean(preflight?.low_score_warning);
-  const canResume = runStatus === "awaiting_review" || (runStatus === "running" && hasExistingProviderJob);
+  const canResume = runStatus === "awaiting_review";
   const canCancel = ["queued", "running", "awaiting_review", "needs_review"].includes(runStatus);
-  const resumeLabel = hasExistingProviderJob ? "Continue Existing Generation" : "Resume";
+  const resumeLabel = "Resume";
   const defaultConfig = defaults?.account_config_json;
 
   const nextAction = useMemo(() => {
@@ -169,7 +170,7 @@ export function DashboardPage() {
           <p className="subtle">The first slice pauses after storyboard review so you can fix ideas before spending video credits.</p>
           <p className="subtle">
             Active video provider: <strong>{videoProvider}</strong>
-            {isRunwayMode ? " - Resume can spend real Runway credits." : " - Safe mock generation mode."}
+            {isRunwayMode ? " - Resume one reviewed run only. Each resume can spend real Runway credits." : " - Safe mock generation mode."}
           </p>
           <p className="subtle">
             Brand defaults come from Settings and can be overridden per run before creation.
@@ -304,9 +305,7 @@ export function DashboardPage() {
                   <div className="notice-card warning">
                     <strong>Paid generation warning</strong>
                     <p>
-                      {hasExistingProviderJob
-                        ? "This run already has a Runway job. Continuing will not create a second job."
-                        : "This resume action can submit a real Runway job and spend credits."}
+                      This resume action can submit one real Runway job and spend credits. Resume one reviewed run only.
                     </p>
                   </div>
                 ) : null}

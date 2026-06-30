@@ -263,10 +263,10 @@ export const api = {
       body: JSON.stringify(payload)
     }),
   getRun: (runId: string) => request<PipelineRunDetail>(`/pipeline-runs/${runId}`),
-  resumeRun: (runId: string, reviewNotes = "") =>
+  resumeRun: (runId: string, reviewNotes = "", confirmPaidGeneration = false) =>
     request<PipelineRunDetail>(`/pipeline-runs/${runId}/resume`, {
       method: "POST",
-      body: JSON.stringify({ review_notes: reviewNotes })
+      body: JSON.stringify({ review_notes: reviewNotes, confirm_paid_generation: confirmPaidGeneration })
     }),
   recheckRun: (runId: string, reviewNotes = "") =>
     request<PipelineRunDetail>(`/pipeline-runs/${runId}/recheck`, {

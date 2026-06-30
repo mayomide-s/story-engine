@@ -53,6 +53,10 @@ class UnsafeResumeError(RuntimeError):
     """Raised when a resume request would create unsafe or duplicate video work."""
 
 
+class PaidGenerationConfirmationRequiredError(UnsafeResumeError):
+    """Raised when a paid provider resume is missing explicit confirmation."""
+
+
 STYLE_PRESETS = {
     "clean_3d_cartoon": {
         "style": "clean 3D cartoon",
@@ -1269,53 +1273,36 @@ def continue_pipeline_after_review(db: Session, run: PipelineRun):
         fail_pipeline_run(db, run, f"Resume failed: {exc}", run.current_stage, video=current_video, event_type="pipeline.resume_failed")
         raise RuntimeError(f"Resume failed: {exc}") from exc
 
-
-def resume_pipeline(db: Session, run_id: str, review_notes: str | None = None) -> PipelineRun:
+def resume_pipeline(
+    db: Session,
+    run_id: str,
+    review_notes: str | None = None,
+    confirm_paid_generation: bool = False,
+) -> PipelineRun:
     run = db.get(PipelineRun, run_id)
     if not run:
         raise ValueError("Pipeline run not found")
     video = db.get(Video, run.video_id) if run.video_id else None
+    active_provider = video.provider if video and video.provider else get_settings().video_provider
 
     if video and video.status in {VideoStatus.COMPLETED, VideoStatus.APPROVED}:
         raise UnsafeResumeError("Run already has a generated video. Open Video Review or re-run quality check instead of resuming.")
-    if run.status in {PipelineStatus.COMPLETED, PipelineStatus.CANCELLED, PipelineStatus.FAILED}:
-        raise UnsafeResumeError(f"Run cannot be resumed from status '{run.status.value}'")
-    if video and video.status == VideoStatus.SUBMITTING and video.provider_job_id:
-        raise UnsafeResumeError("Run already has a submitted provider job. Please wait for polling to continue.")
+    if run.status in {PipelineStatus.COMPLETED, PipelineStatus.CANCELLED, PipelineStatus.FAILED, PipelineStatus.NEEDS_REVIEW}:
+        raise UnsafeResumeError("Run is no longer eligible for resume.")
+    if run.status != PipelineStatus.AWAITING_REVIEW or run.current_stage != PipelineStage.STORYBOARD_GENERATION:
+        raise UnsafeResumeError("Run is no longer eligible for resume.")
+    if video and video.provider_job_id:
+        raise UnsafeResumeError("Run is no longer eligible for resume.")
+    if video and video.status in {VideoStatus.SUBMITTING, VideoStatus.GENERATING, VideoStatus.PENDING_REVIEW, VideoStatus.REJECTED, VideoStatus.FAILED}:
+        raise UnsafeResumeError("Run is no longer eligible for resume.")
+    if active_provider == "runway" and not confirm_paid_generation:
+        raise PaidGenerationConfirmationRequiredError(
+            "Runway generation requires explicit paid confirmation. Re-submit resume with confirm_paid_generation=true."
+        )
     preflight = build_preflight_review(db, run)
     prompt_length = preflight.get("prompt_length", {})
     if not preflight.get("prompt_valid") or prompt_length.get("too_long"):
         raise UnsafeResumeError("Prompt preview is invalid or too long for the selected provider. Fix it in Ideas before resuming.")
-    if run.status == PipelineStatus.RUNNING and run.current_stage in {
-        PipelineStage.VIDEO_PROMPT_BUILD,
-        PipelineStage.VIDEO_GENERATION_SUBMIT,
-        PipelineStage.VIDEO_GENERATION_POLLING,
-        PipelineStage.ASSET_UPLOAD,
-        PipelineStage.QUALITY_CHECK,
-        PipelineStage.MANUAL_PACKAGE_CREATION,
-    }:
-        return run
-    if video and video.provider_job_id and run.status == PipelineStatus.RUNNING:
-        return run
-    if video and video.provider_job_id and video.status in {VideoStatus.QUEUED, VideoStatus.GENERATING, VideoStatus.PENDING_REVIEW}:
-        run.review_notes = review_notes or run.review_notes
-        run.status = PipelineStatus.RUNNING
-        run.resumed_at = now_utc()
-        run.paused_at = None
-        run.current_stage = PipelineStage.VIDEO_GENERATION_POLLING
-        add_event(
-            db,
-            run.id,
-            "pipeline.resumed_existing_generation",
-            "Run resumed with existing provider job",
-            stage=PipelineStage.VIDEO_GENERATION_POLLING.value,
-        )
-        db.commit()
-        if get_settings().video_provider == "runway":
-            enqueue_resume_pipeline_task(run.id)
-            return db.get(PipelineRun, run.id)
-        continue_pipeline_after_review(db, db.get(PipelineRun, run.id) or run)
-        return db.get(PipelineRun, run.id)
 
     run.review_notes = review_notes
     run.status = PipelineStatus.RUNNING
@@ -1325,7 +1312,7 @@ def resume_pipeline(db: Session, run_id: str, review_notes: str | None = None) -
     add_event(db, run.id, "pipeline.resumed", "Run resumed", stage=PipelineStage.VIDEO_PROMPT_BUILD.value)
     db.commit()
 
-    if get_settings().video_provider == "runway":
+    if active_provider == "runway":
         enqueue_resume_pipeline_task(run.id)
         return db.get(PipelineRun, run.id)
 

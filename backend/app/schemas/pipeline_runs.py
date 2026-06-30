@@ -48,6 +48,7 @@ class ReviewConfigPatch(BaseModel):
 
 class ReviewAction(BaseModel):
     review_notes: str | None = None
+    confirm_paid_generation: bool = False
 
 
 class PromptActionRequest(BaseModel):

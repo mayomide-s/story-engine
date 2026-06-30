@@ -13,6 +13,7 @@ from app.schemas.pipeline_runs import (
     StoryboardPatch,
 )
 from app.services.pipeline_service import (
+    PaidGenerationConfirmationRequiredError,
     UnsafeResumeError,
     cancel_pipeline,
     create_pipeline_run,
@@ -58,12 +59,15 @@ def get_run(run_id: str, db: Session = Depends(get_db)):
 def resume_run(run_id: str, payload: ReviewAction | None = Body(default=None), db: Session = Depends(get_db)):
     try:
         review_notes = payload.review_notes if payload else "Approved from dashboard"
-        run = resume_pipeline(db, run_id, review_notes)
+        confirm_paid_generation = payload.confirm_paid_generation if payload else False
+        run = resume_pipeline(db, run_id, review_notes, confirm_paid_generation)
         return get_pipeline_run_detail(db, run.id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PaidGenerationConfirmationRequiredError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except UnsafeResumeError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 

@@ -58,6 +58,18 @@ def test_resume_run_accepts_no_body(client):
     assert payload["pipeline_run"]["review_notes"] == "Approved from dashboard"
 
 
+def test_runway_resume_without_confirmation_is_rejected(client, monkeypatch):
+    monkeypatch.setenv("VIDEO_PROVIDER", "runway")
+    get_settings.cache_clear()
+    create = client.post("/api/pipeline-runs", json={"topic": "CORS", "auto_mode": False})
+    run_id = create.json()["pipeline_run"]["id"]
+
+    resume = client.post(f"/api/pipeline-runs/{run_id}/resume", json={"review_notes": "Looks good"})
+    assert resume.status_code == 409
+    assert "confirm_paid_generation=true" in resume.json()["detail"]
+    get_settings.cache_clear()
+
+
 def test_config_validation_accepts_mock_local_mode():
     settings = Settings(
         _env_file=None,
@@ -390,7 +402,10 @@ def test_runway_provider_failure_path(client, monkeypatch):
     get_settings.cache_clear()
     monkeypatch.setattr(pipeline_service, "enqueue_resume_pipeline_task", lambda run_id, countdown=None: None)
 
-    resume = client.post(f"/api/pipeline-runs/{run_id}/resume", json={"review_notes": "Use runway"})
+    resume = client.post(
+        f"/api/pipeline-runs/{run_id}/resume",
+        json={"review_notes": "Use runway", "confirm_paid_generation": True},
+    )
     assert resume.status_code == 200
 
     with SessionLocal() as db:
@@ -421,7 +436,7 @@ def test_resume_commits_running_state_before_provider_work(client, monkeypatch):
     get_settings.cache_clear()
     monkeypatch.setattr(pipeline_service, "enqueue_resume_pipeline_task", fake_enqueue)
 
-    resume = client.post(f"/api/pipeline-runs/{run_id}/resume")
+    resume = client.post(f"/api/pipeline-runs/{run_id}/resume", json={"confirm_paid_generation": True})
     assert resume.status_code == 200
     payload = resume.json()
     assert payload["pipeline_run"]["status"] == "running"
@@ -463,7 +478,10 @@ def test_runway_submit_saves_provider_job_id_before_polling(client, monkeypatch)
     monkeypatch.setattr(pipeline_service, "get_video_provider", lambda: FakeProvider())
     monkeypatch.setattr(pipeline_service, "enqueue_resume_pipeline_task", lambda task_run_id, countdown=None: queued.append((task_run_id, countdown)))
 
-    resume = client.post(f"/api/pipeline-runs/{run_id}/resume", json={"review_notes": "Approved"})
+    resume = client.post(
+        f"/api/pipeline-runs/{run_id}/resume",
+        json={"review_notes": "Approved", "confirm_paid_generation": True},
+    )
     assert resume.status_code == 200
 
     with SessionLocal() as db:
@@ -483,7 +501,7 @@ def test_runway_submit_saves_provider_job_id_before_polling(client, monkeypatch)
     get_settings.cache_clear()
 
 
-def test_duplicate_resume_does_not_create_second_submission(client, monkeypatch):
+def test_repeated_runway_resume_is_rejected_safely(client, monkeypatch):
     from app.services import pipeline_service
 
     create = client.post("/api/pipeline-runs", json={"topic": "CORS", "auto_mode": False})
@@ -497,10 +515,11 @@ def test_duplicate_resume_does_not_create_second_submission(client, monkeypatch)
     get_settings.cache_clear()
     monkeypatch.setattr(pipeline_service, "enqueue_resume_pipeline_task", fake_enqueue)
 
-    first = client.post(f"/api/pipeline-runs/{run_id}/resume")
-    second = client.post(f"/api/pipeline-runs/{run_id}/resume")
+    first = client.post(f"/api/pipeline-runs/{run_id}/resume", json={"confirm_paid_generation": True})
+    second = client.post(f"/api/pipeline-runs/{run_id}/resume", json={"confirm_paid_generation": True})
     assert first.status_code == 200
-    assert second.status_code == 200
+    assert second.status_code == 409
+    assert "no longer eligible for resume" in second.json()["detail"].lower()
     assert queued["count"] == 1
     get_settings.cache_clear()
 
@@ -513,7 +532,7 @@ def test_resume_rejects_run_with_completed_video(client):
     assert first_resume.status_code == 200
 
     second_resume = client.post(f"/api/pipeline-runs/{run_id}/resume")
-    assert second_resume.status_code == 400
+    assert second_resume.status_code == 409
     assert "Open Video Review" in second_resume.json()["detail"]
 
 
@@ -568,7 +587,10 @@ def test_failure_after_submit_does_not_revert_run_state(client, monkeypatch):
     monkeypatch.setattr(pipeline_service, "get_video_provider", lambda: FakeProvider())
     monkeypatch.setattr(pipeline_service, "enqueue_resume_pipeline_task", lambda task_run_id, countdown=None: None)
 
-    resume = client.post(f"/api/pipeline-runs/{run_id}/resume", json={"review_notes": "Approved"})
+    resume = client.post(
+        f"/api/pipeline-runs/{run_id}/resume",
+        json={"review_notes": "Approved", "confirm_paid_generation": True},
+    )
     assert resume.status_code == 200
 
     with SessionLocal() as db:
