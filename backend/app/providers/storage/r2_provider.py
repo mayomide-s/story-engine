@@ -1,4 +1,4 @@
-﻿import mimetypes
+import mimetypes
 from pathlib import Path
 
 import boto3
@@ -26,17 +26,18 @@ class R2StorageProvider:
 
     def save_file(self, source_path: str, storage_key: str) -> dict:
         source = Path(source_path)
-        content_type = mimetypes.guess_type(source.name)[0] or "application/octet-stream"
+        mime_type = mimetypes.guess_type(source.name)[0] or "application/octet-stream"
 
         self.client.upload_file(
             str(source),
             self.bucket_name,
             storage_key,
-            ExtraArgs={"ContentType": content_type},
+            ExtraArgs={"ContentType": mime_type},
         )
 
         return {
             "storage_key": storage_key,
             "public_url": self.resolve_path(storage_key),
             "size_bytes": source.stat().st_size,
+            "mime_type": mime_type,
         }

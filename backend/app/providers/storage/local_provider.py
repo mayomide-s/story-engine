@@ -1,4 +1,5 @@
-﻿from pathlib import Path
+import mimetypes
+from pathlib import Path
 from shutil import copyfile
 
 from app.config import get_settings
@@ -19,10 +20,15 @@ class LocalStorageProvider:
         source = Path(source_path)
         target = self.base_path / storage_key
         target.parent.mkdir(parents=True, exist_ok=True)
-        copyfile(source, target)
+
+        if source.resolve() != target.resolve():
+            copyfile(source, target)
+
+        mime_type = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
 
         return {
             "storage_key": storage_key,
             "public_url": f"/assets/{storage_key}",
             "size_bytes": target.stat().st_size,
+            "mime_type": mime_type,
         }
