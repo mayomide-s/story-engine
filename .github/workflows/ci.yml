@@ -34,7 +34,7 @@ jobs:
           REDIS_URL: redis://localhost:6379/0
           VIDEO_PROVIDER: mock
           STORAGE_PROVIDER: local
-        run: pytest -q
+        run: pytest -q -s --tb=long
 
   frontend:
     runs-on: ubuntu-latest
