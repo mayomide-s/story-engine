@@ -81,6 +81,48 @@ Warnings:
 
 - do not run `git clean -fd` on the VPS
 - untracked VPS compose/env files may be important
+- create a database backup before deployments that involve migrations or schema risk
+
+## Database Backups
+
+Backups are stored outside the repo at:
+
+```bash
+/root/story-engine-backups/db
+```
+
+Create a manual backup:
+
+```bash
+./scripts/vps-db-backup.sh
+```
+
+List backups:
+
+```bash
+ls -lh /root/story-engine-backups/db
+```
+
+The backup script:
+
+- runs from `/opt/story-engine`
+- creates the backup directory if missing
+- writes a timestamped Postgres dump
+- gzips the dump
+- keeps the newest 14 backups
+- deletes older backups automatically
+
+Restore the latest backup:
+
+```bash
+./scripts/vps-db-restore-latest.sh
+```
+
+Warning:
+
+- restore overwrites the staging database
+- the restore script requires typing `RESTORE` exactly
+- take a fresh backup before restoring if there is any doubt
 
 ## Health Checks
 
@@ -244,6 +286,12 @@ git reset --hard origin/master
 docker compose --env-file .env -f docker-compose.vps.prod.yml -f docker-compose.vps.env.yml up -d --build backend celery_worker frontend
 ```
 
+Rollback reminder:
+
+- code rollback and database rollback are separate actions
+- if a deployment includes migrations, make a DB backup before deploy
+- restoring a DB backup can overwrite newer staging data
+
 ## HTTPS / Certbot Check
 
 Dry-run renewal:
@@ -277,4 +325,3 @@ curl -I http://144.126.234.61:5174/
 - Do not run `git clean -fd` on the VPS.
 - Do not enable Runway casually.
 - Switch back to `VIDEO_PROVIDER=mock` after any paid-provider test unless you intentionally want staging left in Runway mode.
-
