@@ -131,6 +131,31 @@ Remember:
 - database backups do not back up R2 binary assets
 - generated MP4s and thumbnails live in R2
 - do not delete R2 objects manually unless DB references are handled too
+- the weekly inventory check is read-only and does not back up R2 binary objects or delete unused files
+
+Systemd automation on the VPS:
+
+- timer: `story-engine-r2-inventory.timer`
+- service: `story-engine-r2-inventory.service`
+- schedule: weekly on Sunday at `04:15` UTC/server time
+
+Check the timer:
+
+```bash
+systemctl list-timers --all | grep story-engine
+```
+
+Run the inventory manually:
+
+```bash
+systemctl start story-engine-r2-inventory.service
+```
+
+View recent service logs:
+
+```bash
+journalctl -u story-engine-r2-inventory.service -n 80 --no-pager
+```
 
 Run the inventory check:
 
