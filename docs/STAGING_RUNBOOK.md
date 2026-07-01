@@ -242,6 +242,34 @@ Healthy staging expectations:
 - SSH should reject password-based login attempts
 - Fail2ban should show the `sshd` jail active
 
+## Staging Release Checklist
+
+Run the VPS-only read-only checklist from `/opt/story-engine`:
+
+```bash
+./scripts/vps-staging-release-check.sh
+```
+
+Run it before:
+
+- staging deploys
+- schema or infrastructure changes
+- any controlled paid Runway test
+- rollback verification
+- troubleshooting after VPS security or Docker changes
+
+Checklist result meanings:
+
+- `PASS`: the check matched the expected staging baseline
+- `WARN`: non-critical drift or missing context was detected and should be reviewed
+- `FAIL`: a critical safety or readiness check failed
+
+Important:
+
+- this checklist is read-only
+- it does not deploy, rebuild, back up data, restore data, modify `.env`, or enable Runway
+- it is intended to catch unsafe staging state before changes are made
+
 ## How To Confirm Safe Mock Mode
 
 Check `.env`:
