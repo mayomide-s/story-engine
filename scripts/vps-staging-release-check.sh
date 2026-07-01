@@ -9,6 +9,7 @@ SERVICES=(backend celery_worker frontend postgres redis)
 DB_BACKUP_TIMER="story-engine-db-backup.timer"
 R2_TIMER="story-engine-r2-inventory.timer"
 R2_INVENTORY_SCRIPT="scripts/vps-r2-asset-inventory.sh"
+PYTHON3_BIN="$(command -v python3 || true)"
 
 critical_failures=0
 warning_count=0
@@ -33,6 +34,12 @@ echo "Story Engine staging release checklist"
 echo "Root: ${ROOT_DIR}"
 echo "URL: ${STAGING_URL}"
 echo
+
+if [[ -n "${PYTHON3_BIN}" ]]; then
+  pass "python3 detected at ${PYTHON3_BIN}"
+else
+  fail "python3 is required for health/details parsing"
+fi
 
 current_commit="$(git rev-parse --short HEAD 2>/dev/null || true)"
 if [[ -n "${current_commit}" ]]; then
@@ -87,7 +94,11 @@ else
 fi
 
 if [[ "${details_status}" == "200" ]]; then
-  mapfile -t health_lines < <(python - <<'PY'
+  if [[ -z "${PYTHON3_BIN}" ]]; then
+    fail "Skipping health/details parsing because python3 is unavailable"
+  else
+    set +e
+    mapfile -t health_lines < <("${PYTHON3_BIN}" - <<'PY'
 from __future__ import annotations
 
 import json
@@ -98,46 +109,52 @@ payload = json.loads(Path("/tmp/story-engine-health-details.json").read_text(enc
 def line(name: str, value: str) -> None:
     print(f"{name}={value}")
 
-line("video_provider", str(payload.get("video_provider", "")))
-line("storage_provider", str(payload.get("storage_provider", "")))
-line("runway_mode_enabled", str(payload.get("runway_mode_enabled", "")))
+line("video_provider", str(payload.get("video_provider", "")).strip().lower())
+line("storage_provider", str(payload.get("storage_provider", "")).strip().lower())
+line("runway_mode_enabled", "true" if bool(payload.get("runway_mode_enabled", False)) else "false")
 checks = payload.get("checks", {})
 for name in ("database", "redis", "storage"):
     status = checks.get(name, {}).get("status", "")
-    line(f"{name}_status", str(status))
+    line(f"{name}_status", str(status).strip().lower())
 PY
 )
+    parser_status=$?
+    set -e
+    if [[ ${parser_status} -ne 0 || ${#health_lines[@]} -eq 0 ]]; then
+      fail "Could not parse /health/details JSON with python3"
+    else
+      declare -A health_map=()
+      for line in "${health_lines[@]}"; do
+        key="${line%%=*}"
+        value="${line#*=}"
+        health_map["${key}"]="${value}"
+      done
 
-  declare -A health_map=()
-  for line in "${health_lines[@]}"; do
-    key="${line%%=*}"
-    value="${line#*=}"
-    health_map["${key}"]="${value}"
-  done
+      [[ "${health_map[video_provider]:-}" == "mock" ]] \
+        && pass "health/details video_provider is mock" \
+        || fail "health/details video_provider is ${health_map[video_provider]:-unknown}"
 
-  [[ "${health_map[video_provider]:-}" == "mock" ]] \
-    && pass "health/details video_provider is mock" \
-    || fail "health/details video_provider is ${health_map[video_provider]:-unknown}"
+      [[ "${health_map[storage_provider]:-}" == "r2" ]] \
+        && pass "health/details storage_provider is r2" \
+        || fail "health/details storage_provider is ${health_map[storage_provider]:-unknown}"
 
-  [[ "${health_map[storage_provider]:-}" == "r2" ]] \
-    && pass "health/details storage_provider is r2" \
-    || fail "health/details storage_provider is ${health_map[storage_provider]:-unknown}"
+      [[ "${health_map[runway_mode_enabled]:-}" == "false" ]] \
+        && pass "health/details runway_mode_enabled is false" \
+        || fail "health/details runway_mode_enabled is ${health_map[runway_mode_enabled]:-unknown}"
 
-  [[ "${health_map[runway_mode_enabled]:-}" == "False" ]] \
-    && pass "health/details runway_mode_enabled is false" \
-    || fail "health/details runway_mode_enabled is ${health_map[runway_mode_enabled]:-unknown}"
+      [[ "${health_map[database_status]:-}" == "ok" ]] \
+        && pass "health/details database status ok" \
+        || fail "health/details database status is ${health_map[database_status]:-unknown}"
 
-  [[ "${health_map[database_status]:-}" == "ok" ]] \
-    && pass "health/details database status ok" \
-    || fail "health/details database status is ${health_map[database_status]:-unknown}"
+      [[ "${health_map[redis_status]:-}" == "ok" ]] \
+        && pass "health/details redis status ok" \
+        || fail "health/details redis status is ${health_map[redis_status]:-unknown}"
 
-  [[ "${health_map[redis_status]:-}" == "ok" ]] \
-    && pass "health/details redis status ok" \
-    || fail "health/details redis status is ${health_map[redis_status]:-unknown}"
-
-  [[ "${health_map[storage_status]:-}" == "ok" ]] \
-    && pass "health/details storage status ok" \
-    || fail "health/details storage status is ${health_map[storage_status]:-unknown}"
+      [[ "${health_map[storage_status]:-}" == "ok" ]] \
+        && pass "health/details storage status ok" \
+        || fail "health/details storage status is ${health_map[storage_status]:-unknown}"
+    fi
+  fi
 fi
 
 timers_output="$(systemctl list-timers --all 2>&1 || true)"
@@ -166,20 +183,15 @@ else
   warn "No DB backup found under ${BACKUP_DIR}"
 fi
 
-if [[ -x "${R2_INVENTORY_SCRIPT}" || -f "${R2_INVENTORY_SCRIPT}" ]]; then
+if [[ -f "${R2_INVENTORY_SCRIPT}" ]]; then
   set +e
-  inventory_output="$("${R2_INVENTORY_SCRIPT}" "${ROOT_DIR}" 2>&1)"
+  inventory_output="$(bash "${R2_INVENTORY_SCRIPT}" "${ROOT_DIR}" 2>&1)"
   inventory_status=$?
   set -e
-  if [[ ${inventory_status} -eq 0 ]]; then
-    pass "R2 inventory script ran successfully"
-    if [[ "${inventory_output}" == *"Missing R2 objects referenced by DB: 0"* ]]; then
-      pass "R2 inventory reported zero missing DB-referenced objects"
-    else
-      warn "R2 inventory completed but reported possible missing objects"
-    fi
+  if [[ ${inventory_status} -eq 0 && "${inventory_output}" == *"Missing R2 objects referenced by DB: 0"* ]]; then
+    pass "R2 inventory script ran successfully with zero missing DB-referenced objects"
   else
-    warn "R2 inventory script failed to run cleanly"
+    warn "R2 inventory check did not reach a clean zero-missing result"
   fi
 else
   warn "R2 inventory script not found at ${R2_INVENTORY_SCRIPT}"
@@ -193,10 +205,16 @@ else
 fi
 
 ufw_numbered_output="$(ufw status numbered 2>&1 || true)"
-if [[ "${ufw_numbered_output}" == *"22/tcp"* && "${ufw_numbered_output}" == *"80/tcp"* && "${ufw_numbered_output}" == *"443/tcp"* ]]; then
-  pass "UFW allows expected public ports 22/80/443"
+if [[ "${ufw_numbered_output}" == *"Nginx Full"* || ( "${ufw_numbered_output}" == *"80/tcp"* && "${ufw_numbered_output}" == *"443/tcp"* ) ]]; then
+  pass "UFW allows expected web ports"
 else
-  warn "UFW rules do not clearly show 22/80/443"
+  warn "UFW rules do not clearly show web access via Nginx Full or 80/443"
+fi
+
+if [[ "${ufw_numbered_output}" == *"OpenSSH"* || "${ufw_numbered_output}" == *"22/tcp"* ]]; then
+  pass "UFW allows SSH access"
+else
+  warn "UFW rules do not clearly show SSH access via OpenSSH or 22/tcp"
 fi
 
 fail2ban_status="$(fail2ban-client status 2>&1 || true)"
