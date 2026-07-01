@@ -295,6 +295,53 @@ docker compose --env-file .env -f docker-compose.vps.prod.yml -f docker-compose.
 
 ## How To Switch To Runway For Exactly One Controlled Test
 
+Use the guarded paid-test window instead of editing `.env` by hand when possible.
+
+## Controlled Runway Paid Test
+
+Warning:
+
+- Runway generation costs real money
+- this only opens a temporary provider window
+- it does not generate a video automatically
+
+Open a default 30-minute window:
+
+```bash
+CONFIRM_RUNWAY_COST=YES bash scripts/vps-runway-paid-test-window.sh
+```
+
+Open a shorter 15-minute window:
+
+```bash
+CONFIRM_RUNWAY_COST=YES bash scripts/vps-runway-paid-test-window.sh 15
+```
+
+Manual rollback:
+
+```bash
+bash scripts/vps-safe-mock-mode.sh
+```
+
+Post-test safety check:
+
+```bash
+bash scripts/vps-staging-release-check.sh
+```
+
+What the paid-test window script does:
+
+- runs the staging release checklist first
+- verifies staging is still in safe `mock/r2` mode before switching
+- verifies Runway and R2 config exists without printing secrets
+- backs up `.env`
+- changes only `VIDEO_PROVIDER=runway`
+- restarts `backend` and `celery_worker`
+- verifies `/health/details` shows `runway/r2` readiness
+- schedules an automatic rollback to mock mode when `systemd-run` is available
+
+If you still need to switch manually:
+
 1. Edit `.env`
 2. Set:
 
