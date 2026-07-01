@@ -205,6 +205,43 @@ curl -i http://127.0.0.1:8001/health/details
 curl -I http://127.0.0.1:5174/
 ```
 
+## Security Baseline
+
+Baseline staging VPS expectations:
+
+- UFW firewall enabled
+- allowed public ports:
+  - `22/tcp` for SSH
+  - `80/tcp` for HTTP
+  - `443/tcp` for HTTPS
+- Fail2ban enabled for SSH
+- SSH password login disabled
+- SSH key login required
+
+Expected effective SSH settings:
+
+- `PasswordAuthentication no`
+- `KbdInteractiveAuthentication no`
+- `PermitRootLogin without-password`
+- `PubkeyAuthentication yes`
+
+Useful checks:
+
+```bash
+ufw status numbered
+fail2ban-client status
+fail2ban-client status sshd
+ss -tulpn | grep -E ':(22|80|443|8000|8001|5174|5432|6379)\b'
+sshd -T | grep -Ei 'passwordauthentication|kbdinteractiveauthentication|permitrootlogin|pubkeyauthentication'
+```
+
+Healthy staging expectations:
+
+- only `22`, `80`, and `443` should be publicly exposed
+- backend, frontend container bind ports, Postgres, and Redis should stay private to localhost or Docker-internal networking
+- SSH should reject password-based login attempts
+- Fail2ban should show the `sshd` jail active
+
 ## How To Confirm Safe Mock Mode
 
 Check `.env`:
