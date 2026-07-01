@@ -124,6 +124,40 @@ Warning:
 - the restore script requires typing `RESTORE` exactly
 - take a fresh backup before restoring if there is any doubt
 
+## R2 Asset Inventory
+
+Remember:
+
+- database backups do not back up R2 binary assets
+- generated MP4s and thumbnails live in R2
+- do not delete R2 objects manually unless DB references are handled too
+
+Run the inventory check:
+
+```bash
+./scripts/vps-r2-asset-inventory.sh
+```
+
+What it reports:
+
+- R2 bucket name
+- object count and total size for `videos/`
+- object count and total size for `thumbnails/`
+- DB asset record counts for `video_mp4` and `thumbnail`
+- missing R2 objects referenced by DB
+- at most the first 20 missing keys
+
+Healthy result:
+
+- non-zero counts for `videos/` and `thumbnails/` once staging has generated assets
+- `Missing R2 objects referenced by DB: 0`
+
+If missing keys are reported:
+
+- do not delete more objects
+- inspect the listed keys
+- compare DB records, R2 inventory, and recent logs before making changes
+
 ## Health Checks
 
 Public health checks:
