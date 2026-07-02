@@ -187,18 +187,15 @@ export default function App() {
           </nav>
         </div>
         <div className="sidebar-footer">
-          <EnvironmentStatusPanel />
+          <details className="sidebar-diagnostics">
+            <summary>Diagnostics</summary>
+            <EnvironmentStatusPanel showAccessNote={accessStatus.auth_enabled} />
+          </details>
           {accessStatus.auth_enabled ? (
-            <div className="stack compact sidebar-access-card">
-              <div className="notice-card">
-                <strong>Private access enabled</strong>
-                <p>You are using the lightweight staging access gate.</p>
-              </div>
-              <button className="secondary" type="button" onClick={handleLogout} title="Logout">
-                <span className="nav-icon">L</span>
-                <span className="nav-label">Logout</span>
-              </button>
-            </div>
+            <button className="secondary sidebar-logout" type="button" onClick={handleLogout} title="Logout">
+              <span className="nav-icon">L</span>
+              <span className="nav-label">Logout</span>
+            </button>
           ) : null}
         </div>
       </aside>

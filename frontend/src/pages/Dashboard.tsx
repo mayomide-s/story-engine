@@ -5,6 +5,7 @@ import { api, AccountDefaults, HealthDetails, PipelineRunDetail, PipelineRunSumm
 import { EventTimeline } from "../components/EventTimeline";
 import { RunList } from "../components/RunList";
 import { AUDIENCE_LEVELS, CONTENT_FORMATS, STYLE_PRESETS, TARGET_PLATFORMS } from "../constants";
+import { formatProvider, formatRunStatus, formatStage } from "../utils/display";
 
 const videoProvider = import.meta.env.VITE_VIDEO_PROVIDER ?? "mock";
 const storageProvider = import.meta.env.VITE_STORAGE_PROVIDER ?? "local";
@@ -211,16 +212,7 @@ export function DashboardPage() {
   const video = detail?.video as Record<string, unknown> | null;
   const runStatus = typeof run?.status === "string" ? run.status : "";
   const activeVideoProvider = healthDetails?.video_provider ?? videoProvider;
-  const activeStorageProvider = healthDetails?.storage_provider ?? storageProvider;
-  const providerBadge = `${activeVideoProvider}/${activeStorageProvider.toUpperCase()}`;
   const isRunwayMode = activeVideoProvider === "runway" && Boolean(healthDetails?.runway_mode_enabled);
-  const environmentLabel = isRunwayMode
-    ? `Current environment: ${activeVideoProvider}/${activeStorageProvider.toUpperCase()} paid mode`
-    : `Current environment: ${activeVideoProvider}/${activeStorageProvider.toUpperCase()} safe mode`;
-  const backendStatus = healthDetails?.backend_reachable ? "ok" : "offline";
-  const databaseStatus = healthDetails?.checks.database.status ?? "unknown";
-  const redisStatus = healthDetails?.checks.redis.status ?? "unknown";
-  const storageStatus = healthDetails?.checks.storage.status ?? "unknown";
   const preflight = detail?.review_preflight ?? null;
   const preflightPromptTooLong = Boolean(preflight?.prompt_length?.too_long);
   const preflightPromptInvalid = preflight?.prompt_valid === false;
@@ -250,28 +242,6 @@ export function DashboardPage() {
 
   return (
     <div className="page">
-      <section className="page-header-card panel">
-        <div>
-          <p className="eyebrow">Dashboard</p>
-          <div className="title-row">
-            <h2>Build the next coding mini-story</h2>
-            <span className={`status-pill ${isRunwayMode ? "warning" : "success"}`}>{providerBadge}</span>
-          </div>
-          <p className="subtle">The first slice pauses after storyboard review so you can fix ideas before spending video credits.</p>
-          <p className="subtle">{environmentLabel}</p>
-          <p className="subtle">
-            Brand defaults come from Settings and can be overridden per run before creation.
-            {" "}
-            <Link className="inline-link" to="/settings">Open Settings</Link>
-          </p>
-        </div>
-        <div className="status-chip-row">
-          <span className={`status-pill ${backendStatus === "ok" ? "success" : "danger"}`}>Backend {backendStatus}</span>
-          <span className={`status-pill ${databaseStatus === "ok" ? "success" : "warning"}`}>DB {databaseStatus}</span>
-          <span className={`status-pill ${redisStatus === "ok" ? "success" : "warning"}`}>Redis {redisStatus}</span>
-          <span className={`status-pill ${storageStatus === "ok" ? "success" : "warning"}`}>Storage {storageStatus}</span>
-        </div>
-      </section>
       {featuredDemo && featuredRun && featuredVideo ? (
         <section className="panel featured-demo-card">
           <div className="panel-header">
@@ -279,19 +249,19 @@ export function DashboardPage() {
               <p className="eyebrow">Featured Demo</p>
               <h2>{String(featuredRun.topic ?? "CORS")}</h2>
             </div>
-            <span className="status-pill success">Runway / R2</span>
+            <span className="status-pill success">Runway generated</span>
           </div>
           <div className="key-grid">
-            <div><span>Provider</span><strong>{String(featuredVideo.provider ?? "runway")}</strong></div>
+            <div><span>Provider</span><strong>{formatProvider(String(featuredVideo.provider ?? "runway"))}</strong></div>
             <div><span>Duration</span><strong>{formatDuration(featuredVideo.duration_seconds)}</strong></div>
             <div><span>Quality Score</span><strong>{formatQualityScore(featuredQualityCheck?.score)}</strong></div>
-            <div><span>Status</span><strong>{String(featuredRun.status ?? "completed")} / {String(featuredVideo.status ?? "approved")}</strong></div>
+            <div><span>Status</span><strong>Completed / Approved</strong></div>
           </div>
-          <p className="subtle">Golden demo path for Story Engine: completed CORS mini-story, generated with Runway and stored in R2.</p>
+          <p className="subtle">A completed coding explainer ready for review and posting.</p>
           <div className="button-row">
-            <Link className="inline-link" to={`/review?run=${String(featuredRun.id)}`}>Watch / Open Review</Link>
+            <Link className="inline-link" to={`/review?run=${String(featuredRun.id)}`}>Open Review</Link>
             <button className="secondary" type="button" onClick={handleCopyCaptionPackage} disabled={!featuredDemo.manual_post_package}>
-              {captionPackageCopied ? "Caption package copied" : "Copy Caption Package"}
+              {captionPackageCopied ? "Posting copy copied" : "Copy Posting Copy"}
             </button>
           </div>
         </section>
@@ -364,15 +334,12 @@ export function DashboardPage() {
           </div>
         </div>
         {defaultConfig ? (
-          <div className="notice-card">
-            <strong>Applied Defaults</strong>
-            <p>
-              Style: {defaultConfig.default_style_preset} | Platforms: {defaultConfig.target_platforms.join(", ")} | Tone: {defaultConfig.default_caption_tone}
+          <details className="technical-disclosure inline-technical">
+            <summary>Applied defaults</summary>
+            <p className="subtle">
+              {defaultConfig.default_style_preset} | {defaultConfig.target_platforms.join(", ")} | {defaultConfig.default_caption_tone} | {defaultConfig.default_audience_level} | {defaultConfig.default_content_format} | {defaultConfig.default_duration_seconds}s
             </p>
-            <p>
-              Audience: {defaultConfig.default_audience_level} | Format: {defaultConfig.default_content_format} | Duration: {defaultConfig.default_duration_seconds}s
-            </p>
-          </div>
+          </details>
         ) : null}
       </section>
       {error ? <p className="error">{error}</p> : null}
@@ -388,9 +355,9 @@ export function DashboardPage() {
               <div className="stack">
                 <div className="key-grid">
                   <div><span>Topic</span><strong>{String(run.topic)}</strong></div>
-                  <div><span>Status</span><strong>{String(run.status)}</strong></div>
-                  <div><span>Stage</span><strong>{String(run.current_stage)}</strong></div>
-                  <div><span>Provider</span><strong>{String(video?.provider ?? "not started")}</strong></div>
+                  <div><span>Status</span><strong>{formatRunStatus(String(run.status))}</strong></div>
+                  <div><span>Stage</span><strong>{formatStage(String(run.current_stage))}</strong></div>
+                  <div><span>Provider</span><strong>{formatProvider(String(video?.provider ?? ""))}</strong></div>
                   <div><span>Style Preset</span><strong>{String(run.style_preset ?? "clean_3d_cartoon")}</strong></div>
                 </div>
                 {run.error_message ? (
@@ -463,7 +430,7 @@ export function DashboardPage() {
             ) : null}
             </div>
           </div>
-          <EventTimeline events={detail?.pipeline_events ?? []} />
+          <EventTimeline events={detail?.pipeline_events ?? []} summary="Show technical timeline" />
         </div>
       </div>
     </div>

@@ -1,4 +1,5 @@
 import { PipelineRunSummary } from "../api/client";
+import { formatProvider, formatRunStatus, formatStage, formatVideoStatus } from "../utils/display";
 
 type Props = {
   runs: PipelineRunSummary[];
@@ -54,11 +55,11 @@ export function RunList({ runs, selectedRunId, onSelect }: Props) {
                     <span>{formatCreatedAt(run.created_at)}</span>
                   </div>
                   <div className="run-card-badges">
-                    <span className="status-pill">{run.provider ?? "not started"}</span>
-                    <span className="status-pill muted">{run.status}</span>
+                    <span className="status-pill">{formatProvider(run.provider)}</span>
+                    <span className="status-pill muted">{formatRunStatus(run.status)}</span>
                   </div>
-                  <span>{run.current_stage}</span>
-                  {run.video_status ? <span className="subtle">video: {run.video_status}</span> : null}
+                  <span>{formatStage(run.current_stage)}</span>
+                  {run.video_status ? <span className="subtle">Video: {formatVideoStatus(run.video_status)}</span> : null}
                   {run.error_message ? <span className="error">{run.error_message}</span> : null}
                 </button>
               ))}

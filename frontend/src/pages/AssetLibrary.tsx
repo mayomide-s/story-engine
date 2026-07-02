@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import { api, AssetLibraryDetail, AssetLibraryItem } from "../api/client";
 import { ExportPackPanel } from "../components/ExportPackPanel";
 import { normalizeQualityChecklist } from "../qualityChecklist";
+import { formatProvider, formatRunStatus, formatVideoStatus } from "../utils/display";
 
 function CopyButton({ text, label }: { text: string; label: string }) {
   const [copied, setCopied] = useState(false);
@@ -192,13 +193,13 @@ export function AssetLibraryPage() {
               </div>
               <div className="run-card-badges">
                 <span className="status-pill">{item.style_preset}</span>
-                <span className="status-pill muted">{item.provider}</span>
+                <span className="status-pill muted">{formatProvider(item.provider)}</span>
                 {item.target_platform ? <span className="status-pill muted">{item.target_platform}</span> : null}
                 {item.manual_posting_status ? <span className="status-pill muted">{item.manual_posting_status}</span> : null}
               </div>
-              <span>run: {item.run_status}</span>
-              <span>video: {item.video_status}</span>
-              <span>quality: {item.quality_score ?? "n/a"}</span>
+              <span>Run: {formatRunStatus(item.run_status)}</span>
+              <span>Video: {formatVideoStatus(item.video_status)}</span>
+              <span>Quality: {item.quality_score ?? "n/a"}</span>
             </button>
           ))}
         </div>
@@ -239,11 +240,15 @@ export function AssetLibraryPage() {
             <div className="key-grid">
               <div><span>Original Topic</span><strong>{String(detail.pipeline_run.topic)}</strong></div>
               <div><span>Style Preset</span><strong>{String(detail.pipeline_run.style_preset)}</strong></div>
-              <div><span>Provider</span><strong>{String(detail.video.provider)}</strong></div>
+              <div><span>Provider</span><strong>{formatProvider(String(detail.video.provider))}</strong></div>
               <div><span>Quality Score</span><strong>{String(detail.video.quality_score ?? "n/a")}</strong></div>
-              <div><span>Run Status</span><strong>{String(detail.pipeline_run.status)}</strong></div>
-              <div><span>Video Status</span><strong>{String(detail.video.status)}</strong></div>
+              <div><span>Run Status</span><strong>{formatRunStatus(String(detail.pipeline_run.status))}</strong></div>
+              <div><span>Video Status</span><strong>{formatVideoStatus(String(detail.video.status))}</strong></div>
               <div><span>Manual Posting</span><strong>{String(detail.manual_post_package?.manual_posting_status ?? "not_posted")}</strong></div>
+            </div>
+            <div className="button-row">
+              <CopyButton text={String(detail.video_asset.public_url)} label="video URL" />
+              {detail.thumbnail_asset ? <CopyButton text={String(detail.thumbnail_asset.public_url)} label="thumbnail URL" /> : null}
             </div>
             {detail.idea ? (
               <div className="copy-block">
@@ -260,6 +265,31 @@ export function AssetLibraryPage() {
               </div>
               <pre>{String(detail.video.prompt_text)}</pre>
             </div>
+            <details className="technical-disclosure">
+              <summary>Show technical details</summary>
+              <div className="stack compact technical-stack">
+                <div className="copy-block">
+                  <div className="content-meta">
+                    <strong>Video URL</strong>
+                  </div>
+                  <pre>{String(detail.video_asset.public_url)}</pre>
+                </div>
+                {detail.thumbnail_asset ? (
+                  <div className="copy-block">
+                    <div className="content-meta">
+                      <strong>Thumbnail URL</strong>
+                    </div>
+                    <pre>{String(detail.thumbnail_asset.public_url)}</pre>
+                  </div>
+                ) : null}
+                <div className="copy-block">
+                  <div className="content-meta">
+                    <strong>Storage Keys</strong>
+                  </div>
+                  <pre>{`Video: ${String(detail.video_asset.storage_key)}${detail.thumbnail_asset ? `\nThumbnail: ${String(detail.thumbnail_asset.storage_key)}` : ""}`}</pre>
+                </div>
+              </div>
+            </details>
             {manualPackage ? (
               <div className="stack">
                 <div className="copy-block">
@@ -324,14 +354,17 @@ export function AssetLibraryPage() {
             {qualityCheck ? (
               <div className="panel inset">
                 <h3>Quality Checklist</h3>
-                <div className="quality-list">
-                  {qualityEntries.map(([key, value]) => (
-                    <div key={key} className={`quality-item ${Boolean(value) ? "pass" : "fail"}`}>
-                      <strong>{key.split("_").join(" ")}</strong>
-                      <span>{String(value)}</span>
-                    </div>
-                  ))}
-                </div>
+                <details className="technical-disclosure">
+                  <summary>Show technical quality details</summary>
+                  <div className="quality-list technical-stack">
+                    {qualityEntries.map(([key, value]) => (
+                      <div key={key} className={`quality-item ${Boolean(value) ? "pass" : "fail"}`}>
+                        <strong>{key.split("_").join(" ")}</strong>
+                        <span>{String(value)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </details>
               </div>
             ) : null}
             <div className="key-grid">

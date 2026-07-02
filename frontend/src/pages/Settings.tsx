@@ -84,7 +84,7 @@ export function SettingsPage() {
         <div>
           <p className="eyebrow">Settings</p>
           <h2>Brand Defaults</h2>
-          <p className="subtle">Set the reusable defaults that seed new ideas, new runs, critique guidance, and manual posting packages.</p>
+          <p className="subtle">Set the defaults used for new ideas, new runs, and posting copy.</p>
         </div>
         <div className="hero-actions">
           <button className="secondary" type="button" onClick={() => defaults ? applyConfig(defaults.account_config_json) : undefined}>

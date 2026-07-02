@@ -5,6 +5,7 @@ import { api, PipelineRunDetail, PipelineRunSummary } from "../api/client";
 import { ExportPackPanel } from "../components/ExportPackPanel";
 import { EventTimeline } from "../components/EventTimeline";
 import { normalizeQualityChecklist } from "../qualityChecklist";
+import { formatProvider, formatRunStatus, formatVideoStatus } from "../utils/display";
 
 const videoProvider = import.meta.env.VITE_VIDEO_PROVIDER ?? "mock";
 const storageProvider = import.meta.env.VITE_STORAGE_PROVIDER ?? "local";
@@ -152,7 +153,10 @@ export function VideoReviewPage() {
     <div className="page stack">
       <section className="page-header-card panel">
         <div className="panel-header">
-          <h2>Video Review</h2>
+          <div>
+            <p className="eyebrow">Video Review</p>
+            <h2>Review the generated explainer and posting package.</h2>
+          </div>
           <div className="panel-actions">
             <span className="status-pill success">{badgeLabel}</span>
             <select value={selectedRunId} onChange={(event) => setSelectedRunId(event.target.value)}>
@@ -168,8 +172,8 @@ export function VideoReviewPage() {
         {video ? (
           <div className="key-grid">
             <div><span>Topic</span><strong>{String(run?.topic ?? "")}</strong></div>
-            <div><span>Status</span><strong>{String(video.status)}</strong></div>
-            <div><span>Provider</span><strong>{generatedProvider}</strong></div>
+            <div><span>Status</span><strong>{formatVideoStatus(String(video.status))}</strong></div>
+            <div><span>Provider</span><strong>{formatProvider(generatedProvider)}</strong></div>
             <div><span>Quality Score</span><strong>{String(latestQualityCheck?.score ?? "n/a")}</strong></div>
           </div>
         ) : null}
@@ -192,11 +196,10 @@ export function VideoReviewPage() {
                 </div>
               </div>
               <div className="key-grid">
-                <div><span>Status</span><strong>{String(video.status)}</strong></div>
-                <div><span>Provider</span><strong>{String(video.provider)}</strong></div>
+                <div><span>Status</span><strong>{formatVideoStatus(String(video.status))}</strong></div>
+                <div><span>Provider</span><strong>{formatProvider(String(video.provider))}</strong></div>
                 <div><span>Duration</span><strong>{String(video.duration_seconds)}s</strong></div>
-                <div><span>Requested</span><strong>{String(video.requested_duration_seconds ?? "n/a")}s</strong></div>
-                <div><span>Run Status</span><strong>{String(run?.status ?? "")}</strong></div>
+                <div><span>Run Status</span><strong>{formatRunStatus(String(run?.status ?? ""))}</strong></div>
               </div>
               <p className="subtle">Generated with {generatedProvider}, stored in {generatedStorage.toUpperCase()}.</p>
               <p><strong>Review Notes:</strong> {String(video.review_notes ?? run?.review_notes ?? "No review notes yet.")}</p>
@@ -210,12 +213,14 @@ export function VideoReviewPage() {
 
             {videoAsset ? (
               <div className="panel inset feature-video">
-                <div className="panel-header">
-                  <h3>Generated Video</h3>
-                  <span className="subtle">{String(videoAsset.public_url)}</span>
+              <div className="panel-header">
+                <h3>Generated Video</h3>
+                <div className="button-row">
+                  <CopyButton text={String(videoAsset.public_url)} label="video URL" />
                 </div>
-                <video
-                  className="video-player large"
+              </div>
+              <video
+                className="video-player large"
                   controls
                   preload="metadata"
                   poster={thumbnailAsset ? String(thumbnailAsset.public_url) : undefined}
@@ -232,12 +237,14 @@ export function VideoReviewPage() {
                 {videoAsset ? (
                   <div className="content-card">
                     <div className="content-meta">
-                      <strong>Video MP4</strong>
+                      <strong>Video</strong>
                       <span>{String(videoAsset.mime_type)}</span>
                     </div>
-                    <p><strong>Storage Key:</strong> {String(videoAsset.storage_key)}</p>
                     <p><strong>Dimensions:</strong> {String(videoAsset.width)} x {String(videoAsset.height)}</p>
                     <p><strong>Duration:</strong> {String(videoAsset.duration_seconds)}s</p>
+                    <div className="button-row">
+                      <CopyButton text={String(videoAsset.public_url)} label="video URL" />
+                    </div>
                   </div>
                 ) : null}
                 {thumbnailAsset ? (
@@ -246,27 +253,47 @@ export function VideoReviewPage() {
                       <strong>Thumbnail</strong>
                       <span>{String(thumbnailAsset.mime_type)}</span>
                     </div>
-                    <p><strong>Storage Key:</strong> {String(thumbnailAsset.storage_key)}</p>
-                    <p><strong>URL:</strong> {String(thumbnailAsset.public_url)}</p>
+                    <div className="button-row">
+                      <CopyButton text={String(thumbnailAsset.public_url)} label="thumbnail URL" />
+                    </div>
                   </div>
                 ) : null}
               </div>
+              <details className="technical-disclosure">
+                <summary>Show technical asset details</summary>
+                <div className="stack compact technical-stack">
+                  {videoAsset ? (
+                    <div className="copy-block">
+                      <strong>Video asset</strong>
+                      <pre>{`URL: ${String(videoAsset.public_url)}\nStorage key: ${String(videoAsset.storage_key)}`}</pre>
+                    </div>
+                  ) : null}
+                  {thumbnailAsset ? (
+                    <div className="copy-block">
+                      <strong>Thumbnail asset</strong>
+                      <pre>{`URL: ${String(thumbnailAsset.public_url)}\nStorage key: ${String(thumbnailAsset.storage_key)}`}</pre>
+                    </div>
+                  ) : null}
+                </div>
+              </details>
             </div>
 
             <div className="panel inset">
-              <div className="panel-header">
-                <h3>Final Prompt</h3>
-                <div className="button-row">
-                  <CopyButton text={promptText} label="prompt" />
-                  {promptText.length > promptPreview.length ? (
-                    <button className="secondary" type="button" onClick={() => setShowFullPrompt((current) => !current)}>
-                      {showFullPrompt ? "Hide full prompt" : "Show full prompt"}
-                    </button>
-                  ) : null}
+              <details className="technical-disclosure">
+                <summary>Show final prompt</summary>
+                <div className="panel-header technical-panel-header">
+                  <h3>Final Prompt</h3>
+                  <div className="button-row">
+                    <CopyButton text={promptText} label="prompt" />
+                    {promptText.length > promptPreview.length ? (
+                      <button className="secondary" type="button" onClick={() => setShowFullPrompt((current) => !current)}>
+                        {showFullPrompt ? "Hide full prompt" : "Show full prompt"}
+                      </button>
+                    ) : null}
+                  </div>
                 </div>
-              </div>
-              <p className="subtle">Preview the saved final prompt without letting a long prompt overwhelm the review page.</p>
-              <pre className="preview-block">{showFullPrompt ? promptText : promptPreview}</pre>
+                <pre className="preview-block">{showFullPrompt ? promptText : promptPreview}</pre>
+              </details>
             </div>
 
             <div className="panel inset">
@@ -276,21 +303,28 @@ export function VideoReviewPage() {
                   <div className="key-grid">
                     <div><span>Result</span><strong>{latestQualityCheck.passed ? "Pass" : "Fail"}</strong></div>
                     <div><span>Score</span><strong>{String(latestQualityCheck.score)}</strong></div>
-                    <div><span>Requested</span><strong>{String(durationInfo.requested ?? "n/a")}s</strong></div>
-                    <div><span>Actual</span><strong>{String(durationInfo.actual ?? "n/a")}s</strong></div>
                   </div>
                   <p>{String(latestQualityCheck.llm_critique)}</p>
-                  <div className="quality-list">
-                    {qualityChecklist.map(([key, value]) => {
-                      const passed = Boolean(value);
-                      return (
-                        <div key={key} className={`quality-item ${passed ? "pass" : "fail"}`}>
-                          <strong>{key.split("_").join(" ")}</strong>
-                          <span>{passed ? "Pass" : "Fail"}</span>
-                        </div>
-                      );
-                    })}
-                  </div>
+                  <details className="technical-disclosure">
+                    <summary>Show detailed quality checklist</summary>
+                    <div className="stack compact technical-stack">
+                      <div className="key-grid">
+                        <div><span>Requested</span><strong>{String(durationInfo.requested ?? "n/a")}s</strong></div>
+                        <div><span>Actual</span><strong>{String(durationInfo.actual ?? "n/a")}s</strong></div>
+                      </div>
+                      <div className="quality-list">
+                        {qualityChecklist.map(([key, value]) => {
+                          const passed = Boolean(value);
+                          return (
+                            <div key={key} className={`quality-item ${passed ? "pass" : "fail"}`}>
+                              <strong>{key.split("_").join(" ")}</strong>
+                              <span>{passed ? "Pass" : "Fail"}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </details>
                 </div>
               ) : (
                 <p className="subtle">No quality check found for this run.</p>
@@ -373,7 +407,7 @@ export function VideoReviewPage() {
           <p className="subtle">Resume a run from the dashboard to generate the video and review package.</p>
         )}
       </section>
-      <EventTimeline events={detail?.pipeline_events ?? []} />
+      <EventTimeline events={detail?.pipeline_events ?? []} summary="Show technical timeline" />
       </div>
     </div>
   );

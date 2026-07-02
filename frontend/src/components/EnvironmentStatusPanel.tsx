@@ -2,7 +2,11 @@ import { useEffect, useState } from "react";
 
 import { api, HealthDetails } from "../api/client";
 
-export function EnvironmentStatusPanel() {
+type Props = {
+  showAccessNote?: boolean;
+};
+
+export function EnvironmentStatusPanel({ showAccessNote = false }: Props) {
   const [details, setDetails] = useState<HealthDetails | null>(null);
   const [error, setError] = useState<string>("");
   const [isLoading, setIsLoading] = useState(true);
@@ -55,6 +59,12 @@ export function EnvironmentStatusPanel() {
             <div className="notice-card warning">
               <strong>Runway mode enabled</strong>
               <p>Resuming eligible runs can spend real provider credits.</p>
+            </div>
+          ) : null}
+          {showAccessNote && details.auth_enabled ? (
+            <div className="notice-card">
+              <strong>Private access enabled</strong>
+              <p>The lightweight staging access gate is active.</p>
             </div>
           ) : null}
           <p className="subtle env-footnote">

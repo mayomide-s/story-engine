@@ -220,7 +220,10 @@ export function IdeasPage() {
     <div className="page stack">
       <section className="panel">
         <div className="panel-header">
-          <h2>Ideas And Story Structure</h2>
+          <div>
+            <p className="eyebrow">Ideas</p>
+            <h2>Shape the story before generating the video.</h2>
+          </div>
           <div className="panel-actions">
             {selectedRunId ? <Link className="inline-link" to={`/review?run=${selectedRunId}`}>Go To Video Review</Link> : null}
             <select value={selectedRunId} onChange={(event) => setSelectedRunId(event.target.value)}>
