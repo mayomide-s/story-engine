@@ -188,7 +188,10 @@ export default function App() {
         </div>
         <div className="sidebar-footer">
           <details className="sidebar-diagnostics">
-            <summary>Diagnostics</summary>
+            <summary>
+              <span className="nav-icon">D</span>
+              <span className="nav-label">Diagnostics</span>
+            </summary>
             <EnvironmentStatusPanel showAccessNote={accessStatus.auth_enabled} />
           </details>
           {accessStatus.auth_enabled ? (

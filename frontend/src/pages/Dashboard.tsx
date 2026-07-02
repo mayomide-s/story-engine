@@ -219,7 +219,6 @@ export function DashboardPage() {
   const lowPreflight = Boolean(preflight?.low_score_warning);
   const canResume = runStatus === "awaiting_review";
   const canCancel = ["queued", "running", "awaiting_review", "needs_review"].includes(runStatus);
-  const defaultConfig = defaults?.account_config_json;
 
   const nextAction = useMemo(() => {
     if (!selectedRunId) {
@@ -266,11 +265,11 @@ export function DashboardPage() {
           </div>
         </section>
       ) : null}
-      <section className="panel">
+      <section className="panel create-run-panel">
         <div className="panel-header">
           <h2>Create Run</h2>
           <div className="button-row">
-            <button className="secondary" type="button" onClick={() => defaultConfig ? applyDefaults(defaultConfig) : undefined}>
+            <button className="secondary" type="button" onClick={() => defaults ? applyDefaults(defaults.account_config_json) : undefined}>
               Reset To Defaults
             </button>
             <button onClick={handleCreateRun}>Create Run</button>
@@ -333,14 +332,6 @@ export function DashboardPage() {
             </div>
           </div>
         </div>
-        {defaultConfig ? (
-          <details className="technical-disclosure inline-technical">
-            <summary>Applied defaults</summary>
-            <p className="subtle">
-              {defaultConfig.default_style_preset} | {defaultConfig.target_platforms.join(", ")} | {defaultConfig.default_caption_tone} | {defaultConfig.default_audience_level} | {defaultConfig.default_content_format} | {defaultConfig.default_duration_seconds}s
-            </p>
-          </details>
-        ) : null}
       </section>
       {error ? <p className="error">{error}</p> : null}
       <div className="dashboard-grid">
@@ -423,7 +414,7 @@ export function DashboardPage() {
                   </div>
                 ) : null}
                 <div className="link-row">
-                  <Link className="inline-link" to={`/ideas?run=${selectedRunId}`}>Open Ideas</Link>
+                  {runStatus !== "awaiting_review" ? <Link className="inline-link" to={`/ideas?run=${selectedRunId}`}>Open Ideas</Link> : null}
                   <Link className="inline-link" to={`/review?run=${selectedRunId}`}>Open Video Review</Link>
                 </div>
               </div>

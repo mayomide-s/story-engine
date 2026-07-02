@@ -221,9 +221,6 @@ pre {
 }
 
 .sidebar-diagnostics {
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.04);
   overflow: hidden;
 }
 
@@ -235,19 +232,23 @@ pre {
 }
 
 .sidebar-diagnostics summary {
-  padding: 0.8rem 0.9rem;
-  color: #E2E8F0;
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.45rem 0.2rem;
+  color: #94A3B8;
+  font-size: 0.88rem;
+  font-weight: 600;
 }
 
 .sidebar-diagnostics[open] summary {
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  margin-bottom: 0.5rem;
 }
 
 .sidebar-diagnostics .env-panel {
   margin: 0;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.03);
   box-shadow: none;
 }
 
@@ -605,6 +606,12 @@ pre {
   text-transform: uppercase;
 }
 
+.nav a .nav-icon,
+.sidebar-logout .nav-icon,
+.sidebar-diagnostics summary .nav-icon {
+  display: none;
+}
+
 .form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -613,7 +620,7 @@ pre {
 
 .field {
   display: grid;
-  gap: 0.4rem;
+  gap: 0.3rem;
 }
 
 .field-wide {
@@ -762,13 +769,35 @@ pre {
   gap: 0.65rem;
 }
 
-.inline-technical {
-  margin-top: 0.75rem;
-}
-
 .error,
 .error-text {
   color: #DC2626;
+}
+
+.create-run-panel {
+  padding: 0.85rem;
+}
+
+.create-run-panel .panel-header {
+  margin-bottom: 0.15rem;
+}
+
+.create-run-panel .form-grid {
+  gap: 0.75rem;
+}
+
+.create-run-panel input,
+.create-run-panel select,
+.create-run-panel textarea {
+  padding: 0.6rem 0.75rem;
+}
+
+.create-run-panel .toggle-row {
+  gap: 0.45rem;
+}
+
+.create-run-panel .toggle-chip {
+  padding: 0.45rem 0.65rem;
 }
 
 .app-shell.sidebar-collapsed .sidebar {
@@ -802,6 +831,12 @@ pre {
 .app-shell.sidebar-collapsed .sidebar-logout {
   justify-content: center;
   padding-inline: 0.65rem;
+}
+
+.app-shell.sidebar-collapsed .nav a .nav-icon,
+.app-shell.sidebar-collapsed .sidebar-logout .nav-icon,
+.app-shell.sidebar-collapsed .sidebar-diagnostics summary .nav-icon {
+  display: inline-flex;
 }
 
 .app-shell.sidebar-collapsed .sidebar-diagnostics {
@@ -854,6 +889,12 @@ pre {
   .env-panel .subtle,
   .env-footnote {
     display: initial;
+  }
+
+  .nav a .nav-icon,
+  .sidebar-logout .nav-icon,
+  .sidebar-diagnostics summary .nav-icon {
+    display: none;
   }
 
   .content {
