@@ -432,6 +432,15 @@ pre {
   max-height: 620px;
 }
 
+.batch-topic-grid {
+  display: grid;
+  gap: 1rem;
+}
+
+.batch-topic-card {
+  background: #FFFFFF;
+}
+
 .scroll-panel-box {
   overflow: hidden;
 }

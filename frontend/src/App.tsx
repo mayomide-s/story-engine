@@ -6,6 +6,7 @@ import { EnvironmentStatusPanel } from "./components/EnvironmentStatusPanel";
 import { DashboardPage } from "./pages/Dashboard";
 import { AssetLibraryPage } from "./pages/AssetLibrary";
 import { ContentOpsPage } from "./pages/ContentOps";
+import { BatchPlannerPage } from "./pages/BatchPlanner";
 import { IdeaQueuePage } from "./pages/IdeaQueue";
 import { IdeasPage } from "./pages/Ideas";
 import { SettingsPage } from "./pages/Settings";
@@ -173,6 +174,10 @@ export default function App() {
               <span className="nav-icon">A</span>
               <span className="nav-label">Asset Library</span>
             </NavLink>
+            <NavLink to="/app/batch-planner" title="Batch Planner">
+              <span className="nav-icon">B</span>
+              <span className="nav-label">Batch Planner</span>
+            </NavLink>
             <NavLink to="/app/content-ops" title="Content Ops">
               <span className="nav-icon">C</span>
               <span className="nav-label">Content Ops</span>
@@ -212,6 +217,7 @@ export default function App() {
           <Route path="/" element={<DashboardPage />} />
           <Route path="/queue" element={<IdeaQueuePage />} />
           <Route path="/assets" element={<AssetLibraryPage />} />
+          <Route path="/app/batch-planner" element={<BatchPlannerPage />} />
           <Route path="/app/content-ops" element={<ContentOpsPage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/ideas" element={<IdeasPage />} />

@@ -5,6 +5,7 @@ import { api, AccountDefaults, HealthDetails, PipelineRunDetail, PipelineRunSumm
 import { EventTimeline } from "../components/EventTimeline";
 import { RunList } from "../components/RunList";
 import { AUDIENCE_LEVELS, CONTENT_FORMATS, STYLE_PRESETS, TARGET_PLATFORMS } from "../constants";
+import { clearDashboardPrefill, loadDashboardPrefill } from "../utils/batchPlanner";
 import { formatProvider, formatRunStatus, formatStage } from "../utils/display";
 
 const videoProvider = import.meta.env.VITE_VIDEO_PROVIDER ?? "mock";
@@ -129,6 +130,21 @@ export function DashboardPage() {
     }).catch((err) => setError(err.message));
     api.getHealthDetails().then(setHealthDetails).catch(() => undefined);
     loadRuns().catch((err) => setError(err.message));
+  }, []);
+
+  useEffect(() => {
+    const prefill = loadDashboardPrefill();
+    if (!prefill) {
+      return;
+    }
+    setTopic(prefill.topic);
+    if (prefill.audienceLevel) {
+      setAudienceLevel(prefill.audienceLevel);
+    }
+    if (prefill.contentFormat) {
+      setContentFormat(prefill.contentFormat);
+    }
+    clearDashboardPrefill();
   }, []);
 
   useEffect(() => {
