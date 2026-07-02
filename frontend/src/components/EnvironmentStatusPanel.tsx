@@ -2,18 +2,6 @@ import { useEffect, useState } from "react";
 
 import { api, HealthDetails } from "../api/client";
 
-function CheckRow({ label, status, detail }: { label: string; status: string; detail: string }) {
-  return (
-    <div className="env-check-row">
-      <div>
-        <strong>{label}</strong>
-        <p className="subtle">{detail}</p>
-      </div>
-      <span className={`status-pill ${status === "ok" ? "success" : "warning"}`}>{status}</span>
-    </div>
-  );
-}
-
 export function EnvironmentStatusPanel() {
   const [details, setDetails] = useState<HealthDetails | null>(null);
   const [error, setError] = useState<string>("");
@@ -58,19 +46,20 @@ export function EnvironmentStatusPanel() {
             <div className="env-chip"><span>Storage</span><strong>{details.storage_provider}</strong></div>
             <div className="env-chip"><span>R2 URL</span><strong>{details.r2_public_base_url_configured ? "configured" : "missing"}</strong></div>
           </div>
+          <div className="status-chip-row env-status-row">
+            <span className={`status-pill ${details.checks.database.status === "ok" ? "success" : "warning"}`}>DB {details.checks.database.status}</span>
+            <span className={`status-pill ${details.checks.redis.status === "ok" ? "success" : "warning"}`}>Redis {details.checks.redis.status}</span>
+            <span className={`status-pill ${details.checks.storage.status === "ok" ? "success" : "warning"}`}>Storage {details.checks.storage.status}</span>
+          </div>
           {details.runway_mode_enabled ? (
             <div className="notice-card warning">
               <strong>Runway mode enabled</strong>
               <p>Resuming eligible runs can spend real provider credits.</p>
             </div>
           ) : null}
-          <div className="stack compact">
-            <CheckRow label="Configuration" status={details.checks.configuration.status} detail={details.checks.configuration.detail} />
-            <CheckRow label="Database" status={details.checks.database.status} detail={details.checks.database.detail} />
-            <CheckRow label="Redis" status={details.checks.redis.status} detail={details.checks.redis.detail} />
-            <CheckRow label="Storage" status={details.checks.storage.status} detail={details.checks.storage.detail} />
-            <CheckRow label="Video Provider" status={details.checks.video_provider.status} detail={details.checks.video_provider.detail} />
-          </div>
+          <p className="subtle env-footnote">
+            Config: {details.checks.configuration.status} | Provider: {details.checks.video_provider.status}
+          </p>
         </div>
       ) : null}
     </section>

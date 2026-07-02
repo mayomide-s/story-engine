@@ -10,12 +10,20 @@ import { IdeasPage } from "./pages/Ideas";
 import { SettingsPage } from "./pages/Settings";
 import { VideoReviewPage } from "./pages/VideoReview";
 
+const SIDEBAR_COLLAPSED_STORAGE_KEY = "story-engine-sidebar-collapsed";
+
 export default function App() {
   const [accessStatus, setAccessStatus] = useState<AccessStatus | null>(null);
   const [password, setPassword] = useState("");
   const [isCheckingAccess, setIsCheckingAccess] = useState(true);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [accessError, setAccessError] = useState("");
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    if (typeof window === "undefined") {
+      return false;
+    }
+    return window.localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY) === "true";
+  });
 
   async function refreshAccessStatus() {
     try {
@@ -43,6 +51,13 @@ export default function App() {
     window.addEventListener("app-access-expired", handleAccessExpired);
     return () => window.removeEventListener("app-access-expired", handleAccessExpired);
   }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    window.localStorage.setItem(SIDEBAR_COLLAPSED_STORAGE_KEY, String(sidebarCollapsed));
+  }, [sidebarCollapsed]);
 
   async function handleLogin(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -122,30 +137,67 @@ export default function App() {
   }
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
       <aside className="sidebar">
-        <div className="sidebar-brand">
-          <p className="eyebrow">CodeToons AI</p>
-          <h1>Story Engine</h1>
-          <p className="subtle">Topic in. Animated video out.</p>
+        <div className="sidebar-top">
+          <div className="sidebar-brand">
+            <div className="sidebar-brand-row">
+              <div>
+                <p className="eyebrow brand-eyebrow">CodeToons AI</p>
+                <h1 className="brand-full">Story Engine</h1>
+                <h1 className="brand-short">CT</h1>
+              </div>
+              <button
+                className="sidebar-toggle"
+                type="button"
+                onClick={() => setSidebarCollapsed((current) => !current)}
+                aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+                title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+              >
+                {sidebarCollapsed ? ">" : "<"}
+              </button>
+            </div>
+            <p className="subtle brand-tagline">Topic in. Animated video out.</p>
+          </div>
+          <nav className="nav">
+            <NavLink to="/" title="Dashboard">
+              <span className="nav-icon">D</span>
+              <span className="nav-label">Dashboard</span>
+            </NavLink>
+            <NavLink to="/queue" title="Idea Queue">
+              <span className="nav-icon">Q</span>
+              <span className="nav-label">Idea Queue</span>
+            </NavLink>
+            <NavLink to="/assets" title="Asset Library">
+              <span className="nav-icon">A</span>
+              <span className="nav-label">Asset Library</span>
+            </NavLink>
+            <NavLink to="/settings" title="Settings">
+              <span className="nav-icon">S</span>
+              <span className="nav-label">Settings</span>
+            </NavLink>
+            <NavLink to="/ideas" title="Ideas">
+              <span className="nav-icon">I</span>
+              <span className="nav-label">Ideas</span>
+            </NavLink>
+            <NavLink to="/review" title="Video Review">
+              <span className="nav-icon">V</span>
+              <span className="nav-label">Video Review</span>
+            </NavLink>
+          </nav>
         </div>
-        <nav className="nav">
-          <NavLink to="/">Dashboard</NavLink>
-          <NavLink to="/queue">Idea Queue</NavLink>
-          <NavLink to="/assets">Asset Library</NavLink>
-          <NavLink to="/settings">Settings</NavLink>
-          <NavLink to="/ideas">Ideas</NavLink>
-          <NavLink to="/review">Video Review</NavLink>
-        </nav>
         <div className="sidebar-footer">
           <EnvironmentStatusPanel />
           {accessStatus.auth_enabled ? (
-            <div className="stack compact">
+            <div className="stack compact sidebar-access-card">
               <div className="notice-card">
                 <strong>Private access enabled</strong>
                 <p>You are using the lightweight staging access gate.</p>
               </div>
-              <button className="secondary" type="button" onClick={handleLogout}>Logout</button>
+              <button className="secondary" type="button" onClick={handleLogout} title="Logout">
+                <span className="nav-icon">L</span>
+                <span className="nav-label">Logout</span>
+              </button>
             </div>
           ) : null}
         </div>
