@@ -8,6 +8,8 @@ import { AUDIENCE_LEVELS, CONTENT_FORMATS, STYLE_PRESETS, TARGET_PLATFORMS } fro
 
 const videoProvider = import.meta.env.VITE_VIDEO_PROVIDER ?? "mock";
 const storageProvider = import.meta.env.VITE_STORAGE_PROVIDER ?? "local";
+const GOLDEN_DEMO_VIDEO_KEY = "videos/30ea2e8e-780a-471b-b85e-80ff8d84fe51.mp4";
+const GOLDEN_DEMO_THUMBNAIL_KEY = "thumbnails/30ea2e8e-780a-471b-b85e-80ff8d84fe51.jpg";
 
 function toFriendlyResumeError(error: unknown) {
   const message = error instanceof Error ? error.message : "Failed to resume run.";
@@ -15,6 +17,16 @@ function toFriendlyResumeError(error: unknown) {
     return "Tick the paid Runway confirmation checkbox, then use Resume with paid Runway generation.";
   }
   return message;
+}
+
+function formatQualityScore(value: unknown) {
+  const score = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(score) ? score.toFixed(2) : "n/a";
+}
+
+function formatDuration(value: unknown) {
+  const seconds = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(seconds) ? `${seconds}s` : "n/a";
 }
 
 export function DashboardPage() {
@@ -29,10 +41,12 @@ export function DashboardPage() {
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [detail, setDetail] = useState<PipelineRunDetail | null>(null);
   const [healthDetails, setHealthDetails] = useState<HealthDetails | null>(null);
+  const [featuredDemo, setFeaturedDemo] = useState<PipelineRunDetail | null>(null);
   const [defaults, setDefaults] = useState<AccountDefaults | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isResuming, setIsResuming] = useState(false);
   const [paidRunwayConfirmed, setPaidRunwayConfirmed] = useState(false);
+  const [captionPackageCopied, setCaptionPackageCopied] = useState(false);
 
   function applyDefaults(config: AccountDefaults["account_config_json"]) {
     setStylePreset(String(config.default_style_preset ?? "clean_3d_cartoon"));
@@ -59,11 +73,52 @@ export function DashboardPage() {
     if (!selectedRunId && data.length > 0) {
       setSelectedRunId(data[0].id);
     }
+    await loadFeaturedDemo(data);
   }
 
   async function loadDetail(runId: string) {
     const data = await api.getRun(runId);
     setDetail(data);
+  }
+
+  async function loadFeaturedDemo(runList: PipelineRunSummary[]) {
+    const candidates = runList
+      .filter((run) => run.status === "completed" || run.video_status === "approved" || run.video_status === "completed")
+      .sort((left, right) => new Date(right.created_at).getTime() - new Date(left.created_at).getTime());
+
+    if (candidates.length === 0) {
+      setFeaturedDemo(null);
+      return;
+    }
+
+    let fallback: PipelineRunDetail | null = null;
+    for (const candidate of candidates) {
+      try {
+        const payload = await api.getRun(candidate.id);
+        const assets = payload.assets ?? [];
+        const videoAsset = assets.find((asset) => asset.asset_type === "video_mp4");
+        const thumbnailAsset = assets.find((asset) => asset.asset_type === "thumbnail");
+        const video = payload.video as Record<string, unknown> | null;
+        const run = payload.pipeline_run as Record<string, unknown> | null;
+        const videoStatus = String(video?.status ?? "");
+        const provider = String(video?.provider ?? candidate.provider ?? "");
+        const videoStorageKey = String(videoAsset?.storage_key ?? "");
+        const thumbnailStorageKey = String(thumbnailAsset?.storage_key ?? "");
+
+        if (videoStorageKey === GOLDEN_DEMO_VIDEO_KEY || thumbnailStorageKey === GOLDEN_DEMO_THUMBNAIL_KEY) {
+          setFeaturedDemo(payload);
+          return;
+        }
+
+        if (!fallback && provider === "runway" && videoAsset && ["approved", "completed"].includes(videoStatus) && String(run?.status ?? "") === "completed") {
+          fallback = payload;
+        }
+      } catch {
+        // ignore demo candidate failures
+      }
+    }
+
+    setFeaturedDemo(fallback);
   }
 
   useEffect(() => {
@@ -132,6 +187,26 @@ export function DashboardPage() {
     }
   }
 
+  async function handleCopyCaptionPackage() {
+    if (!featuredDemo?.manual_post_package) {
+      return;
+    }
+    const manualPackage = featuredDemo.manual_post_package as Record<string, unknown>;
+    const caption = String(manualPackage.caption ?? "");
+    const hashtags = Array.isArray(manualPackage.hashtags_json) ? manualPackage.hashtags_json.join(" ") : "";
+    const packageText = [caption, hashtags].filter(Boolean).join("\n\n");
+    if (!packageText) {
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(packageText);
+      setCaptionPackageCopied(true);
+      window.setTimeout(() => setCaptionPackageCopied(false), 1500);
+    } catch {
+      setCaptionPackageCopied(false);
+    }
+  }
+
   const run = detail?.pipeline_run as Record<string, unknown> | null;
   const video = detail?.video as Record<string, unknown> | null;
   const runStatus = typeof run?.status === "string" ? run.status : "";
@@ -139,6 +214,9 @@ export function DashboardPage() {
   const activeStorageProvider = healthDetails?.storage_provider ?? storageProvider;
   const providerBadge = `${activeVideoProvider}/${activeStorageProvider.toUpperCase()}`;
   const isRunwayMode = activeVideoProvider === "runway" && Boolean(healthDetails?.runway_mode_enabled);
+  const environmentLabel = isRunwayMode
+    ? `Current environment: ${activeVideoProvider}/${activeStorageProvider.toUpperCase()} paid mode`
+    : `Current environment: ${activeVideoProvider}/${activeStorageProvider.toUpperCase()} safe mode`;
   const preflight = detail?.review_preflight ?? null;
   const preflightPromptTooLong = Boolean(preflight?.prompt_length?.too_long);
   const preflightPromptInvalid = preflight?.prompt_valid === false;
@@ -162,6 +240,9 @@ export function DashboardPage() {
     }
     return null;
   }, [runStatus, selectedRunId]);
+  const featuredRun = featuredDemo?.pipeline_run as Record<string, unknown> | null;
+  const featuredVideo = featuredDemo?.video as Record<string, unknown> | null;
+  const featuredQualityCheck = featuredDemo?.quality_checks?.[featuredDemo.quality_checks.length - 1] as Record<string, unknown> | undefined;
 
   return (
     <div className="page">
@@ -173,10 +254,7 @@ export function DashboardPage() {
             <span className={`status-pill ${isRunwayMode ? "warning" : "success"}`}>{providerBadge}</span>
           </div>
           <p className="subtle">The first slice pauses after storyboard review so you can fix ideas before spending video credits.</p>
-          <p className="subtle">
-            Active video provider: <strong>{activeVideoProvider}</strong>
-            {isRunwayMode ? " - Paid Runway generation mode." : " - Safe mock generation mode."}
-          </p>
+          <p className="subtle">{environmentLabel}</p>
           <p className="subtle">
             Brand defaults come from Settings and can be overridden per run before creation.
             {" "}
@@ -184,6 +262,30 @@ export function DashboardPage() {
           </p>
         </div>
       </section>
+      {featuredDemo && featuredRun && featuredVideo ? (
+        <section className="panel featured-demo-card">
+          <div className="panel-header">
+            <div>
+              <p className="eyebrow">Featured Demo</p>
+              <h2>{String(featuredRun.topic ?? "CORS")}</h2>
+            </div>
+            <span className="status-pill success">Runway / R2</span>
+          </div>
+          <div className="key-grid">
+            <div><span>Provider</span><strong>{String(featuredVideo.provider ?? "runway")}</strong></div>
+            <div><span>Duration</span><strong>{formatDuration(featuredVideo.duration_seconds)}</strong></div>
+            <div><span>Quality Score</span><strong>{formatQualityScore(featuredQualityCheck?.score)}</strong></div>
+            <div><span>Status</span><strong>{String(featuredRun.status ?? "completed")} / {String(featuredVideo.status ?? "approved")}</strong></div>
+          </div>
+          <p className="subtle">Golden demo path for Story Engine: completed CORS mini-story, generated with Runway and stored in R2.</p>
+          <div className="button-row">
+            <Link className="inline-link" to={`/review?run=${String(featuredRun.id)}`}>Watch / Open Review</Link>
+            <button className="secondary" type="button" onClick={handleCopyCaptionPackage} disabled={!featuredDemo.manual_post_package}>
+              {captionPackageCopied ? "Caption package copied" : "Copy Caption Package"}
+            </button>
+          </div>
+        </section>
+      ) : null}
       <section className="panel">
         <div className="panel-header">
           <h2>Create Run</h2>

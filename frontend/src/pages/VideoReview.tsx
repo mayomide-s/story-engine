@@ -20,6 +20,24 @@ function pickPreferredRunId(runs: PipelineRunSummary[]) {
   return preferredRun?.id ?? "";
 }
 
+function inferStorageLabel(publicUrl: unknown, fallback: string) {
+  const url = String(publicUrl ?? "");
+  if (url.includes("r2.dev") || url.includes(".r2.")) {
+    return "r2";
+  }
+  if (url.includes("/assets/")) {
+    return "local";
+  }
+  return fallback;
+}
+
+function buildPromptPreview(prompt: string) {
+  if (prompt.length <= 240) {
+    return prompt;
+  }
+  return `${prompt.slice(0, 240).trim()}...`;
+}
+
 function CopyButton({ text, label }: { text: string; label: string }) {
   const [copied, setCopied] = useState(false);
 
@@ -47,6 +65,7 @@ export function VideoReviewPage() {
   const [detail, setDetail] = useState<PipelineRunDetail | null>(null);
   const [error, setError] = useState<string>("");
   const [isRechecking, setIsRechecking] = useState(false);
+  const [showFullPrompt, setShowFullPrompt] = useState(false);
 
   useEffect(() => {
     const requestedRunId = searchParams.get("run");
@@ -67,6 +86,7 @@ export function VideoReviewPage() {
     if (selectedRunId) {
       api.getRun(selectedRunId).then(setDetail).catch((requestError: Error) => setError(requestError.message));
     }
+    setShowFullPrompt(false);
   }, [selectedRunId]);
 
   async function refreshDetail() {
@@ -98,7 +118,11 @@ export function VideoReviewPage() {
     video &&
     (String(run?.status ?? "") === "needs_review" || String(video.status ?? "") === "rejected"),
   );
-  const badgeLabel = `${videoProvider}/${storageProvider.toUpperCase()}`;
+  const generatedProvider = String(video?.provider ?? videoProvider);
+  const generatedStorage = inferStorageLabel(videoAsset?.public_url, storageProvider);
+  const badgeLabel = `${generatedProvider}/${generatedStorage.toUpperCase()}`;
+  const promptText = String(video?.prompt_text ?? "");
+  const promptPreview = buildPromptPreview(promptText);
 
   async function handleRecheck() {
     if (!selectedRunId) {
@@ -163,7 +187,7 @@ export function VideoReviewPage() {
                 <div><span>Requested</span><strong>{String(video.requested_duration_seconds ?? "n/a")}s</strong></div>
                 <div><span>Run Status</span><strong>{String(run?.status ?? "")}</strong></div>
               </div>
-              <p className="subtle">{String(video.prompt_text)}</p>
+              <p className="subtle">Generated with {generatedProvider}, stored in {generatedStorage.toUpperCase()}.</p>
               <p><strong>Review Notes:</strong> {String(video.review_notes ?? run?.review_notes ?? "No review notes yet.")}</p>
               {run?.error_message ? (
                 <div className="notice-card danger">
@@ -216,6 +240,22 @@ export function VideoReviewPage() {
                   </div>
                 ) : null}
               </div>
+            </div>
+
+            <div className="panel inset">
+              <div className="panel-header">
+                <h3>Final Prompt</h3>
+                <div className="button-row">
+                  <CopyButton text={promptText} label="prompt" />
+                  {promptText.length > promptPreview.length ? (
+                    <button className="secondary" type="button" onClick={() => setShowFullPrompt((current) => !current)}>
+                      {showFullPrompt ? "Hide full prompt" : "Show full prompt"}
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+              <p className="subtle">Preview the saved final prompt without letting a long prompt overwhelm the review page.</p>
+              <pre className="preview-block">{showFullPrompt ? promptText : promptPreview}</pre>
             </div>
 
             <div className="panel inset">

@@ -270,6 +270,34 @@ Important:
 - it does not deploy, rebuild, back up data, restore data, modify `.env`, or enable Runway
 - it is intended to catch unsafe staging state before changes are made
 
+## Demo Readiness
+
+Run the demo check from `/opt/story-engine`:
+
+```bash
+bash scripts/vps-demo-readiness-check.sh
+```
+
+Run it:
+
+- before showing the app live
+- before recording a demo
+- before sharing staging with someone else
+
+What it checks:
+
+- the staging release checklist passes first
+- the app is still in safe `mock/r2` mode
+- the golden demo Runway video object exists in R2
+- the golden demo thumbnail object exists in R2
+- the R2 inventory still reports zero DB-referenced missing objects
+
+Important:
+
+- this check is read-only
+- it does not deploy, rebuild, enable Runway, or change `.env`
+- Runway should remain disabled unless you intentionally open a paid test window
+
 ## How To Confirm Safe Mock Mode
 
 Check `.env`:

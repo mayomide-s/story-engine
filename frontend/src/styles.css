@@ -475,6 +475,30 @@ pre {
   background: rgba(7, 12, 20, 0.55);
 }
 
+.run-group-collapse {
+  border: 1px dashed rgba(255, 255, 255, 0.12);
+  border-radius: 18px;
+  padding: 0.85rem 1rem;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.run-group-collapse summary {
+  cursor: pointer;
+  color: #b5c1d1;
+  font-weight: 700;
+}
+
+.run-group-collapse[open] summary {
+  margin-bottom: 0.9rem;
+}
+
+.featured-demo-card {
+  border-color: rgba(126, 224, 255, 0.24);
+  background:
+    linear-gradient(135deg, rgba(0, 180, 216, 0.12), rgba(255, 140, 66, 0.08)),
+    rgba(17, 24, 36, 0.82);
+}
+
 .steps-list {
   margin: 0;
   padding-left: 1.2rem;
