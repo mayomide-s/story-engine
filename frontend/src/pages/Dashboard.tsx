@@ -1,15 +1,22 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
-import { api, AccountDefaults, PipelineRunDetail, PipelineRunSummary } from "../api/client";
+import { api, AccountDefaults, HealthDetails, PipelineRunDetail, PipelineRunSummary } from "../api/client";
 import { EventTimeline } from "../components/EventTimeline";
 import { RunList } from "../components/RunList";
 import { AUDIENCE_LEVELS, CONTENT_FORMATS, STYLE_PRESETS, TARGET_PLATFORMS } from "../constants";
 
 const videoProvider = import.meta.env.VITE_VIDEO_PROVIDER ?? "mock";
 const storageProvider = import.meta.env.VITE_STORAGE_PROVIDER ?? "local";
-const providerBadge = `${videoProvider}/${storageProvider.toUpperCase()}`;
-const isRunwayMode = videoProvider === "runway";
+
+function toFriendlyResumeError(error: unknown) {
+  const message = error instanceof Error ? error.message : "Failed to resume run.";
+  if (message.includes("Runway generation requires explicit paid confirmation")) {
+    return "Tick the paid Runway confirmation checkbox, then use Resume with paid Runway generation.";
+  }
+  return message;
+}
+
 export function DashboardPage() {
   const [topic, setTopic] = useState("CORS");
   const [stylePreset, setStylePreset] = useState("clean_3d_cartoon");
@@ -21,9 +28,11 @@ export function DashboardPage() {
   const [runs, setRuns] = useState<PipelineRunSummary[]>([]);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [detail, setDetail] = useState<PipelineRunDetail | null>(null);
+  const [healthDetails, setHealthDetails] = useState<HealthDetails | null>(null);
   const [defaults, setDefaults] = useState<AccountDefaults | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isResuming, setIsResuming] = useState(false);
+  const [paidRunwayConfirmed, setPaidRunwayConfirmed] = useState(false);
 
   function applyDefaults(config: AccountDefaults["account_config_json"]) {
     setStylePreset(String(config.default_style_preset ?? "clean_3d_cartoon"));
@@ -62,6 +71,7 @@ export function DashboardPage() {
       setDefaults(data);
       applyDefaults(data.account_config_json);
     }).catch((err) => setError(err.message));
+    api.getHealthDetails().then(setHealthDetails).catch(() => undefined);
     loadRuns().catch((err) => setError(err.message));
   }, []);
 
@@ -69,6 +79,7 @@ export function DashboardPage() {
     if (selectedRunId) {
       loadDetail(selectedRunId).catch((err) => setError(err.message));
     }
+    setPaidRunwayConfirmed(false);
   }, [selectedRunId]);
 
   async function handleCreateRun() {
@@ -94,16 +105,7 @@ export function DashboardPage() {
 
   async function handleResume() {
     if (!selectedRunId) return;
-    let confirmPaidGeneration = false;
-    if (isRunwayMode) {
-      const confirmed = window.confirm(
-        "This will submit one video to Runway and may spend real provider credits. Continue?",
-      );
-      if (!confirmed) {
-        return;
-      }
-      confirmPaidGeneration = true;
-    }
+    const confirmPaidGeneration = isRunwayMode;
     try {
       setError(null);
       setIsResuming(true);
@@ -111,7 +113,7 @@ export function DashboardPage() {
       setDetail(resumed);
       await loadRuns();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to resume run.");
+      setError(toFriendlyResumeError(err));
       await loadDetail(selectedRunId).catch(() => undefined);
     } finally {
       setIsResuming(false);
@@ -133,13 +135,16 @@ export function DashboardPage() {
   const run = detail?.pipeline_run as Record<string, unknown> | null;
   const video = detail?.video as Record<string, unknown> | null;
   const runStatus = typeof run?.status === "string" ? run.status : "";
+  const activeVideoProvider = healthDetails?.video_provider ?? videoProvider;
+  const activeStorageProvider = healthDetails?.storage_provider ?? storageProvider;
+  const providerBadge = `${activeVideoProvider}/${activeStorageProvider.toUpperCase()}`;
+  const isRunwayMode = activeVideoProvider === "runway" && Boolean(healthDetails?.runway_mode_enabled);
   const preflight = detail?.review_preflight ?? null;
   const preflightPromptTooLong = Boolean(preflight?.prompt_length?.too_long);
   const preflightPromptInvalid = preflight?.prompt_valid === false;
   const lowPreflight = Boolean(preflight?.low_score_warning);
   const canResume = runStatus === "awaiting_review";
   const canCancel = ["queued", "running", "awaiting_review", "needs_review"].includes(runStatus);
-  const resumeLabel = "Resume";
   const defaultConfig = defaults?.account_config_json;
 
   const nextAction = useMemo(() => {
@@ -169,8 +174,8 @@ export function DashboardPage() {
           </div>
           <p className="subtle">The first slice pauses after storyboard review so you can fix ideas before spending video credits.</p>
           <p className="subtle">
-            Active video provider: <strong>{videoProvider}</strong>
-            {isRunwayMode ? " - Resume one reviewed run only. Each resume can spend real Runway credits." : " - Safe mock generation mode."}
+            Active video provider: <strong>{activeVideoProvider}</strong>
+            {isRunwayMode ? " - Paid Runway generation mode." : " - Safe mock generation mode."}
           </p>
           <p className="subtle">
             Brand defaults come from Settings and can be overridden per run before creation.
@@ -288,9 +293,9 @@ export function DashboardPage() {
             {selectedRunId ? (
               <div className="stack">
                 <div className="button-row">
-                  {canResume ? (
+                  {canResume && !isRunwayMode ? (
                     <button onClick={handleResume} disabled={isResuming || preflightPromptTooLong || preflightPromptInvalid}>
-                      {isResuming ? "Processing..." : resumeLabel}
+                      {isResuming ? "Processing..." : "Resume"}
                     </button>
                   ) : null}
                   {canCancel ? <button className="secondary" onClick={handleCancel}>Cancel</button> : null}
@@ -303,10 +308,27 @@ export function DashboardPage() {
                 ) : null}
                 {canResume && isRunwayMode ? (
                   <div className="notice-card warning">
-                    <strong>Paid generation warning</strong>
+                    <strong>Runway paid generation is enabled</strong>
                     <p>
-                      This resume action can submit one real Runway job and spend credits. Resume one reviewed run only.
+                      Resuming this run may spend real Runway credits.
                     </p>
+                    <label className="toggle-chip paid-confirmation">
+                      <input
+                        type="checkbox"
+                        checked={paidRunwayConfirmed}
+                        onChange={(event) => setPaidRunwayConfirmed(event.target.checked)}
+                      />
+                      <span>I understand this may spend Runway credits.</span>
+                    </label>
+                    <div className="button-row">
+                      <button
+                        onClick={handleResume}
+                        disabled={isResuming || !paidRunwayConfirmed || preflightPromptTooLong || preflightPromptInvalid}
+                      >
+                        {isResuming ? "Processing..." : "Resume with paid Runway generation"}
+                      </button>
+                    </div>
+                    <p className="subtle">Resume one reviewed run only. Each resume can spend real Runway credits.</p>
                   </div>
                 ) : null}
                 {runStatus === "needs_review" ? (
