@@ -389,7 +389,7 @@ export function IdeaQueuePage() {
             <div className="panel-header">
               <h2>Idea Details</h2>
               {selectedItem?.pipeline_run_id ? (
-                <Link className="inline-link" to={`/app/ideas?run=${selectedItem.pipeline_run_id}`}>Open Generated Run</Link>
+                <Link className="inline-link" to={`/ideas?run=${selectedItem.pipeline_run_id}`}>Open Generated Run</Link>
               ) : null}
             </div>
             {selectedItem ? (
@@ -582,7 +582,7 @@ export function IdeaQueuePage() {
                     <p><strong>Idea:</strong> {item.topic}</p>
                     <p><strong>Status:</strong> {item.status}</p>
                     {item.pipeline_run_id ? (
-                      <Link className="inline-link" to={`/app/review?run=${item.pipeline_run_id}`}>Open generated run</Link>
+                      <Link className="inline-link" to={`/review?run=${item.pipeline_run_id}`}>Open generated run</Link>
                     ) : (
                       <p className="subtle">No generated run yet.</p>
                     )}

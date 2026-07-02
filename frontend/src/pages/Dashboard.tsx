@@ -8,6 +8,7 @@ import { AUDIENCE_LEVELS, CONTENT_FORMATS, STYLE_PRESETS, TARGET_PLATFORMS } fro
 import { formatProvider, formatRunStatus, formatStage } from "../utils/display";
 
 const videoProvider = import.meta.env.VITE_VIDEO_PROVIDER ?? "mock";
+const storageProvider = import.meta.env.VITE_STORAGE_PROVIDER ?? "local";
 const GOLDEN_DEMO_VIDEO_KEY = "videos/30ea2e8e-780a-471b-b85e-80ff8d84fe51.mp4";
 const GOLDEN_DEMO_THUMBNAIL_KEY = "thumbnails/30ea2e8e-780a-471b-b85e-80ff8d84fe51.jpg";
 
@@ -224,13 +225,13 @@ export function DashboardPage() {
       return null;
     }
     if (runStatus === "needs_review") {
-      return { label: "Open Video Review", href: `/app/review?run=${selectedRunId}` };
+      return { label: "Open Video Review", href: `/review?run=${selectedRunId}` };
     }
     if (runStatus === "failed") {
-      return { label: "Create New Run", href: "/app/dashboard" };
+      return { label: "Create New Run", href: "/" };
     }
     if (runStatus === "awaiting_review") {
-      return { label: "Open Ideas", href: `/app/ideas?run=${selectedRunId}` };
+      return { label: "Open Ideas", href: `/ideas?run=${selectedRunId}` };
     }
     return null;
   }, [runStatus, selectedRunId]);
@@ -257,7 +258,7 @@ export function DashboardPage() {
           </div>
           <p className="subtle">A completed coding explainer ready for review and posting.</p>
           <div className="button-row">
-            <Link className="inline-link" to={`/app/review?run=${String(featuredRun.id)}`}>Open Review</Link>
+            <Link className="inline-link" to={`/review?run=${String(featuredRun.id)}`}>Open Review</Link>
             <button className="secondary" type="button" onClick={handleCopyCaptionPackage} disabled={!featuredDemo.manual_post_package}>
               {captionPackageCopied ? "Posting copy copied" : "Copy Posting Copy"}
             </button>
@@ -413,8 +414,8 @@ export function DashboardPage() {
                   </div>
                 ) : null}
                 <div className="link-row">
-                  {runStatus !== "awaiting_review" ? <Link className="inline-link" to={`/app/ideas?run=${selectedRunId}`}>Open Ideas</Link> : null}
-                  <Link className="inline-link" to={`/app/review?run=${selectedRunId}`}>Open Video Review</Link>
+                  {runStatus !== "awaiting_review" ? <Link className="inline-link" to={`/ideas?run=${selectedRunId}`}>Open Ideas</Link> : null}
+                  <Link className="inline-link" to={`/review?run=${selectedRunId}`}>Open Video Review</Link>
                 </div>
               </div>
             ) : null}

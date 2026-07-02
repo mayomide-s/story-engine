@@ -1,25 +1,18 @@
 import { FormEvent, useEffect, useState } from "react";
-import { NavLink, Navigate, Outlet, Route, Routes, useLocation } from "react-router-dom";
+import { NavLink, Route, Routes } from "react-router-dom";
 
 import { api, AccessStatus, clearStoredAccessToken, setStoredAccessToken } from "./api/client";
 import { EnvironmentStatusPanel } from "./components/EnvironmentStatusPanel";
-import { AssetLibraryPage } from "./pages/AssetLibrary";
 import { DashboardPage } from "./pages/Dashboard";
+import { AssetLibraryPage } from "./pages/AssetLibrary";
 import { IdeaQueuePage } from "./pages/IdeaQueue";
 import { IdeasPage } from "./pages/Ideas";
-import { LandingPage } from "./pages/LandingPage";
 import { SettingsPage } from "./pages/Settings";
 import { VideoReviewPage } from "./pages/VideoReview";
 
 const SIDEBAR_COLLAPSED_STORAGE_KEY = "story-engine-sidebar-collapsed";
 
-function LegacyRedirect({ to }: { to: string }) {
-  const location = useLocation();
-  return <Navigate replace to={`${to}${location.search}`} />;
-}
-
-function PrivateAppShell() {
-  const location = useLocation();
+export default function App() {
   const [accessStatus, setAccessStatus] = useState<AccessStatus | null>(null);
   const [password, setPassword] = useState("");
   const [isCheckingAccess, setIsCheckingAccess] = useState(true);
@@ -47,7 +40,7 @@ function PrivateAppShell() {
 
   useEffect(() => {
     refreshAccessStatus().catch(() => undefined);
-  }, [location.pathname]);
+  }, []);
 
   useEffect(() => {
     function handleAccessExpired() {
@@ -167,27 +160,27 @@ function PrivateAppShell() {
             <p className="subtle brand-tagline">Topic in. Animated video out.</p>
           </div>
           <nav className="nav">
-            <NavLink to="/app/dashboard" title="Dashboard">
+            <NavLink to="/" title="Dashboard">
               <span className="nav-icon">D</span>
               <span className="nav-label">Dashboard</span>
             </NavLink>
-            <NavLink to="/app/idea-queue" title="Idea Queue">
+            <NavLink to="/queue" title="Idea Queue">
               <span className="nav-icon">Q</span>
               <span className="nav-label">Idea Queue</span>
             </NavLink>
-            <NavLink to="/app/assets" title="Asset Library">
+            <NavLink to="/assets" title="Asset Library">
               <span className="nav-icon">A</span>
               <span className="nav-label">Asset Library</span>
             </NavLink>
-            <NavLink to="/app/settings" title="Settings">
+            <NavLink to="/settings" title="Settings">
               <span className="nav-icon">S</span>
               <span className="nav-label">Settings</span>
             </NavLink>
-            <NavLink to="/app/ideas" title="Ideas">
+            <NavLink to="/ideas" title="Ideas">
               <span className="nav-icon">I</span>
               <span className="nav-label">Ideas</span>
             </NavLink>
-            <NavLink to="/app/review" title="Video Review">
+            <NavLink to="/review" title="Video Review">
               <span className="nav-icon">V</span>
               <span className="nav-label">Video Review</span>
             </NavLink>
@@ -210,32 +203,15 @@ function PrivateAppShell() {
         </div>
       </aside>
       <main className="content">
-        <Outlet />
+        <Routes>
+          <Route path="/" element={<DashboardPage />} />
+          <Route path="/queue" element={<IdeaQueuePage />} />
+          <Route path="/assets" element={<AssetLibraryPage />} />
+          <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/ideas" element={<IdeasPage />} />
+          <Route path="/review" element={<VideoReviewPage />} />
+        </Routes>
       </main>
     </div>
-  );
-}
-
-export default function App() {
-  return (
-    <Routes>
-      <Route path="/" element={<LandingPage />} />
-      <Route path="/app" element={<PrivateAppShell />}>
-        <Route index element={<Navigate replace to="/app/dashboard" />} />
-        <Route path="dashboard" element={<DashboardPage />} />
-        <Route path="idea-queue" element={<IdeaQueuePage />} />
-        <Route path="assets" element={<AssetLibraryPage />} />
-        <Route path="settings" element={<SettingsPage />} />
-        <Route path="ideas" element={<IdeasPage />} />
-        <Route path="review" element={<VideoReviewPage />} />
-      </Route>
-      <Route path="/dashboard" element={<Navigate replace to="/app/dashboard" />} />
-      <Route path="/queue" element={<Navigate replace to="/app/idea-queue" />} />
-      <Route path="/assets" element={<Navigate replace to="/app/assets" />} />
-      <Route path="/settings" element={<Navigate replace to="/app/settings" />} />
-      <Route path="/ideas" element={<LegacyRedirect to="/app/ideas" />} />
-      <Route path="/review" element={<LegacyRedirect to="/app/review" />} />
-      <Route path="*" element={<Navigate replace to="/" />} />
-    </Routes>
   );
 }
