@@ -51,12 +51,12 @@ export function EnvironmentStatusPanel() {
       {isLoading ? <p className="subtle">Checking backend readiness...</p> : null}
       {details ? (
         <div className="stack compact">
-          <div className="key-grid">
-            <div><span>Backend</span><strong>{details.backend_reachable ? "reachable" : "unreachable"}</strong></div>
-            <div><span>Private Access</span><strong>{details.auth_enabled ? "enabled" : "disabled"}</strong></div>
-            <div><span>Video Provider</span><strong>{details.video_provider}</strong></div>
-            <div><span>Storage Provider</span><strong>{details.storage_provider}</strong></div>
-            <div><span>R2 Public URL</span><strong>{details.r2_public_base_url_configured ? "configured" : "missing/not needed"}</strong></div>
+          <div className="env-chip-grid">
+            <div className="env-chip"><span>Backend</span><strong>{details.backend_reachable ? "reachable" : "unreachable"}</strong></div>
+            <div className="env-chip"><span>Private Access</span><strong>{details.auth_enabled ? "enabled" : "disabled"}</strong></div>
+            <div className="env-chip"><span>Video</span><strong>{details.video_provider}</strong></div>
+            <div className="env-chip"><span>Storage</span><strong>{details.storage_provider}</strong></div>
+            <div className="env-chip"><span>R2 URL</span><strong>{details.r2_public_base_url_configured ? "configured" : "missing"}</strong></div>
           </div>
           {details.runway_mode_enabled ? (
             <div className="notice-card warning">

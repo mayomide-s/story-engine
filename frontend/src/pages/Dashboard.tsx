@@ -217,6 +217,10 @@ export function DashboardPage() {
   const environmentLabel = isRunwayMode
     ? `Current environment: ${activeVideoProvider}/${activeStorageProvider.toUpperCase()} paid mode`
     : `Current environment: ${activeVideoProvider}/${activeStorageProvider.toUpperCase()} safe mode`;
+  const backendStatus = healthDetails?.backend_reachable ? "ok" : "offline";
+  const databaseStatus = healthDetails?.checks.database.status ?? "unknown";
+  const redisStatus = healthDetails?.checks.redis.status ?? "unknown";
+  const storageStatus = healthDetails?.checks.storage.status ?? "unknown";
   const preflight = detail?.review_preflight ?? null;
   const preflightPromptTooLong = Boolean(preflight?.prompt_length?.too_long);
   const preflightPromptInvalid = preflight?.prompt_valid === false;
@@ -246,7 +250,7 @@ export function DashboardPage() {
 
   return (
     <div className="page">
-      <section className="hero panel">
+      <section className="page-header-card panel">
         <div>
           <p className="eyebrow">Dashboard</p>
           <div className="title-row">
@@ -260,6 +264,12 @@ export function DashboardPage() {
             {" "}
             <Link className="inline-link" to="/settings">Open Settings</Link>
           </p>
+        </div>
+        <div className="status-chip-row">
+          <span className={`status-pill ${backendStatus === "ok" ? "success" : "danger"}`}>Backend {backendStatus}</span>
+          <span className={`status-pill ${databaseStatus === "ok" ? "success" : "warning"}`}>DB {databaseStatus}</span>
+          <span className={`status-pill ${redisStatus === "ok" ? "success" : "warning"}`}>Redis {redisStatus}</span>
+          <span className={`status-pill ${storageStatus === "ok" ? "success" : "warning"}`}>Storage {storageStatus}</span>
         </div>
       </section>
       {featuredDemo && featuredRun && featuredVideo ? (
@@ -366,13 +376,14 @@ export function DashboardPage() {
         ) : null}
       </section>
       {error ? <p className="error">{error}</p> : null}
-      <div className="grid">
+      <div className="dashboard-grid">
         <RunList runs={runs} selectedRunId={selectedRunId} onSelect={setSelectedRunId} />
         <div className="stack">
-          <div className="panel">
+          <div className="panel detail-panel">
             <div className="panel-header">
               <h2>Run Details</h2>
             </div>
+            <div className="scroll-panel detail-scroll">
             {run ? (
               <div className="stack">
                 <div className="key-grid">
@@ -450,6 +461,7 @@ export function DashboardPage() {
                 </div>
               </div>
             ) : null}
+            </div>
           </div>
           <EventTimeline events={detail?.pipeline_events ?? []} />
         </div>

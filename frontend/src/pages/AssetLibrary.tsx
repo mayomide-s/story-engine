@@ -178,7 +178,7 @@ export function AssetLibraryPage() {
           </label>
         </div>
         {error ? <p className="error">{error}</p> : null}
-        <div className="asset-grid">
+        <div className="asset-grid scroll-panel asset-library-scroll">
           {items.map((item) => (
             <button
               key={item.run_id}
@@ -206,7 +206,7 @@ export function AssetLibraryPage() {
 
       <section className="panel">
         {selectedItem && detail ? (
-          <div className="stack">
+          <div className="stack scroll-panel asset-detail-scroll">
             <div className="panel-header">
               <h2>{selectedItem.topic}</h2>
               <Link className="inline-link" to={`/review?run=${selectedItem.run_id}`}>Open Video Review</Link>

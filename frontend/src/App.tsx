@@ -124,7 +124,7 @@ export default function App() {
   return (
     <div className="app-shell">
       <aside className="sidebar">
-        <div>
+        <div className="sidebar-brand">
           <p className="eyebrow">CodeToons AI</p>
           <h1>Story Engine</h1>
           <p className="subtle">Topic in. Animated video out.</p>
@@ -137,16 +137,18 @@ export default function App() {
           <NavLink to="/ideas">Ideas</NavLink>
           <NavLink to="/review">Video Review</NavLink>
         </nav>
-        {accessStatus.auth_enabled ? (
-          <div className="stack compact">
-            <div className="notice-card">
-              <strong>Private access enabled</strong>
-              <p>You are using the lightweight staging access gate.</p>
+        <div className="sidebar-footer">
+          <EnvironmentStatusPanel />
+          {accessStatus.auth_enabled ? (
+            <div className="stack compact">
+              <div className="notice-card">
+                <strong>Private access enabled</strong>
+                <p>You are using the lightweight staging access gate.</p>
+              </div>
+              <button className="secondary" type="button" onClick={handleLogout}>Logout</button>
             </div>
-            <button className="secondary" type="button" onClick={handleLogout}>Logout</button>
-          </div>
-        ) : null}
-        <EnvironmentStatusPanel />
+          ) : null}
+        </div>
       </aside>
       <main className="content">
         <Routes>

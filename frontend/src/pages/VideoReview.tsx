@@ -149,8 +149,8 @@ export function VideoReviewPage() {
   const alternativeHooks = Array.isArray(platformVariants.alternative_hooks) ? platformVariants.alternative_hooks : [];
 
   return (
-    <div className="page grid review-grid">
-      <section className="panel">
+    <div className="page stack">
+      <section className="page-header-card panel">
         <div className="panel-header">
           <h2>Video Review</h2>
           <div className="panel-actions">
@@ -165,6 +165,17 @@ export function VideoReviewPage() {
             </select>
           </div>
         </div>
+        {video ? (
+          <div className="key-grid">
+            <div><span>Topic</span><strong>{String(run?.topic ?? "")}</strong></div>
+            <div><span>Status</span><strong>{String(video.status)}</strong></div>
+            <div><span>Provider</span><strong>{generatedProvider}</strong></div>
+            <div><span>Quality Score</span><strong>{String(latestQualityCheck?.score ?? "n/a")}</strong></div>
+          </div>
+        ) : null}
+      </section>
+      <div className="review-grid">
+      <section className="panel">
         {error ? <p className="error-text">{error}</p> : null}
         {video ? (
           <div className="stack">
@@ -215,7 +226,7 @@ export function VideoReviewPage() {
               </div>
             ) : null}
 
-            <div className="panel inset">
+            <div className="panel inset scroll-panel-box">
               <h3>Generated Assets</h3>
               <div className="asset-grid">
                 {videoAsset ? (
@@ -363,6 +374,7 @@ export function VideoReviewPage() {
         )}
       </section>
       <EventTimeline events={detail?.pipeline_events ?? []} />
+      </div>
     </div>
   );
 }

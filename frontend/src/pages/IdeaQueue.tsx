@@ -272,7 +272,7 @@ export function IdeaQueuePage() {
 
   return (
     <div className="page stack">
-      <section className="hero panel">
+      <section className="page-header-card panel">
         <div>
           <p className="eyebrow">Planning</p>
           <h2>Idea Queue And Manual Calendar</h2>
@@ -360,7 +360,7 @@ export function IdeaQueuePage() {
               </button>
             </div>
           </div>
-          <div className="list">
+          <div className="list scroll-panel idea-list-scroll">
             {filteredItems.map((item) => (
               <div key={item.id} className={`run-card ${selectedId === item.id ? "active" : ""}`}>
                 <div className="content-meta">
@@ -525,7 +525,7 @@ export function IdeaQueuePage() {
                 Archive Selected
               </button>
             </div>
-            <div className="stack compact">
+            <div className="stack compact scroll-panel batch-review-scroll">
               {selectedItems.map((item) => {
                 const score = item.idea_score as IdeaScore | undefined;
                 return (
@@ -572,7 +572,7 @@ export function IdeaQueuePage() {
               <span>{calendarItems.length} planned</span>
             </div>
             {calendarItems.length > 0 ? (
-              <div className="stack">
+              <div className="stack scroll-panel calendar-scroll">
                 {calendarItems.map((item) => (
                   <div key={item.id} className="content-card">
                     <div className="content-meta">

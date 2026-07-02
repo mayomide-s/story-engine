@@ -29,12 +29,12 @@ function formatCreatedAt(value: string) {
 
 export function RunList({ runs, selectedRunId, onSelect }: Props) {
   return (
-    <div className="panel">
+    <div className="panel run-list-panel">
       <div className="panel-header">
         <h2>Pipeline Runs</h2>
         <span>{runs.length} total</span>
       </div>
-      <div className="stack">
+      <div className="stack scroll-panel run-list-scroll">
         {STATUS_GROUPS.map((group) => {
           const items = runs.filter((run) => group.statuses.includes(run.status));
           if (items.length === 0) {

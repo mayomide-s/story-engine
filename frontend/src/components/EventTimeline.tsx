@@ -4,11 +4,11 @@ type Props = {
 
 export function EventTimeline({ events }: Props) {
   return (
-    <div className="panel">
+    <div className="panel timeline-panel">
       <div className="panel-header">
         <h2>Event Timeline</h2>
       </div>
-      <div className="timeline">
+      <div className="timeline scroll-panel">
         {events.map((event) => (
           <div key={String(event.id)} className="timeline-item">
             <strong>{String(event.event_type)}</strong>

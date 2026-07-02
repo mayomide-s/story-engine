@@ -80,7 +80,7 @@ export function SettingsPage() {
 
   return (
     <div className="page stack">
-      <section className="hero panel">
+      <section className="page-header-card panel">
         <div>
           <p className="eyebrow">Settings</p>
           <h2>Brand Defaults</h2>
