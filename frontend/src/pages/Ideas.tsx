@@ -225,7 +225,7 @@ export function IdeasPage() {
             <h2>Shape the story before generating the video.</h2>
           </div>
           <div className="panel-actions">
-            {selectedRunId ? <Link className="inline-link" to={`/review?run=${selectedRunId}`}>Go To Video Review</Link> : null}
+            {selectedRunId ? <Link className="inline-link" to={`/app/review?run=${selectedRunId}`}>Go To Video Review</Link> : null}
             <select value={selectedRunId} onChange={(event) => setSelectedRunId(event.target.value)}>
               <option value="">Select a run</option>
               {runs.map((run) => (

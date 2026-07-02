@@ -94,6 +94,149 @@ pre {
   margin: 0;
 }
 
+.landing-page {
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at top right, rgba(37, 99, 235, 0.12), transparent 26%),
+    linear-gradient(180deg, #F8FBFF 0%, #F4F7FB 100%);
+  color: #111827;
+}
+
+.landing-hero,
+.landing-section {
+  width: min(1120px, calc(100% - 2rem));
+  margin: 0 auto;
+}
+
+.landing-hero {
+  padding: 1.5rem 0 2.5rem;
+  display: grid;
+  gap: 2rem;
+}
+
+.landing-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.landing-nav h1,
+.landing-hero-copy h2,
+.landing-section h2,
+.landing-final-cta h2 {
+  margin: 0;
+}
+
+.landing-ghost-link,
+.landing-secondary-link,
+.landing-primary-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  border-radius: 12px;
+  padding: 0.75rem 1rem;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.landing-ghost-link,
+.landing-secondary-link {
+  border: 1px solid #DDE5F0;
+  color: #2563EB;
+  background: #FFFFFF;
+}
+
+.landing-primary-link {
+  border: 1px solid #2563EB;
+  color: #FFFFFF;
+  background: #2563EB;
+}
+
+.landing-hero-grid,
+.landing-demo-grid,
+.landing-duo-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.8fr);
+}
+
+.landing-hero-copy,
+.landing-highlight-card,
+.landing-demo-copy,
+.landing-final-cta {
+  display: grid;
+  gap: 1rem;
+}
+
+.landing-lead {
+  margin: 0;
+  max-width: 56rem;
+  color: #334155;
+  font-size: 1.08rem;
+}
+
+.landing-highlight-card,
+.landing-video-card,
+.landing-demo-copy,
+.landing-step-card,
+.landing-final-cta {
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(6px);
+}
+
+.landing-section {
+  padding-bottom: 2.25rem;
+}
+
+.landing-section-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+
+.landing-step-grid,
+.landing-tag-grid {
+  display: grid;
+  gap: 1rem;
+}
+
+.landing-step-grid {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.landing-step-card {
+  min-height: 168px;
+}
+
+.landing-step-index {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: fit-content;
+  padding: 0.25rem 0.6rem;
+  border-radius: 999px;
+  background: #DBEAFE;
+  color: #1D4ED8;
+  font-size: 0.75rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.landing-tag-grid {
+  grid-template-columns: repeat(auto-fit, minmax(180px, max-content));
+}
+
+.landing-cta-row {
+  justify-content: flex-start;
+}
+
 .app-shell {
   display: grid;
   grid-template-columns: 240px minmax(0, 1fr);
@@ -846,8 +989,15 @@ pre {
 @media (max-width: 1100px) {
   .dashboard-grid,
   .grid,
-  .review-grid {
+  .review-grid,
+  .landing-hero-grid,
+  .landing-demo-grid,
+  .landing-duo-grid {
     grid-template-columns: 1fr;
+  }
+
+  .landing-step-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
@@ -904,6 +1054,15 @@ pre {
   }
 
   .form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .landing-hero,
+  .landing-section {
+    width: min(100% - 1.25rem, 1120px);
+  }
+
+  .landing-step-grid {
     grid-template-columns: 1fr;
   }
 }

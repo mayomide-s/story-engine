@@ -192,7 +192,7 @@ export function VideoReviewPage() {
                       {isRechecking ? "Rechecking..." : "Re-run Quality Check"}
                     </button>
                   ) : null}
-                  {selectedRunId ? <Link className="inline-link" to={`/ideas?run=${selectedRunId}`}>Back To Ideas</Link> : null}
+                  {selectedRunId ? <Link className="inline-link" to={`/app/ideas?run=${selectedRunId}`}>Back To Ideas</Link> : null}
                 </div>
               </div>
               <div className="key-grid">

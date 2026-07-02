@@ -210,7 +210,7 @@ export function AssetLibraryPage() {
           <div className="stack scroll-panel asset-detail-scroll">
             <div className="panel-header">
               <h2>{selectedItem.topic}</h2>
-              <Link className="inline-link" to={`/review?run=${selectedItem.run_id}`}>Open Video Review</Link>
+              <Link className="inline-link" to={`/app/review?run=${selectedItem.run_id}`}>Open Video Review</Link>
             </div>
             <video
               className="video-player large"
