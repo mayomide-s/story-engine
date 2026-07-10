@@ -408,6 +408,29 @@ pre {
   max-height: 520px;
 }
 
+.run-list-controls {
+  margin-bottom: 0.9rem;
+}
+
+.run-list-filter-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.run-cleanup-bar {
+  display: grid;
+  gap: 0.75rem;
+  padding: 0.85rem;
+  border: 1px solid #DDE5F0;
+  border-radius: 12px;
+  background: #F8FAFC;
+}
+
+.run-cleanup-bar p {
+  margin: 0.2rem 0 0;
+}
+
 .detail-scroll {
   max-height: 520px;
 }
@@ -449,12 +472,15 @@ pre {
 .timeline-item {
   border: 1px solid #DDE5F0;
   background: #FFFFFF;
-  padding: 0.9rem;
   border-radius: 12px;
   display: grid;
   gap: 0.45rem;
   text-align: left;
   color: inherit;
+}
+
+.run-card {
+  padding: 0.75rem;
 }
 
 .run-card:hover {
@@ -495,6 +521,30 @@ pre {
   flex-wrap: wrap;
   gap: 0.45rem;
 }
+
+.run-card-toolbar {
+  align-items: center;
+  margin-bottom: 0.1rem;
+}
+
+.run-card-button {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  border-radius: 0;
+  box-shadow: none;
+  display: grid;
+  gap: 0.45rem;
+  text-align: left;
+}
+
+.run-card-button:hover:not(:disabled) {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+ }
 
 .status-pill {
   display: inline-flex;
@@ -918,6 +968,10 @@ pre {
   }
 
   .form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .run-list-filter-grid {
     grid-template-columns: 1fr;
   }
 }

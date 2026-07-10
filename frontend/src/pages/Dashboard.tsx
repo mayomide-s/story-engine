@@ -3,8 +3,9 @@ import { Link } from "react-router-dom";
 
 import { api, AccountDefaults, HealthDetails, PipelineRunDetail, PipelineRunSummary } from "../api/client";
 import { EventTimeline } from "../components/EventTimeline";
-import { RunList } from "../components/RunList";
+import { RunList, RunProviderFilter, RunStatusFilter } from "../components/RunList";
 import { AUDIENCE_LEVELS, CONTENT_FORMATS, STYLE_PRESETS, TARGET_PLATFORMS } from "../constants";
+import { getArchivedRunsStorageKey, loadArchivedRunIds, saveArchivedRunIds } from "../utils/archivedRuns";
 import { clearDashboardPrefill, loadDashboardPrefill } from "../utils/batchPlanner";
 import { formatProvider, formatRunStatus, formatStage } from "../utils/display";
 
@@ -12,6 +13,8 @@ const videoProvider = import.meta.env.VITE_VIDEO_PROVIDER ?? "mock";
 const storageProvider = import.meta.env.VITE_STORAGE_PROVIDER ?? "local";
 const GOLDEN_DEMO_VIDEO_KEY = "videos/30ea2e8e-780a-471b-b85e-80ff8d84fe51.mp4";
 const GOLDEN_DEMO_THUMBNAIL_KEY = "thumbnails/30ea2e8e-780a-471b-b85e-80ff8d84fe51.jpg";
+const OLD_AWAITING_REVIEW_DAYS = 7;
+const OLD_TEST_CORS_DAYS = 3;
 
 function toFriendlyResumeError(error: unknown) {
   const message = error instanceof Error ? error.message : "Failed to resume run.";
@@ -29,6 +32,44 @@ function formatQualityScore(value: unknown) {
 function formatDuration(value: unknown) {
   const seconds = typeof value === "number" ? value : Number(value);
   return Number.isFinite(seconds) ? `${seconds}s` : "n/a";
+}
+
+function isOlderThanDays(value: string, days: number) {
+  const createdAt = new Date(value).getTime();
+  if (Number.isNaN(createdAt)) {
+    return false;
+  }
+  return Date.now() - createdAt >= days * 24 * 60 * 60 * 1000;
+}
+
+function matchesStatusFilter(run: PipelineRunSummary, statusFilter: RunStatusFilter) {
+  if (statusFilter === "all" || statusFilter === "archived") {
+    return true;
+  }
+  if (statusFilter === "awaiting_review") {
+    return run.status === "awaiting_review";
+  }
+  if (statusFilter === "completed") {
+    return ["completed", "cancelled"].includes(run.status);
+  }
+  if (statusFilter === "failed") {
+    return run.status === "failed";
+  }
+  return true;
+}
+
+function matchesProviderFilter(run: PipelineRunSummary, providerFilter: RunProviderFilter) {
+  if (providerFilter === "all") {
+    return true;
+  }
+  return String(run.provider ?? "").toLowerCase() === providerFilter;
+}
+
+function matchesTopicSearch(run: PipelineRunSummary, topicSearch: string) {
+  if (!topicSearch.trim()) {
+    return true;
+  }
+  return run.topic.toLowerCase().includes(topicSearch.trim().toLowerCase());
 }
 
 export function DashboardPage() {
@@ -49,6 +90,12 @@ export function DashboardPage() {
   const [isResuming, setIsResuming] = useState(false);
   const [paidRunwayConfirmed, setPaidRunwayConfirmed] = useState(false);
   const [captionPackageCopied, setCaptionPackageCopied] = useState(false);
+  const [archivedRunIds, setArchivedRunIds] = useState<string[]>([]);
+  const [selectedRunIds, setSelectedRunIds] = useState<string[]>([]);
+  const [statusFilter, setStatusFilter] = useState<RunStatusFilter>("all");
+  const [providerFilter, setProviderFilter] = useState<RunProviderFilter>("all");
+  const [topicSearch, setTopicSearch] = useState("");
+  const [showArchived, setShowArchived] = useState(false);
 
   function applyDefaults(config: AccountDefaults["account_config_json"]) {
     setStylePreset(String(config.default_style_preset ?? "clean_3d_cartoon"));
@@ -124,6 +171,10 @@ export function DashboardPage() {
   }
 
   useEffect(() => {
+    setArchivedRunIds(loadArchivedRunIds());
+  }, []);
+
+  useEffect(() => {
     api.getAccountDefaults().then((data) => {
       setDefaults(data);
       applyDefaults(data.account_config_json);
@@ -150,9 +201,79 @@ export function DashboardPage() {
   useEffect(() => {
     if (selectedRunId) {
       loadDetail(selectedRunId).catch((err) => setError(err.message));
+    } else {
+      setDetail(null);
     }
     setPaidRunwayConfirmed(false);
   }, [selectedRunId]);
+
+  const sortedRuns = useMemo(() => {
+    return [...runs].sort((left, right) => new Date(right.created_at).getTime() - new Date(left.created_at).getTime());
+  }, [runs]);
+
+  const visibleRuns = useMemo(() => {
+    return sortedRuns.filter((run) => {
+      const isArchived = archivedRunIds.includes(run.id);
+      if (statusFilter === "archived") {
+        if (!isArchived) {
+          return false;
+        }
+      } else if (!showArchived && isArchived) {
+        return false;
+      }
+      return matchesStatusFilter(run, statusFilter)
+        && matchesProviderFilter(run, providerFilter)
+        && matchesTopicSearch(run, topicSearch);
+    });
+  }, [archivedRunIds, providerFilter, showArchived, sortedRuns, statusFilter, topicSearch]);
+
+  const visibleRunIds = useMemo(() => visibleRuns.map((run) => run.id), [visibleRuns]);
+
+  useEffect(() => {
+    setSelectedRunIds((current) => current.filter((runId) => visibleRunIds.includes(runId)));
+  }, [visibleRunIds]);
+
+  useEffect(() => {
+    if (visibleRuns.length === 0) {
+      setSelectedRunId(null);
+      return;
+    }
+    if (!selectedRunId || !visibleRunIds.includes(selectedRunId)) {
+      setSelectedRunId(visibleRuns[0].id);
+    }
+  }, [selectedRunId, visibleRunIds, visibleRuns]);
+
+  function persistArchivedRunIds(nextRunIds: string[]) {
+    setArchivedRunIds(nextRunIds);
+    saveArchivedRunIds(nextRunIds);
+  }
+
+  function archiveRuns(runIds: string[]) {
+    if (runIds.length === 0) {
+      return;
+    }
+    persistArchivedRunIds([...archivedRunIds, ...runIds]);
+  }
+
+  function unarchiveRuns(runIds: string[]) {
+    if (runIds.length === 0) {
+      return;
+    }
+    persistArchivedRunIds(archivedRunIds.filter((runId) => !runIds.includes(runId)));
+  }
+
+  function getSelectedVisibleRunIds() {
+    return selectedRunIds.filter((runId) => visibleRunIds.includes(runId));
+  }
+
+  function confirmArchive(runIds: string[], title: string) {
+    if (runIds.length === 0) {
+      return false;
+    }
+    return window.confirm(
+      `${title}\n\nThis only hides ${runIds.length} run${runIds.length === 1 ? "" : "s"} locally in this browser. It does not delete database records or change backend data.`,
+    );
+  }
 
   async function handleCreateRun() {
     try {
@@ -222,6 +343,77 @@ export function DashboardPage() {
     } catch {
       setCaptionPackageCopied(false);
     }
+  }
+
+  function handleArchiveRun(runId: string) {
+    archiveRuns([runId]);
+    setSelectedRunIds((current) => current.filter((item) => item !== runId));
+  }
+
+  function handleUnarchiveRun(runId: string) {
+    unarchiveRuns([runId]);
+  }
+
+  function handleSelectionChange(runId: string, selected: boolean) {
+    setSelectedRunIds((current) => {
+      if (selected) {
+        return current.includes(runId) ? current : [...current, runId];
+      }
+      return current.filter((item) => item !== runId);
+    });
+  }
+
+  function handleSelectAllVisible() {
+    setSelectedRunIds(visibleRunIds);
+  }
+
+  function handleClearSelection() {
+    setSelectedRunIds([]);
+  }
+
+  function handleArchiveSelected() {
+    const runIds = getSelectedVisibleRunIds();
+    if (!confirmArchive(runIds, "Archive the selected visible runs?")) {
+      return;
+    }
+    archiveRuns(runIds);
+    setSelectedRunIds([]);
+  }
+
+  function handleArchiveFailedRuns() {
+    const runIds = sortedRuns
+      .filter((run) => run.status === "failed" && !archivedRunIds.includes(run.id))
+      .map((run) => run.id);
+    if (!confirmArchive(runIds, "Archive all failed runs?")) {
+      return;
+    }
+    archiveRuns(runIds);
+  }
+
+  function handleArchiveOldAwaitingReviewRuns() {
+    const runIds = sortedRuns
+      .filter((run) => run.status === "awaiting_review" && !archivedRunIds.includes(run.id) && isOlderThanDays(run.created_at, OLD_AWAITING_REVIEW_DAYS))
+      .map((run) => run.id);
+    if (!confirmArchive(runIds, `Archive awaiting-review runs older than ${OLD_AWAITING_REVIEW_DAYS} days?`)) {
+      return;
+    }
+    archiveRuns(runIds);
+  }
+
+  function handleArchiveOldCorsRuns() {
+    const runIds = sortedRuns
+      .filter((run) => {
+        const provider = String(run.provider ?? "").toLowerCase();
+        return !archivedRunIds.includes(run.id)
+          && provider === "mock"
+          && run.topic.toLowerCase().includes("cors")
+          && isOlderThanDays(run.created_at, OLD_TEST_CORS_DAYS);
+      })
+      .map((run) => run.id);
+    if (!confirmArchive(runIds, `Archive mock CORS runs older than ${OLD_TEST_CORS_DAYS} days?`)) {
+      return;
+    }
+    archiveRuns(runIds);
   }
 
   const run = detail?.pipeline_run as Record<string, unknown> | null;
@@ -351,11 +543,46 @@ export function DashboardPage() {
       </section>
       {error ? <p className="error">{error}</p> : null}
       <div className="dashboard-grid">
-        <RunList runs={runs} selectedRunId={selectedRunId} onSelect={setSelectedRunId} />
+        <RunList
+          runs={visibleRuns}
+          totalRuns={runs.length}
+          selectedRunId={selectedRunId}
+          selectedRunIds={selectedRunIds}
+          statusFilter={statusFilter}
+          providerFilter={providerFilter}
+          topicSearch={topicSearch}
+          showArchived={showArchived}
+          archivedRunIds={archivedRunIds}
+          onSelect={setSelectedRunId}
+          onSelectionChange={handleSelectionChange}
+          onSelectAllVisible={handleSelectAllVisible}
+          onClearSelection={handleClearSelection}
+          onStatusFilterChange={setStatusFilter}
+          onProviderFilterChange={setProviderFilter}
+          onTopicSearchChange={setTopicSearch}
+          onShowArchivedChange={setShowArchived}
+          onArchiveRun={handleArchiveRun}
+          onUnarchiveRun={handleUnarchiveRun}
+          onArchiveSelected={handleArchiveSelected}
+          onArchiveFailedRuns={handleArchiveFailedRuns}
+          onArchiveOldAwaitingReviewRuns={handleArchiveOldAwaitingReviewRuns}
+          onArchiveOldCorsRuns={handleArchiveOldCorsRuns}
+        />
         <div className="stack">
           <div className="panel detail-panel">
             <div className="panel-header">
               <h2>Run Details</h2>
+              {selectedRunId ? (
+                archivedRunIds.includes(selectedRunId) ? (
+                  <button className="secondary" type="button" onClick={() => handleUnarchiveRun(selectedRunId)}>
+                    Unarchive run
+                  </button>
+                ) : (
+                  <button className="secondary" type="button" onClick={() => handleArchiveRun(selectedRunId)}>
+                    Archive run
+                  </button>
+                )
+              ) : null}
             </div>
             <div className="scroll-panel detail-scroll">
             {run ? (
@@ -366,7 +593,9 @@ export function DashboardPage() {
                   <div><span>Stage</span><strong>{formatStage(String(run.current_stage))}</strong></div>
                   <div><span>Provider</span><strong>{formatProvider(String(video?.provider ?? ""))}</strong></div>
                   <div><span>Style Preset</span><strong>{String(run.style_preset ?? "clean_3d_cartoon")}</strong></div>
+                  <div><span>Archive State</span><strong>{selectedRunId && archivedRunIds.includes(selectedRunId) ? "Archived locally" : "Visible"}</strong></div>
                 </div>
+                <p className="subtle">Archive state is stored locally in <code>{getArchivedRunsStorageKey()}</code> and does not change backend records.</p>
                 {run.error_message ? (
                   <div className="notice-card danger">
                     <strong>Latest Error</strong>
