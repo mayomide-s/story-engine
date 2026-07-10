@@ -6,6 +6,11 @@ from app.schemas.pipeline_runs import (
     AggregatedPipelineRunResponse,
     ContentIdeaPatch,
     HumanStoryAdherenceReviewPayload,
+    NarrationDraftCreatePayload,
+    NarrationDraftPatchPayload,
+    NarrationHumanReviewPayload,
+    NarrationRenderCreatePayload,
+    NarrationSpeechRetryPayload,
     PipelineRunCreate,
     PromptActionRequest,
     ReviewConfigPatch,
@@ -34,6 +39,16 @@ from app.services.pipeline_service import (
     resume_pipeline,
 )
 from app.services.access_service import require_app_access
+from app.services.narration_service import (
+    PaidNarrationConfirmationRequiredError,
+    create_narration_draft,
+    create_narration_render,
+    patch_narration_draft,
+    record_narration_human_review,
+    recompose_narration_render,
+    retry_narration_speech,
+    regenerate_narration_draft,
+)
 
 router = APIRouter(prefix="/pipeline-runs", tags=["pipeline-runs"], dependencies=[Depends(require_app_access)])
 
@@ -120,6 +135,108 @@ def save_human_story_review(
     try:
         run = record_story_adherence_human_review(db, run_id, payload)
         return get_pipeline_run_detail(db, run.id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/{run_id}/narration/draft")
+def create_run_narration_draft(run_id: str, payload: NarrationDraftCreatePayload | None = Body(default=None), db: Session = Depends(get_db)):
+    try:
+        create_narration_draft(db, run_id, confirm_paid_draft=payload.confirm_paid_draft if payload else False)
+        return get_pipeline_run_detail(db, run_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PaidNarrationConfirmationRequiredError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/{run_id}/narration/draft/regenerate")
+def regenerate_run_narration_draft(run_id: str, payload: NarrationDraftCreatePayload | None = Body(default=None), db: Session = Depends(get_db)):
+    try:
+        regenerate_narration_draft(db, run_id, confirm_paid_draft=payload.confirm_paid_draft if payload else False)
+        return get_pipeline_run_detail(db, run_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PaidNarrationConfirmationRequiredError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.patch("/{run_id}/narration/draft")
+def update_run_narration_draft(run_id: str, payload: NarrationDraftPatchPayload, db: Session = Depends(get_db)):
+    try:
+        patch_narration_draft(db, run_id, payload.model_dump(exclude_none=True))
+        return get_pipeline_run_detail(db, run_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/{run_id}/narration/render")
+def render_run_narration(run_id: str, payload: NarrationRenderCreatePayload, db: Session = Depends(get_db)):
+    try:
+        create_narration_render(
+            db,
+            run_id,
+            confirm_paid_narration=payload.confirm_paid_narration,
+            confirm_unapproved_story=payload.confirm_unapproved_story,
+            voice=payload.voice,
+        )
+        return get_pipeline_run_detail(db, run_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PaidNarrationConfirmationRequiredError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/{run_id}/narration/renders/{render_id}/recompose")
+def recompose_run_narration(run_id: str, render_id: str, db: Session = Depends(get_db)):
+    try:
+        recompose_narration_render(db, run_id, render_id)
+        return get_pipeline_run_detail(db, run_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/{run_id}/narration/renders/{render_id}/retry-speech")
+def retry_run_narration_speech(
+    run_id: str,
+    render_id: str,
+    payload: NarrationSpeechRetryPayload,
+    db: Session = Depends(get_db),
+):
+    try:
+        retry_narration_speech(
+            db,
+            run_id,
+            render_id,
+            confirm_paid_narration=payload.confirm_paid_narration,
+            confirm_possible_duplicate_charge=payload.confirm_possible_duplicate_charge,
+        )
+        return get_pipeline_run_detail(db, run_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PaidNarrationConfirmationRequiredError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/{run_id}/narration/human-review")
+def save_narration_human_review(run_id: str, payload: NarrationHumanReviewPayload, db: Session = Depends(get_db)):
+    try:
+        record_narration_human_review(db, run_id, payload.narration_render_id, payload.decision, payload.notes)
+        return get_pipeline_run_detail(db, run_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except RuntimeError as exc:

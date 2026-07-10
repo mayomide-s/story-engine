@@ -37,6 +37,7 @@ from app.schemas.pipeline_runs import (
     StoryboardPatch,
 )
 from app.services.providers import get_llm_provider, get_storage_provider, get_video_provider
+from app.services.narration_service import build_narration_payloads
 from app.services.semantic_critic_service import (
     build_story_adherence_payload,
     get_human_story_adherence_review,
@@ -2155,6 +2156,7 @@ def get_pipeline_run_detail(db: Session, run_id: str) -> dict[str, Any]:
     review_sections = get_review_sections(run, idea, script)
     preflight = build_preflight_review(db, run) if run.script_id else None
     story_adherence_review = build_story_adherence_review(db, run)
+    narration_payloads = build_narration_payloads(db, run)
     return {
         "pipeline_run": serialize_model(run),
         "idea": serialize_model(idea) if idea else None,
@@ -2172,6 +2174,9 @@ def get_pipeline_run_detail(db: Session, run_id: str) -> dict[str, Any]:
         "prompt_preview": build_video_prompt(run, db),
         "content_critique": critique_log.response_json.get("critique") if critique_log else None,
         "story_adherence_review": story_adherence_review,
+        "narration_draft": narration_payloads["narration_draft"],
+        "latest_narration_render": narration_payloads["latest_narration_render"],
+        "narration_renders": narration_payloads["narration_renders"],
         "review_sections": review_sections,
         "review_preflight": preflight,
     }

@@ -45,6 +45,9 @@ export type PipelineRunDetail = {
   prompt_preview?: string | null;
   content_critique?: Record<string, unknown> | null;
   story_adherence_review?: Record<string, unknown> | null;
+  narration_draft?: Record<string, unknown> | null;
+  latest_narration_render?: Record<string, unknown> | null;
+  narration_renders?: Record<string, unknown>[];
   review_sections?: Record<string, string> | null;
   review_preflight?: {
     scores?: Record<string, number>;
@@ -62,6 +65,7 @@ export type PipelineRunDetail = {
 };
 
 export type StoryAdherenceHumanDecision = "approve" | "needs_review" | "regenerate";
+export type NarrationHumanDecision = "approve" | "needs_revision" | "reject";
 
 export type IdeaQueueItem = {
   id: string;
@@ -285,6 +289,35 @@ export const api = {
     request<PipelineRunDetail>(`/pipeline-runs/${runId}/story-adherence/human-review`, {
       method: "POST",
       body: JSON.stringify({ decision, notes })
+    }),
+  createNarrationDraft: (runId: string, confirmPaidDraft = false) =>
+    request<PipelineRunDetail>(`/pipeline-runs/${runId}/narration/draft`, {
+      method: "POST",
+      body: JSON.stringify({ confirm_paid_draft: confirmPaidDraft })
+    }),
+  regenerateNarrationDraft: (runId: string, confirmPaidDraft = false) =>
+    request<PipelineRunDetail>(`/pipeline-runs/${runId}/narration/draft/regenerate`, {
+      method: "POST",
+      body: JSON.stringify({ confirm_paid_draft: confirmPaidDraft })
+    }),
+  patchNarrationDraft: (runId: string, payload: Record<string, unknown>) =>
+    request<PipelineRunDetail>(`/pipeline-runs/${runId}/narration/draft`, {
+      method: "PATCH",
+      body: JSON.stringify(payload)
+    }),
+  createNarrationRender: (runId: string, payload: { confirm_paid_narration: boolean; confirm_unapproved_story?: boolean; voice?: string | null }) =>
+    request<PipelineRunDetail>(`/pipeline-runs/${runId}/narration/render`, {
+      method: "POST",
+      body: JSON.stringify(payload)
+    }),
+  recomposeNarrationRender: (runId: string, renderId: string) =>
+    request<PipelineRunDetail>(`/pipeline-runs/${runId}/narration/renders/${renderId}/recompose`, {
+      method: "POST"
+    }),
+  submitNarrationHumanReview: (runId: string, narrationRenderId: string, decision: NarrationHumanDecision, notes = "") =>
+    request<PipelineRunDetail>(`/pipeline-runs/${runId}/narration/human-review`, {
+      method: "POST",
+      body: JSON.stringify({ narration_render_id: narrationRenderId, decision, notes })
     }),
   cancelRun: (runId: string, reviewNotes = "") =>
     request<PipelineRunDetail>(`/pipeline-runs/${runId}/cancel`, {

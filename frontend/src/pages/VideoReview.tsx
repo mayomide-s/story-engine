@@ -90,6 +90,10 @@ export function VideoReviewPage() {
   const [isRechecking, setIsRechecking] = useState(false);
   const [isRecheckingStory, setIsRecheckingStory] = useState(false);
   const [showFullPrompt, setShowFullPrompt] = useState(false);
+  const [isNarrationBusy, setIsNarrationBusy] = useState(false);
+  const [draftSegments, setDraftSegments] = useState<Record<string, unknown>[]>([]);
+  const [draftFullText, setDraftFullText] = useState("");
+  const [narrationVoice, setNarrationVoice] = useState("alloy");
 
   useEffect(() => {
     const requestedRunId = searchParams.get("run");
@@ -113,6 +117,16 @@ export function VideoReviewPage() {
     setShowFullPrompt(false);
   }, [selectedRunId]);
 
+  useEffect(() => {
+    const narrationDraft = detail?.narration_draft as Record<string, unknown> | null | undefined;
+    const scriptJson = narrationDraft?.script_json as { segments?: unknown[] } | undefined;
+    const nextSegments = Array.isArray(scriptJson?.segments) ? scriptJson.segments as Record<string, unknown>[] : [];
+    setDraftSegments(nextSegments.map((segment) => ({ ...segment })));
+    setDraftFullText(String(narrationDraft?.full_spoken_text ?? ""));
+    const latestNarrationRender = detail?.latest_narration_render as Record<string, unknown> | null | undefined;
+    setNarrationVoice(String(latestNarrationRender?.voice ?? narrationDraft?.voice ?? "alloy"));
+  }, [detail]);
+
   async function refreshDetail() {
     if (!selectedRunId) return;
     const data = await api.getRun(selectedRunId);
@@ -122,6 +136,8 @@ export function VideoReviewPage() {
   const manualPackage = detail?.manual_post_package as Record<string, unknown> | null;
   const video = detail?.video as Record<string, unknown> | null;
   const run = detail?.pipeline_run as Record<string, unknown> | null;
+  const narrationDraft = detail?.narration_draft as Record<string, unknown> | null;
+  const latestNarrationRender = detail?.latest_narration_render as Record<string, unknown> | null;
   const qualityChecks = detail?.quality_checks ?? [];
   const latestQualityCheck = qualityChecks[qualityChecks.length - 1] as Record<string, unknown> | undefined;
   const storyAdherence = detail?.story_adherence_review as Record<string, unknown> | null;
@@ -189,6 +205,121 @@ export function VideoReviewPage() {
   const youtubeVariant = platformVariants.youtube as Record<string, unknown> | undefined;
   const alternativeCaptions = Array.isArray(platformVariants.alternative_captions) ? platformVariants.alternative_captions : [];
   const alternativeHooks = Array.isArray(platformVariants.alternative_hooks) ? platformVariants.alternative_hooks : [];
+  const narrationAudioAsset = latestNarrationRender?.audio_asset as Record<string, unknown> | undefined;
+  const narrationCaptionAsset = latestNarrationRender?.caption_asset as Record<string, unknown> | undefined;
+  const narratedVideoAsset = latestNarrationRender?.rendered_video_asset as Record<string, unknown> | undefined;
+  const storyHumanReview = (storyAdherence?.human_review as Record<string, unknown> | null) ?? null;
+  const storyApproved = Boolean(
+    storyHumanReview?.decision === "approve" ||
+    (!storyHumanReview?.decision && String(storyAdherence?.review_status ?? "") === "accept")
+  );
+  const narrationDraftUsable = Boolean(narrationDraft?.has_valid_content);
+
+  async function handleCreateNarrationDraft(regenerate = false) {
+    if (!selectedRunId) return;
+    const needsPaidDraftConfirmation = window.confirm(
+      "Continue creating a narration draft? If the writer provider is OpenAI, this will trigger a paid narration-writing call."
+    );
+    if (!needsPaidDraftConfirmation && regenerate) {
+      return;
+    }
+    setIsNarrationBusy(true);
+    setError("");
+    try {
+      const refreshed = regenerate
+        ? await api.regenerateNarrationDraft(selectedRunId, needsPaidDraftConfirmation)
+        : await api.createNarrationDraft(selectedRunId, needsPaidDraftConfirmation);
+      setDetail(refreshed);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Failed to create the narration draft.");
+    } finally {
+      setIsNarrationBusy(false);
+    }
+  }
+
+  async function handleSaveNarrationDraft() {
+    if (!selectedRunId || !narrationDraftUsable) return;
+    setIsNarrationBusy(true);
+    setError("");
+    try {
+      const refreshed = await api.patchNarrationDraft(selectedRunId, {
+        segments: draftSegments,
+        full_spoken_text: draftFullText,
+        estimated_word_count: draftFullText.split(/\s+/).filter(Boolean).length,
+      });
+      setDetail(refreshed);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Failed to save the narration draft.");
+    } finally {
+      setIsNarrationBusy(false);
+    }
+  }
+
+  async function handleGenerateNarratedVideo() {
+    if (!selectedRunId || !narrationDraftUsable) return;
+    const confirmPaid = window.confirm("Generate narrated video now? This may trigger a paid OpenAI speech call.");
+    if (!confirmPaid) return;
+    let confirmUnapprovedStory = false;
+    if (!storyApproved) {
+      confirmUnapprovedStory = window.confirm("This story is not fully approved yet. Continue and spend narration credits anyway?");
+      if (!confirmUnapprovedStory) return;
+    }
+    setIsNarrationBusy(true);
+    setError("");
+    try {
+      const refreshed = await api.createNarrationRender(selectedRunId, {
+        confirm_paid_narration: true,
+        confirm_unapproved_story: confirmUnapprovedStory,
+        voice: narrationVoice,
+      });
+      setDetail(refreshed);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Failed to create the narrated render.");
+    } finally {
+      setIsNarrationBusy(false);
+    }
+  }
+
+  async function handleRecomposeNarratedVideo() {
+    if (!selectedRunId || !latestNarrationRender?.id) return;
+    setIsNarrationBusy(true);
+    setError("");
+    try {
+      const refreshed = await api.recomposeNarrationRender(selectedRunId, String(latestNarrationRender.id));
+      setDetail(refreshed);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Failed to recompose the narrated video.");
+    } finally {
+      setIsNarrationBusy(false);
+    }
+  }
+
+  async function handleNarrationHumanReview(decision: "approve" | "needs_revision" | "reject") {
+    if (!selectedRunId || !latestNarrationRender?.id) return;
+    setIsNarrationBusy(true);
+    setError("");
+    try {
+      const refreshed = await api.submitNarrationHumanReview(selectedRunId, String(latestNarrationRender.id), decision, "");
+      setDetail(refreshed);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Failed to save the narration review.");
+    } finally {
+      setIsNarrationBusy(false);
+    }
+  }
+
+  function updateDraftSegment(index: number, key: string, value: string) {
+    setDraftSegments((current) =>
+      current.map((segment, segmentIndex) => (
+        segmentIndex === index
+          ? {
+              ...segment,
+              [key]: key.endsWith("_seconds") ? Number(value) : value,
+            }
+          : segment
+      ))
+    );
+  }
 
   return (
     <div className="page stack">
@@ -448,6 +579,170 @@ export function VideoReviewPage() {
               ) : (
                 <p className="subtle">No story adherence review data found for this run.</p>
               )}
+            </div>
+
+            <div className="panel inset">
+              <div className="panel-header">
+                <h3>Narration and Captions</h3>
+                <div className="button-row">
+                  <button type="button" className="secondary" onClick={() => handleCreateNarrationDraft(false)} disabled={isNarrationBusy}>
+                    {isNarrationBusy ? "Working..." : narrationDraft ? "Refresh Draft" : "Create Narration Draft"}
+                  </button>
+                  {narrationDraft ? (
+                    <button type="button" className="secondary" onClick={() => handleCreateNarrationDraft(true)} disabled={isNarrationBusy}>
+                      Regenerate Draft
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+              {!storyApproved ? (
+                <div className="notice-card warning">
+                  <strong>Story approval warning</strong>
+                  <p>Narration can still be rendered for review, but an extra confirmation is required because the story is not approved yet.</p>
+                </div>
+              ) : null}
+              {narrationDraft ? (
+                <div className="stack">
+                  <div className="key-grid">
+                    <div><span>Draft status</span><strong>{String(narrationDraft.status ?? "n/a").replace(/_/g, " ")}</strong></div>
+                    <div><span>Valid content</span><strong>{String(Boolean(narrationDraft.has_valid_content) ? "Yes" : "No")}</strong></div>
+                    <div><span>Revision</span><strong>{String(narrationDraft.generation_revision ?? "n/a")}</strong></div>
+                    <div><span>Word count</span><strong>{String(narrationDraft.estimated_word_count ?? "n/a")}</strong></div>
+                  </div>
+                  {narrationDraft.failure_reason ? (
+                    <div className={`notice-card ${narrationDraftUsable ? "warning" : "danger"}`}>
+                      <strong>Latest draft issue</strong>
+                      <p>{String(narrationDraft.failure_reason)}</p>
+                    </div>
+                  ) : null}
+                  {Boolean(narrationDraft.paid_call_outcome_uncertain) ? (
+                    <div className="notice-card danger">
+                      <strong>Manual recovery required</strong>
+                      <p>A paid narration draft call may have completed before its result was fully persisted. Retrying may create another charge.</p>
+                    </div>
+                  ) : null}
+                  <label>
+                    <span>Full spoken text</span>
+                    <textarea value={draftFullText} onChange={(event) => setDraftFullText(event.target.value)} rows={4} disabled={!narrationDraftUsable || isNarrationBusy} />
+                  </label>
+                  <div className="stack compact">
+                    {draftSegments.map((segment, index) => (
+                      <div key={index} className="panel inset">
+                        <div className="key-grid">
+                          <label>
+                            <span>Start</span>
+                            <input type="number" step="0.1" value={String(segment.start_seconds ?? "")} onChange={(event) => updateDraftSegment(index, "start_seconds", event.target.value)} disabled={!narrationDraftUsable || isNarrationBusy} />
+                          </label>
+                          <label>
+                            <span>End</span>
+                            <input type="number" step="0.1" value={String(segment.end_seconds ?? "")} onChange={(event) => updateDraftSegment(index, "end_seconds", event.target.value)} disabled={!narrationDraftUsable || isNarrationBusy} />
+                          </label>
+                        </div>
+                        <label>
+                          <span>Spoken text</span>
+                          <textarea value={String(segment.spoken_text ?? "")} onChange={(event) => updateDraftSegment(index, "spoken_text", event.target.value)} rows={2} disabled={!narrationDraftUsable || isNarrationBusy} />
+                        </label>
+                        <label>
+                          <span>Caption text</span>
+                          <textarea value={String(segment.caption_text ?? "")} onChange={(event) => updateDraftSegment(index, "caption_text", event.target.value)} rows={2} disabled={!narrationDraftUsable || isNarrationBusy} />
+                        </label>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="button-row">
+                    <button type="button" onClick={handleSaveNarrationDraft} disabled={!narrationDraftUsable || isNarrationBusy}>Save Narration</button>
+                    <button type="button" className="secondary" onClick={handleGenerateNarratedVideo} disabled={!narrationDraftUsable || isNarrationBusy}>Generate Narrated Video</button>
+                  </div>
+                </div>
+              ) : (
+                <p className="subtle">Create a narration draft to review timing, captions, and speech before generating a narrated MP4.</p>
+              )}
+              {latestNarrationRender ? (
+                <div className="stack">
+                  <div className="key-grid">
+                    <div><span>Render status</span><strong>{String(latestNarrationRender.status ?? "n/a").replace(/_/g, " ")}</strong></div>
+                    <div><span>Voice</span><strong>{String(latestNarrationRender.voice ?? narrationVoice)}</strong></div>
+                    <div><span>Speech model</span><strong>{String(latestNarrationRender.speech_model ?? "n/a")}</strong></div>
+                    <div><span>Disclosure</span><strong>{Boolean(latestNarrationRender.voice_is_ai_generated) ? "AI-generated narration" : "Not set"}</strong></div>
+                  </div>
+                  <div className="key-grid">
+                    <div><span>Source duration</span><strong>{String(latestNarrationRender.source_duration_seconds ?? "n/a")}s</strong></div>
+                    <div><span>Final audio</span><strong>{String(latestNarrationRender.final_audio_duration_seconds ?? "n/a")}s</strong></div>
+                    <div><span>Usable window</span><strong>{String(latestNarrationRender.usable_narration_window_seconds ?? "n/a")}s</strong></div>
+                    <div><span>Atempo</span><strong>{String(latestNarrationRender.applied_atempo_factor ?? "1.0")}</strong></div>
+                  </div>
+                  {latestNarrationRender.failure_reason ? (
+                    <div className="notice-card warning">
+                      <strong>Latest render issue</strong>
+                      <p>{String(latestNarrationRender.failure_reason)}</p>
+                    </div>
+                  ) : null}
+                  {Boolean(latestNarrationRender.paid_call_outcome_uncertain) ? (
+                    <div className="notice-card danger">
+                      <strong>Manual recovery required</strong>
+                      <p>A paid narration speech call may have completed before the audio asset was fully persisted. Retrying may create another charge.</p>
+                    </div>
+                  ) : null}
+                  {narratedVideoAsset ? (
+                    <div className="panel inset feature-video">
+                      <div className="panel-header">
+                        <h3>Narrated Video</h3>
+                        <div className="button-row">
+                          <CopyButton text={String(narratedVideoAsset.public_url)} label="narrated video URL" />
+                        </div>
+                      </div>
+                      <video className="video-player large" controls preload="metadata" src={String(narratedVideoAsset.public_url)}>
+                        Your browser does not support the narrated video preview.
+                      </video>
+                    </div>
+                  ) : null}
+                  <div className="asset-grid">
+                    {narrationAudioAsset ? (
+                      <div className="content-card">
+                        <div className="content-meta">
+                          <strong>Audio</strong>
+                          <span>{String(narrationAudioAsset.mime_type ?? "")}</span>
+                        </div>
+                        <div className="button-row">
+                          <CopyButton text={String(narrationAudioAsset.public_url)} label="audio URL" />
+                        </div>
+                      </div>
+                    ) : null}
+                    {narrationCaptionAsset ? (
+                      <div className="content-card">
+                        <div className="content-meta">
+                          <strong>Captions</strong>
+                          <span>{String(narrationCaptionAsset.mime_type ?? "")}</span>
+                        </div>
+                        <div className="button-row">
+                          <CopyButton text={String(narrationCaptionAsset.public_url)} label="caption URL" />
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                  <details className="technical-disclosure">
+                    <summary>Show caption cues and metadata</summary>
+                    <div className="stack compact technical-stack">
+                      <div className="copy-block">
+                        <strong>Caption cues</strong>
+                        <pre>{JSON.stringify(latestNarrationRender.caption_cues_json ?? [], null, 2)}</pre>
+                      </div>
+                      <div className="copy-block">
+                        <strong>AI voice disclosure</strong>
+                        <pre>{String(latestNarrationRender.ai_voice_disclosure ?? "AI-generated narration")}</pre>
+                      </div>
+                    </div>
+                  </details>
+                  <div className="button-row">
+                    <button type="button" className="secondary" onClick={handleRecomposeNarratedVideo} disabled={isNarrationBusy || !latestNarrationRender.audio_asset || Boolean(latestNarrationRender.rendered_video_asset_id)}>
+                      Recompose Narrated Video
+                    </button>
+                    <button type="button" onClick={() => handleNarrationHumanReview("approve")} disabled={isNarrationBusy}>Approve</button>
+                    <button type="button" className="secondary" onClick={() => handleNarrationHumanReview("needs_revision")} disabled={isNarrationBusy}>Needs Revision</button>
+                    <button type="button" className="secondary" onClick={() => handleNarrationHumanReview("reject")} disabled={isNarrationBusy}>Reject</button>
+                  </div>
+                </div>
+              ) : null}
             </div>
 
             <div className="panel inset">

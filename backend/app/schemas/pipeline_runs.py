@@ -60,6 +60,33 @@ class HumanStoryAdherenceReviewPayload(BaseModel):
     notes: str | None = None
 
 
+class NarrationDraftCreatePayload(BaseModel):
+    confirm_paid_draft: bool = False
+
+
+class NarrationDraftPatchPayload(BaseModel):
+    segments: list[dict[str, Any]]
+    full_spoken_text: str | None = None
+    estimated_word_count: int | None = None
+
+
+class NarrationRenderCreatePayload(BaseModel):
+    confirm_paid_narration: bool = False
+    confirm_unapproved_story: bool = False
+    voice: str | None = None
+
+
+class NarrationSpeechRetryPayload(BaseModel):
+    confirm_paid_narration: bool = False
+    confirm_possible_duplicate_charge: bool = False
+
+
+class NarrationHumanReviewPayload(BaseModel):
+    narration_render_id: str
+    decision: Literal["approve", "needs_revision", "reject"]
+    notes: str | None = None
+
+
 class PromptActionRequest(BaseModel):
     action: Literal["improve", "shorten"]
 
@@ -99,5 +126,8 @@ class AggregatedPipelineRunResponse(BaseModel):
     prompt_preview: str | None = None
     content_critique: dict[str, Any] | None = None
     story_adherence_review: dict[str, Any] | None = None
+    narration_draft: dict[str, Any] | None = None
+    latest_narration_render: dict[str, Any] | None = None
+    narration_renders: list[dict[str, Any]] = Field(default_factory=list)
     review_sections: dict[str, str] | None = None
     review_preflight: dict[str, Any] | None = None
