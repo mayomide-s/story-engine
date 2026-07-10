@@ -39,6 +39,16 @@ function buildPromptPreview(prompt: string) {
   return `${prompt.slice(0, 240).trim()}...`;
 }
 
+function formatAdherenceValue(value: unknown) {
+  if (value === null || value === undefined || value === "") {
+    return "Unavailable";
+  }
+  if (typeof value === "boolean") {
+    return value ? "Yes" : "No";
+  }
+  return String(value);
+}
+
 function CopyButton({ text, label }: { text: string; label: string }) {
   const [copied, setCopied] = useState(false);
 
@@ -101,6 +111,7 @@ export function VideoReviewPage() {
   const run = detail?.pipeline_run as Record<string, unknown> | null;
   const qualityChecks = detail?.quality_checks ?? [];
   const latestQualityCheck = qualityChecks[qualityChecks.length - 1] as Record<string, unknown> | undefined;
+  const storyAdherence = detail?.story_adherence_review as Record<string, unknown> | null;
   const assets = detail?.assets ?? [];
   const videoAsset = assets.find((asset) => asset.asset_type === "video_mp4");
   const thumbnailAsset = assets.find((asset) => asset.asset_type === "thumbnail");
@@ -174,7 +185,7 @@ export function VideoReviewPage() {
             <div><span>Topic</span><strong>{String(run?.topic ?? "")}</strong></div>
             <div><span>Status</span><strong>{formatVideoStatus(String(video.status))}</strong></div>
             <div><span>Provider</span><strong>{formatProvider(generatedProvider)}</strong></div>
-            <div><span>Quality Score</span><strong>{String(latestQualityCheck?.score ?? "n/a")}</strong></div>
+            <div><span>Technical Quality</span><strong>{String(latestQualityCheck?.score ?? "n/a")}</strong></div>
           </div>
         ) : null}
       </section>
@@ -297,7 +308,7 @@ export function VideoReviewPage() {
             </div>
 
             <div className="panel inset">
-              <h3>Quality Check</h3>
+              <h3>Technical Quality</h3>
               {latestQualityCheck ? (
                 <div className="stack">
                   <div className="key-grid">
@@ -328,6 +339,58 @@ export function VideoReviewPage() {
                 </div>
               ) : (
                 <p className="subtle">No quality check found for this run.</p>
+              )}
+            </div>
+
+            <div className="panel inset">
+              <h3>Story Adherence</h3>
+              {storyAdherence ? (
+                <div className="stack">
+                  <div className="key-grid">
+                    <div><span>Status</span><strong>{String(storyAdherence.status ?? "unknown").split("_").join(" ")}</strong></div>
+                    <div><span>Recommendation</span><strong>{String(storyAdherence.recommendation ?? "n/a")}</strong></div>
+                  </div>
+                  <p>{String(storyAdherence.explanation ?? "No story adherence review explanation available.")}</p>
+                  <div className="key-grid">
+                    <div><span>Setup Present</span><strong>{formatAdherenceValue(storyAdherence.setup_present)}</strong></div>
+                    <div><span>Subject Present</span><strong>{formatAdherenceValue(storyAdherence.intended_subject_present)}</strong></div>
+                    <div><span>Transformation Attempted</span><strong>{formatAdherenceValue(storyAdherence.transformation_attempted)}</strong></div>
+                    <div><span>Transformation Completed</span><strong>{formatAdherenceValue(storyAdherence.transformation_completed)}</strong></div>
+                    <div><span>Final State Visible</span><strong>{formatAdherenceValue(storyAdherence.required_final_state_visible)}</strong></div>
+                    <div><span>Final Hold Achieved</span><strong>{formatAdherenceValue(storyAdherence.final_state_hold_achieved)}</strong></div>
+                  </div>
+                  <details className="technical-disclosure">
+                    <summary>Show intended outcome contract</summary>
+                    <div className="stack compact technical-stack">
+                      <div className="copy-block">
+                        <strong>Initial state</strong>
+                        <pre>{String(storyAdherence.initial_state ?? "")}</pre>
+                      </div>
+                      <div className="copy-block">
+                        <strong>Trigger</strong>
+                        <pre>{String(storyAdherence.trigger ?? "")}</pre>
+                      </div>
+                      <div className="copy-block">
+                        <strong>Required transformation</strong>
+                        <pre>{String(storyAdherence.required_transformation ?? "")}</pre>
+                      </div>
+                      <div className="copy-block">
+                        <strong>Required final state</strong>
+                        <pre>{String(storyAdherence.required_final_state ?? "")}</pre>
+                      </div>
+                      <div className="copy-block">
+                        <strong>Final-state hold</strong>
+                        <pre>{String(storyAdherence.final_state_hold ?? "")}</pre>
+                      </div>
+                      <div className="copy-block">
+                        <strong>Prohibited actions</strong>
+                        <pre>{Array.isArray(storyAdherence.prohibited_actions) ? storyAdherence.prohibited_actions.map(String).join("\n") : String(storyAdherence.prohibited_actions ?? "")}</pre>
+                      </div>
+                    </div>
+                  </details>
+                </div>
+              ) : (
+                <p className="subtle">No story adherence review data found for this run.</p>
               )}
             </div>
 

@@ -319,8 +319,26 @@ def make_visual_plan(
     solved_state: str,
     setting: str,
     icon: str,
+    final_state_hold: str | None = None,
+    motion_restrictions: list[str] | None = None,
     forbidden_actions: list[str] | None = None,
+    prompt_initial_state: str | None = None,
+    prompt_trigger: str | None = None,
+    prompt_transformation: str | None = None,
+    prompt_final_state: str | None = None,
+    prompt_final_hold: str | None = None,
+    prompt_setting: str | None = None,
 ) -> dict[str, Any]:
+    default_motion_restrictions = [
+        "no new characters",
+        "no location changes",
+        "no repeated random actions",
+        "no unrelated object movement",
+        "do not remain in the initial problem state",
+        "complete the described transformation",
+        "hold on the finished result for the final two seconds",
+        "no unresolved ending",
+    ]
     return {
         "protagonist": protagonist,
         "coding_problem": coding_problem,
@@ -328,8 +346,19 @@ def make_visual_plan(
         "tool_or_intervention": tool_or_intervention,
         "visible_transformation": transformation,
         "final_solved_state": solved_state,
+        "initial_state": f"{protagonist} is blocked by {coding_problem} while {obstacle}",
+        "trigger": tool_or_intervention,
+        "required_final_state": solved_state,
+        "final_state_hold": final_state_hold or solved_state,
+        "prompt_initial_state": prompt_initial_state or f"{protagonist} is blocked by {coding_problem}",
+        "prompt_trigger": prompt_trigger or tool_or_intervention,
+        "prompt_transformation": prompt_transformation or transformation,
+        "prompt_final_state": prompt_final_state or solved_state,
+        "prompt_final_hold": prompt_final_hold or final_state_hold or solved_state,
+        "prompt_setting": prompt_setting or setting,
         "setting": setting,
         "icon": icon,
+        "motion_restrictions": list(dict.fromkeys([*default_motion_restrictions, *(motion_restrictions or [])])),
         "forbidden_actions": forbidden_actions or ["floating text labels", "unrelated side characters", "invisible explanation-only actions"],
     }
 
@@ -346,6 +375,11 @@ def decompose_topic_to_visual_plan(topic: str, audience_level: str) -> dict[str,
             solved_state="the request package rolls cleanly through the doorway while the blocked package stays outside",
             setting="a club-like API entrance with one guarded door and one waiting lane",
             icon="matching access pass",
+            prompt_initial_state="a bouncer blocks a courier robot at an API doorway because the pass does not match",
+            prompt_trigger="a server clerk updates the courier with a matching pass",
+            prompt_transformation="the courier swaps to the matching pass and the blocked doorway opens",
+            prompt_final_state="the request package rolls through the doorway while the blocked package stays outside",
+            prompt_final_hold="hold the courier inside the doorway with the matching pass still visible",
             forbidden_actions=["caption cards", "computer code overlays", "multiple unrelated doors"],
         )
     if "developer fixes a bug with an ai assistant" in normalized:
@@ -353,11 +387,18 @@ def decompose_topic_to_visual_plan(topic: str, audience_level: str) -> dict[str,
             protagonist="a stressed developer",
             coding_problem="a red blinking build machine keeps jamming on one broken gear",
             obstacle="the developer keeps trying random buttons while sparks and error lights repeat the same failure",
-            tool_or_intervention="an AI assistant hologram points a laser marker at the single cracked gear",
-            transformation="the developer replaces the cracked gear with a clean new gear and the machine immediately starts smoothly",
-            solved_state="the once-jammed machine runs with green lights while the developer and AI assistant share a relieved nod",
+            tool_or_intervention="an AI assistant hologram points directly at the single cracked gear",
+            transformation="the developer removes the cracked gear, inserts one clean gear, and the machine shifts from sparking and jerking to one smooth steady motion",
+            solved_state="the machine runs smoothly with green lights and the new gear spinning cleanly while the developer stands beside it",
             setting="a compact office workshop with one build machine on the desk",
             icon="cracked gear",
+            final_state_hold="the repaired machine keeps running smoothly with the new gear visible and no more sparks",
+            motion_restrictions=["no running", "no dancing"],
+            prompt_initial_state="a build machine jams on one cracked gear while sparks repeat",
+            prompt_trigger="an AI assistant points straight at the cracked gear",
+            prompt_transformation="the developer swaps the cracked gear for a clean one and the machine smooths out",
+            prompt_final_state="the machine runs with green lights and the new gear spinning cleanly",
+            prompt_final_hold="hold the repaired machine running smoothly with no sparks",
             forbidden_actions=["typing walls of code", "crowded office chaos", "abstract magic effects"],
         )
     if "messy code becomes clean and organised" in normalized:
@@ -365,11 +406,19 @@ def decompose_topic_to_visual_plan(topic: str, audience_level: str) -> dict[str,
             protagonist="a developer librarian",
             coding_problem="a tower of tangled code folders, wires, and sticky notes spills across one desk",
             obstacle="every time the developer pulls one folder, three more mixed-up folders slide out of place",
-            tool_or_intervention="colored trays and labeled bins are arranged into one simple filing rack",
-            transformation="the developer sorts loose folders and tangled wires into matching bins until the desk becomes ordered",
-            solved_state="a clean shelf of aligned folders sits beside a clear desk with one neat working screen",
+            tool_or_intervention="the developer slides one empty filing rack with color-coded trays beside the desk and starts sorting into it",
+            transformation="the developer continuously moves every loose folder and cable from the messy desk into matching trays until the pile disappears and the desktop clears",
+            solved_state="all loose folders are aligned inside the filing rack, all cables are contained, the desk surface is completely clear, and the developer stands beside the organised workspace",
             setting="a bright office archive corner with one overloaded desk and one empty filing rack",
             icon="color-coded filing trays",
+            final_state_hold="the fully organized filing rack and completely clear desk stay still in frame while the developer stands beside them",
+            motion_restrictions=["no running", "no dancing"],
+            prompt_initial_state="a desk is buried in loose folders, cables, and sticky notes",
+            prompt_trigger="the developer slides in a color-coded rack",
+            prompt_transformation="folders and cables sort into trays until the pile disappears and the desk clears",
+            prompt_final_state="folders aligned in the rack, cables contained, desk fully clear",
+            prompt_final_hold="organized rack, clear desk, developer beside them",
+            prompt_setting="bright archive desk with one empty filing rack",
             forbidden_actions=["invisible cleanup", "generic glowing swirl", "extra characters doing unrelated work"],
         )
     if "slow manual coding task becomes automated" in normalized:
@@ -377,11 +426,18 @@ def decompose_topic_to_visual_plan(topic: str, audience_level: str) -> dict[str,
             protagonist="a tired developer operator",
             coding_problem="they keep stamping the same stack of task cards by hand at a slow conveyor desk",
             obstacle="the card pile keeps growing faster than the developer can stamp it",
-            tool_or_intervention="a small automation robot is wheeled beside the conveyor and connected to the stamp arm",
-            transformation="the robot takes over the repeated stamping cycle while the developer only presses one start button",
-            solved_state="the full stack clears quickly into a finished tray while the developer watches the conveyor run on its own",
+            tool_or_intervention="a small automation robot is connected to the stamp arm and the developer presses one start button",
+            transformation="the robot takes over the same stamping cycle in one continuous pass while the backlog shrinks card by card without the developer hand-stamping anymore",
+            solved_state="the full stack clears into the finished tray while the conveyor keeps running on its own and the developer no longer stamps by hand",
             setting="a factory-style office desk with one conveyor, one stamp, and one backlog tray",
             icon="stamping robot arm",
+            final_state_hold="the finished tray stays full and the developer watches the conveyor run by itself",
+            motion_restrictions=["no running", "no dancing"],
+            prompt_initial_state="a backlog keeps growing while a developer hand-stamps cards one by one",
+            prompt_trigger="a small automation robot connects to the stamp arm and the developer presses start",
+            prompt_transformation="the robot takes over the same stamping cycle and the backlog shrinks continuously",
+            prompt_final_state="the finished tray fills while the developer stops hand-stamping",
+            prompt_final_hold="hold the full finished tray and self-running conveyor",
             forbidden_actions=["typing code overlays", "extra mini tasks", "unclear off-screen automation"],
         )
     if "api" in normalized:
@@ -421,42 +477,78 @@ def decompose_topic_to_visual_plan(topic: str, audience_level: str) -> dict[str,
     )
 
 
+def build_story_adherence_contract(topic: str, audience_level: str, target_duration: int) -> dict[str, Any]:
+    plan = decompose_topic_to_visual_plan(topic, audience_level)
+    if target_duration <= 10:
+        timing = {
+            "setup": "0-2s",
+            "transformation": "2-8s",
+            "final_state_hold": "8-10s",
+        }
+    else:
+        timings = build_scene_timings(target_duration)
+        timing = {
+            "setup": timings[0],
+            "transformation": timings[2] if len(timings) > 2 else timings[-1],
+            "final_state_hold": timings[-1],
+        }
+    prohibited_actions = list(dict.fromkeys([*plan["motion_restrictions"], *plan["forbidden_actions"]]))
+    return {
+        "topic": topic,
+        "subject": plan["protagonist"],
+        "setting": plan["setting"],
+        "initial_state": plan["initial_state"],
+        "trigger": plan["trigger"],
+        "required_transformation": plan["visible_transformation"],
+        "required_final_state": plan["required_final_state"],
+        "final_state_hold": plan["final_state_hold"],
+        "prompt_initial_state": plan["prompt_initial_state"],
+        "prompt_trigger": plan["prompt_trigger"],
+        "prompt_transformation": plan["prompt_transformation"],
+        "prompt_final_state": plan["prompt_final_state"],
+        "prompt_final_hold": plan["prompt_final_hold"],
+        "prompt_setting": plan["prompt_setting"],
+        "prohibited_actions": prohibited_actions,
+        "duration_plan": timing,
+    }
+
+
 def build_scene_contracts(topic: str, style_preset: str, target_duration: int, audience_level: str) -> list[dict[str, str]]:
     plan = decompose_topic_to_visual_plan(topic, audience_level)
     style_label = style_preset.replace("_", " ")
     if target_duration <= 10:
         return [
             {
-                "time": "0-3s",
+                "time": "0-2s",
                 "purpose": "setup",
                 "subject": plan["protagonist"],
                 "setting": f"{style_label} {plan['setting']}",
-                "visible_action": f"{plan['protagonist']} faces {plan['coding_problem']} while {plan['visible_obstacle']}",
-                "state_before": "the workflow is blocked and frustrating",
-                "state_after": f"the exact blockage is obvious through {plan['icon']}",
+                "visible_action": plan["initial_state"],
+                "state_before": plan["initial_state"],
+                "state_after": f"the single blockage is unmistakable through {plan['icon']}",
                 "camera_direction": "quick push-in from wide desk view to the blocked object",
                 "forbidden_actions": ", ".join(plan["forbidden_actions"]),
             },
             {
-                "time": "3-7s",
+                "time": "2-8s",
                 "purpose": "transformation",
-                "subject": f"{plan['protagonist']} and {plan['tool_or_intervention']}",
+                "subject": plan["protagonist"],
                 "setting": f"{style_label} {plan['setting']}",
-                "visible_action": f"{plan['tool_or_intervention']} causes {plan['visible_transformation']}",
-                "state_before": f"{plan['visible_obstacle']}",
-                "state_after": "the blocking object is clearly changed and working differently",
+                "visible_action": f"{plan['trigger']} and {plan['visible_transformation']}",
+                "state_before": plan["initial_state"],
+                "state_after": "the original blockage is disappearing and the solved result is almost complete",
                 "camera_direction": "side tracking shot that follows the tool fixing the object",
                 "forbidden_actions": ", ".join(plan["forbidden_actions"]),
             },
             {
-                "time": "7-10s",
-                "purpose": "payoff",
+                "time": "8-10s",
+                "purpose": "final-state hold",
                 "subject": plan["protagonist"],
                 "setting": f"{style_label} {plan['setting']}",
-                "visible_action": plan["final_solved_state"],
-                "state_before": "the task was stuck or repetitive",
-                "state_after": "the workflow is now smooth, fast, or orderly",
-                "camera_direction": "settle into a clean hero frame on the solved result",
+                "visible_action": plan["final_state_hold"],
+                "state_before": "the transformation has already completed before this hold begins",
+                "state_after": plan["required_final_state"],
+                "camera_direction": "hold steady on the completed result for the final two seconds",
                 "forbidden_actions": ", ".join(plan["forbidden_actions"]),
             },
         ]
@@ -538,11 +630,11 @@ def default_review_sections(run: PipelineRun, idea: ContentIdea | None, script: 
     return {
         "concept_clarity": f"Show {run.topic} through one concrete visual transformation that a beginner can identify instantly.",
         "hook_strength": idea.hook if idea else f"Make {run.topic} feel surprising in the first two seconds.",
-        "visual_metaphor": "Keep one concrete object transformation instead of stacked abstract metaphors.",
+        "visual_metaphor": "Keep one concrete transformation and make the final solved state unmistakable on screen.",
         "scene_timing": ", ".join(str(scene.get("time", "")) for scene in scenes if scene.get("time")) or "Add scene timing before generating video.",
         "final_cta": f"End with a clean CTA that feels useful, not salesy. {get_run_input_config(run).get('preferred_cta', '')}".strip(),
         "caption_strength": run.caption_override or f"Caption should sell the hook, stay concise, and reinforce {run.topic}.",
-        "risk_issues": f"Avoid banned claims and keep the action visually obvious without captions. Final frame should show: {final_scene.get('visible_action', '') or 'the solved state clearly.'}",
+        "risk_issues": f"Avoid banned claims and keep the action visually obvious without captions. Reach the solved state before the final hold. Final frame should show: {final_scene.get('visible_action', '') or 'the solved state clearly.'}",
     }
 
 
@@ -613,30 +705,12 @@ def sanitize_runway_visual_phrase(text: str, topic: str = "") -> str:
 
 def build_runway_metaphor_visual_context(run: PipelineRun, idea: ContentIdea | None, preset: dict[str, str]) -> str:
     style_phrase = RUNWAY_STYLE_OVERRIDES.get(run.style_preset, preset["style"])
-    plan = decompose_topic_to_visual_plan(run.topic, get_run_input_config(run).get("audience_level", "beginner"))
-    return (
-        f"A {style_phrase} vertical 9:16 short in {sanitize_runway_visual_phrase(plan['setting'])}. "
-        f"Focus on {sanitize_runway_visual_phrase(plan['protagonist'])}, {sanitize_runway_visual_phrase(plan['visible_obstacle'])}, "
-        f"{sanitize_runway_visual_phrase(plan['tool_or_intervention'])}, and {sanitize_runway_visual_phrase(plan['final_solved_state'])}."
-    )
+    contract = build_story_adherence_contract(run.topic, get_run_input_config(run).get("audience_level", "beginner"), 10)
+    return f"{style_phrase.capitalize()}, 9:16, {sanitize_runway_visual_phrase(contract.get('prompt_setting', contract['setting']))}."
 
 
-def extract_runway_visual_scene_beats(run: PipelineRun, scenes: list[dict[str, Any]], preset: dict[str, str]) -> list[str]:
-    beats: list[str] = []
-    for scene in scenes[:3]:
-        subject = sanitize_runway_visual_phrase(str(scene.get("subject", "")), run.topic)
-        action = sanitize_runway_visual_phrase(str(scene.get("visible_action", "")), run.topic)
-        before = sanitize_runway_visual_phrase(str(scene.get("state_before", "")), run.topic)
-        after = sanitize_runway_visual_phrase(str(scene.get("state_after", "")), run.topic)
-        motion = sanitize_runway_visual_phrase(str(scene.get("camera_direction", "") or scene.get("motion_camera", "")), run.topic)
-        beat_parts = [part for part in (subject, action, f"before {before}" if before else "", f"after {after}" if after else "", motion) if part]
-        if beat_parts:
-            beats.append(". ".join(beat_parts))
-    if beats:
-        return beats
-    return [
-        f"A {RUNWAY_STYLE_OVERRIDES.get(run.style_preset, preset['style'])} short with one clear character, one visible obstacle, one direct fix, and one clear payoff"
-    ]
+def build_runway_motion_restrictions(contract: dict[str, Any]) -> str:
+    return "new characters, location changes, random repeated actions, unresolved ending, or staying messy; finish the transformation"
 
 
 def build_runway_visual_only_prompt(
@@ -651,13 +725,20 @@ def build_runway_visual_only_prompt(
     if base_source:
         visual_body = sanitize_runway_visual_phrase(strip_runway_text_free_ban(base_source), run.topic)
     else:
-        beats = extract_runway_visual_scene_beats(run, scenes, preset)
-        focused_beats = beats[:2] if not force_target else beats[:1]
+        contract = build_story_adherence_contract(
+            run.topic,
+            get_run_input_config(run).get("audience_level", "beginner"),
+            10 if get_settings().video_provider == "runway" else max(len(scenes), 1) * 5,
+        )
+        restrictions = build_runway_motion_restrictions(contract)
         visual_body = (
             f"{build_runway_metaphor_visual_context(run, idea, preset)} "
-            f"Story beats: {' '.join(f'{beat}.' for beat in focused_beats)} "
-            "Show the idea only through action, objects, and motion. "
-            "Keep one protagonist, one obstacle, one intervention, and one solved result."
+            f"Start: {sanitize_runway_visual_phrase(contract.get('prompt_initial_state', contract['initial_state']), run.topic)}. "
+            f"Trigger: {sanitize_runway_visual_phrase(contract.get('prompt_trigger', contract['trigger']), run.topic)}. "
+            f"Transform: {sanitize_runway_visual_phrase(contract.get('prompt_transformation', contract['required_transformation']), run.topic)}. "
+            f"By 8s: {sanitize_runway_visual_phrase(contract.get('prompt_final_state', contract['required_final_state']), run.topic)}. "
+            f"Hold 8-10s: {sanitize_runway_visual_phrase(contract.get('prompt_final_hold', contract['final_state_hold']), run.topic)}. "
+            f"Avoid {restrictions}."
         )
     constraints = get_prompt_constraints("runway")
     limit = constraints["target"]
@@ -769,6 +850,7 @@ def build_preflight_review(db: Session, run: PipelineRun) -> dict[str, Any]:
     prompt_target_miss = prompt_length > constraints["target"]
     branding_present = prompt_preview.startswith(RUNWAY_TEXT_FREE_BAN) if provider_name == "runway" else "End tag:" in prompt_preview
     duplicate_text_free_instruction = prompt_preview.count(RUNWAY_TEXT_FREE_BAN) > 1 if provider_name == "runway" else False
+    has_story_beats_phrase = "story beats:" in prompt_preview.lower()
     caption_text = run.caption_override or ""
     hook_text = idea.hook if idea else ""
     abstract_hits = find_abstract_phrase_hits(prompt_preview + " " + " ".join(collect_scene_text(scene) for scene in scenes))
@@ -804,9 +886,17 @@ def build_preflight_review(db: Session, run: PipelineRun) -> dict[str, Any]:
     expected_scene_count = 3 if script and script.duration_seconds <= 10 else 4
     pacing_score = round(min(1.0, 0.45 + (0.2 if len(scenes) == expected_scene_count else 0.05) + (0.12 if all(scene.get("time") for scene in scenes) else 0) - (0.08 if any(len(str(scene.get("dialogue", "")).split()) > 14 for scene in scenes) else 0)), 2)
     social_hook_score = round(min(1.0, 0.58 + (0.16 if 35 <= len(hook_text) <= 100 else 0.08) + (0.08 if caption_text else 0) + (0.08 if "?" in hook_text or ":" in hook_text else 0)), 2)
-    prompt_safety_score = round(max(0.0, min(1.0, 0.92 - (0.4 if too_long else 0) - (0.15 if prompt_target_miss else 0) - (0.18 if not branding_present else 0) - (0.12 if duplicate_text_free_instruction else 0) - (0.18 if abstract_hits else 0))), 2)
+    prompt_safety_score = round(max(0.0, min(1.0, 0.92 - (0.4 if too_long else 0) - (0.15 if prompt_target_miss else 0) - (0.18 if not branding_present else 0) - (0.12 if duplicate_text_free_instruction else 0) - (0.18 if abstract_hits else 0) - (0.1 if has_story_beats_phrase else 0))), 2)
     overall = round((clarity_score + visual_score + pacing_score + social_hook_score + prompt_safety_score) / 5, 2)
-    prompt_valid = bool(prompt_preview.strip()) and branding_present and not too_long and not abstract_hits and contract_complete and topic_specific_scene_count == len(scenes)
+    prompt_valid = (
+        bool(prompt_preview.strip())
+        and branding_present
+        and not too_long
+        and not abstract_hits
+        and not has_story_beats_phrase
+        and contract_complete
+        and topic_specific_scene_count == len(scenes)
+    )
     return sanitize_for_json(
         {
             "scores": {
@@ -827,6 +917,7 @@ def build_preflight_review(db: Session, run: PipelineRun) -> dict[str, Any]:
             "generic_output_flags": {
                 "abstract_phrase_hits": abstract_hits,
                 "duplicate_text_free_instruction": duplicate_text_free_instruction,
+                "story_beats_wording": has_story_beats_phrase,
                 "topic_specific_scene_count": topic_specific_scene_count,
                 "scene_contract_complete": contract_complete,
                 "similar_storyboards": similarity_hits,
@@ -967,9 +1058,11 @@ def generate_script(db: Session, run: PipelineRun):
     prompt = f"Write a short {run_config['content_format']} script for '{idea.title}' aimed at {run_config['audience_level']} viewers."
     result = llm.generate(PipelineStage.SCRIPT_GENERATION.value, prompt, {"idea_id": idea.id, "config": run_config})
     scenes = build_scene_templates(run.topic, run.style_preset, target_duration, run_config["audience_level"])
+    adherence_contract = build_story_adherence_contract(run.topic, run_config["audience_level"], target_duration)
     script_json = {
         "hook": idea.hook,
         "scenes": scenes,
+        "story_adherence_contract": adherence_contract,
         "final_tag": build_account_config(account.account_config_json if account else {}).get("end_tag", "Made by CodeToons AI"),
         "target_duration_seconds": target_duration,
         "audience_level": run_config["audience_level"],
@@ -1003,7 +1096,9 @@ def generate_storyboard(db: Session, run: PipelineRun):
     prompt = f"Create storyboard frames from the script in the {run.style_preset} preset."
     result = llm.generate(PipelineStage.STORYBOARD_GENERATION.value, prompt, {"script": script.script_json, "config": run_config})
     scenes = get_script_scenes(script)
+    adherence_contract = build_story_adherence_contract(run.topic, run_config["audience_level"], script.duration_seconds if script else 10)
     frames = {
+        "story_adherence_contract": adherence_contract,
         "storyboard_frames": [
             {
                 "frame": index + 1,
@@ -1064,6 +1159,7 @@ def generate_content_critique(db: Session, run: PipelineRun):
     dialogue_words = sum(len(str(scene.get("dialogue", "")).split()) for scene in scenes)
     too_much_text = dialogue_words > max(script.duration_seconds * 2, 22) if script else False
     review_sections = get_review_sections(run, idea, script)
+    adherence_contract = build_story_adherence_contract(run.topic, run_config["audience_level"], script.duration_seconds if script else 10)
     critique = {
         "beginner_clarity": {"score": 0.9 if script and script.duration_seconds <= 10 else 0.82, "notes": "Clear enough for beginner coders with simple visual language."},
         "metaphor_strength": {"score": 0.88 if idea and "bouncer" in idea.hook.lower() else 0.78, "notes": "Metaphor is memorable and easy to retell."},
@@ -1071,6 +1167,7 @@ def generate_content_critique(db: Session, run: PipelineRun):
         "social_hook_strength": {"score": 0.86 if idea and len(idea.hook) <= 90 else 0.74, "notes": "Hook is short enough to land in a short-form opener."},
         "audience_fit": {"score": 0.9 if idea and idea.difficulty == run_config["audience_level"] else 0.76, "notes": f"Targeted for {run_config['audience_level']} viewers."},
         "brand_voice_alignment": {"score": 0.85, "notes": f"Caption tone should stay {run_config['caption_tone']} and avoid {', '.join(run_config['avoid_phrases'])}."},
+        "outcome_adherence_plan": adherence_contract,
         "structured_review": review_sections,
         "too_much_text_dialogue_warning": {"flagged": too_much_text, "notes": "Dialogue is getting dense for a short video." if too_much_text else "Dialogue density looks safe for a fast watch."},
         "serious_issue": not scenes,
@@ -1406,6 +1503,70 @@ def run_quality_check(db: Session, run: PipelineRun):
     add_event(db, run.id, "quality_check.completed", "Quality check passed" if passed else "Quality check failed", stage=PipelineStage.QUALITY_CHECK.value)
 
 
+def build_story_adherence_review(db: Session, run: PipelineRun) -> dict[str, Any]:
+    script = db.get(Script, run.script_id) if run.script_id else None
+    storyboard = db.get(Storyboard, run.storyboard_id) if run.storyboard_id else None
+    video = db.get(Video, run.video_id) if run.video_id else None
+    latest_quality = (
+        db.query(QualityCheck)
+        .filter(QualityCheck.pipeline_run_id == run.id)
+        .order_by(QualityCheck.created_at.desc())
+        .first()
+    )
+    run_config = get_run_input_config(run)
+    contract = (
+        dict(script.script_json or {}).get("story_adherence_contract")
+        if script and isinstance(script.script_json, dict)
+        else None
+    )
+    if not isinstance(contract, dict):
+        frames_json = storyboard.frames_json if storyboard and isinstance(storyboard.frames_json, dict) else {}
+        contract = frames_json.get("story_adherence_contract") if isinstance(frames_json.get("story_adherence_contract"), dict) else None
+    if not isinstance(contract, dict):
+        contract = build_story_adherence_contract(
+            run.topic,
+            run_config["audience_level"],
+            script.duration_seconds if script else get_target_duration_seconds(run_config, get_settings().video_provider),
+        )
+    review_available = False
+    has_video = bool(video and video.provider_job_id)
+    explanation = (
+        "Semantic story adherence review is unavailable because no configured vision-capable provider exists in this environment. "
+        "A multimodal model that can inspect representative video frames is required."
+    )
+    if not has_video:
+        explanation = "Preview only. Story adherence evidence is defined below, but no video has been generated yet."
+    return sanitize_for_json(
+        {
+            "available": review_available,
+            "status": "preview_only" if not has_video else "unavailable",
+            "review_source": "none",
+            "subject": contract.get("subject"),
+            "initial_state": contract.get("initial_state"),
+            "trigger": contract.get("trigger"),
+            "required_transformation": contract.get("required_transformation"),
+            "required_final_state": contract.get("required_final_state"),
+            "final_state_hold": contract.get("final_state_hold"),
+            "prohibited_actions": contract.get("prohibited_actions", []),
+            "duration_plan": contract.get("duration_plan", {}),
+            "setup_present": None,
+            "intended_subject_present": None,
+            "transformation_attempted": None,
+            "transformation_completed": None,
+            "required_final_state_visible": None,
+            "final_state_hold_achieved": None,
+            "unrelated_actions_detected": None,
+            "overall_adherence_score": None,
+            "explanation": explanation,
+            "recommendation": "Manual Review Required" if has_video else "Preview Only",
+            "technical_quality_score": latest_quality.score if latest_quality else None,
+            "technical_quality_result": (
+                "Pass" if latest_quality and latest_quality.passed else "Needs Review" if latest_quality else "Not Run"
+            ),
+        }
+    )
+
+
 def finalize_post_video_processing(db: Session, run: PipelineRun) -> PipelineRun:
     run.current_stage = PipelineStage.QUALITY_CHECK
     db.commit()
@@ -1694,6 +1855,7 @@ def regenerate_text_only(db: Session, run_id: str, review_notes: str | None = No
     target_duration = get_target_duration_seconds(run_config, get_settings().video_provider)
     refreshed_scenes = build_scene_templates(run.topic, run.style_preset, target_duration, run_config["audience_level"])
     topic_plan = decompose_topic_to_visual_plan(run.topic, run_config["audience_level"])
+    adherence_contract = build_story_adherence_contract(run.topic, run_config["audience_level"], target_duration)
     idea.title = f"{run.topic} as one concrete visual transformation"
     idea.hook = f"{run.topic} clicks once the blocked object visibly changes on screen."
     idea.concept = f"{topic_plan['protagonist']} uses {topic_plan['tool_or_intervention']} to turn {topic_plan['visible_obstacle']} into {topic_plan['final_solved_state']}."
@@ -1704,6 +1866,7 @@ def regenerate_text_only(db: Session, run_id: str, review_notes: str | None = No
             **dict(script.script_json or {}),
             "hook": idea.hook,
             "scenes": refreshed_scenes,
+            "story_adherence_contract": adherence_contract,
             "target_duration_seconds": target_duration,
             "audience_level": run_config["audience_level"],
             "content_format": run_config["content_format"],
@@ -1711,6 +1874,7 @@ def regenerate_text_only(db: Session, run_id: str, review_notes: str | None = No
     )
     storyboard.frames_json = sanitize_for_json(
         {
+            "story_adherence_contract": adherence_contract,
             "storyboard_frames": [
                 {
                     "frame": index + 1,
@@ -1863,6 +2027,7 @@ def get_pipeline_run_detail(db: Session, run_id: str) -> dict[str, Any]:
     script = db.get(Script, run.script_id) if run.script_id else None
     review_sections = get_review_sections(run, idea, script)
     preflight = build_preflight_review(db, run) if run.script_id else None
+    story_adherence_review = build_story_adherence_review(db, run)
     return {
         "pipeline_run": serialize_model(run),
         "idea": serialize_model(idea) if idea else None,
@@ -1879,6 +2044,7 @@ def get_pipeline_run_detail(db: Session, run_id: str) -> dict[str, Any]:
         ],
         "prompt_preview": build_video_prompt(run, db),
         "content_critique": critique_log.response_json.get("critique") if critique_log else None,
+        "story_adherence_review": story_adherence_review,
         "review_sections": review_sections,
         "review_preflight": preflight,
     }

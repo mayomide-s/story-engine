@@ -121,7 +121,7 @@ def test_runway_storyboard_timings_fit_requested_duration(client, monkeypatch):
     response = client.post("/api/pipeline-runs", json={"topic": "CORS", "auto_mode": False})
     assert response.status_code == 200
     scenes = response.json()["script"]["script_json"]["scenes"]
-    assert [scene["time"] for scene in scenes] == ["0-3s", "3-7s", "7-10s"]
+    assert [scene["time"] for scene in scenes] == ["0-2s", "2-8s", "8-10s"]
     assert response.json()["script"]["duration_seconds"] == 10
     get_settings.cache_clear()
 
@@ -139,6 +139,7 @@ def test_runway_prompt_preview_stays_within_provider_limit(client, monkeypatch):
     assert "Made by CodeToons AI" not in prompt_preview
     assert "Here is why" not in prompt_preview
     assert "That is" not in prompt_preview
+    assert "Story beats:" not in prompt_preview
     assert "core metaphor" not in prompt_preview.lower()
     assert "tied to the topic" not in prompt_preview.lower()
     assert "core metaphor for with" not in prompt_preview.lower()
@@ -266,10 +267,15 @@ def test_runway_storyboard_scenes_include_concrete_contract_fields(client, monke
     get_settings.cache_clear()
     response = client.post("/api/pipeline-runs", json={"topic": "Developer fixes a bug with an AI assistant", "auto_mode": False, "style_preset": "office_comedy"})
     assert response.status_code == 200
-    scene = response.json()["script"]["script_json"]["scenes"][0]
+    payload = response.json()
+    scene = payload["script"]["script_json"]["scenes"][0]
     for key in ("purpose", "subject", "setting", "visible_action", "state_before", "state_after", "camera_direction", "forbidden_actions"):
         assert scene[key]
     assert "core metaphor" not in scene["visible_action"].lower()
+    contract = payload["story_adherence_review"]
+    for key in ("initial_state", "trigger", "required_transformation", "required_final_state", "final_state_hold", "prohibited_actions"):
+        assert contract[key]
+    assert contract["status"] == "preview_only"
     get_settings.cache_clear()
 
 
@@ -311,6 +317,17 @@ def test_preflight_rejects_generic_prompt_override_with_abstract_placeholders(cl
     assert "core metaphor" in preflight["generic_output_flags"]["abstract_phrase_hits"]
     assert preflight["summary"] == "Preflight rejected generic output. Make the scenes more topic-specific before spending credits."
     get_settings.cache_clear()
+
+
+def test_story_adherence_review_is_unavailable_without_vision_provider(client):
+    response = client.post("/api/pipeline-runs", json={"topic": "Messy code becomes clean and organised", "auto_mode": False, "style_preset": "office_comedy"})
+    assert response.status_code == 200
+    review = response.json()["story_adherence_review"]
+    assert review["available"] is False
+    assert review["review_source"] == "none"
+    assert review["recommendation"] == "Preview Only"
+    assert "vision-capable provider" not in review["explanation"].lower()
+    assert "preview only" in review["explanation"].lower()
 
 
 def test_preflight_scoring_appears_in_run_detail(client):

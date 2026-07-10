@@ -202,6 +202,7 @@ export function IdeasPage() {
   const idea = detail?.idea as Record<string, unknown> | null;
   const storyboard = detail?.storyboard as Record<string, unknown> | null;
   const critique = detail?.content_critique ?? null;
+  const storyAdherence = detail?.story_adherence_review as Record<string, unknown> | null;
   const promptPreview = useMemo(() => promptOverride.trim() || String(detail?.prompt_preview ?? ""), [detail?.prompt_preview, promptOverride]);
   const promptLength = detail?.review_preflight?.prompt_length;
   const preflightScores = detail?.review_preflight?.scores ?? {};
@@ -372,6 +373,12 @@ export function IdeasPage() {
                 <span>Saved Prompt Override</span>
                 <textarea value={promptOverride} onChange={(event) => setPromptOverride(event.target.value)} rows={8} disabled={editingLocked} />
               </label>
+              {!promptPreview.includes("Story beats:") ? (
+                <div className="notice-card">
+                  <strong>Prompt structure check</strong>
+                  <p>The preview uses the direct outcome-adherence format and does not include duplicated "Story beats" wording.</p>
+                </div>
+              ) : null}
               <pre className="preview-block">{promptPreview}</pre>
             </div>
 
@@ -394,6 +401,46 @@ export function IdeasPage() {
                 </div>
               ) : (
                 <p className="subtle">No preflight score found for this run yet.</p>
+              )}
+            </div>
+
+            <div className="panel inset">
+              <h3>Outcome Adherence Plan</h3>
+              {storyAdherence ? (
+                <div className="stack compact">
+                  <div className="key-grid">
+                    <div><span>Subject</span><strong>{String(storyAdherence.subject ?? "n/a")}</strong></div>
+                    <div><span>Setup</span><strong>{String((storyAdherence.duration_plan as Record<string, unknown> | undefined)?.setup ?? "n/a")}</strong></div>
+                    <div><span>Transformation</span><strong>{String((storyAdherence.duration_plan as Record<string, unknown> | undefined)?.transformation ?? "n/a")}</strong></div>
+                    <div><span>Final Hold</span><strong>{String((storyAdherence.duration_plan as Record<string, unknown> | undefined)?.final_state_hold ?? "n/a")}</strong></div>
+                  </div>
+                  <div className="content-card">
+                    <div className="content-meta"><strong>Initial state</strong></div>
+                    <p>{String(storyAdherence.initial_state ?? "")}</p>
+                  </div>
+                  <div className="content-card">
+                    <div className="content-meta"><strong>Trigger</strong></div>
+                    <p>{String(storyAdherence.trigger ?? "")}</p>
+                  </div>
+                  <div className="content-card">
+                    <div className="content-meta"><strong>Required transformation</strong></div>
+                    <p>{String(storyAdherence.required_transformation ?? "")}</p>
+                  </div>
+                  <div className="content-card">
+                    <div className="content-meta"><strong>Required final state</strong></div>
+                    <p>{String(storyAdherence.required_final_state ?? "")}</p>
+                  </div>
+                  <div className="content-card">
+                    <div className="content-meta"><strong>Final-state hold</strong></div>
+                    <p>{String(storyAdherence.final_state_hold ?? "")}</p>
+                  </div>
+                  <div className="content-card">
+                    <div className="content-meta"><strong>Prohibited actions</strong></div>
+                    <p>{Array.isArray(storyAdherence.prohibited_actions) ? storyAdherence.prohibited_actions.map(String).join(", ") : String(storyAdherence.prohibited_actions ?? "")}</p>
+                  </div>
+                </div>
+              ) : (
+                <p className="subtle">No outcome adherence plan found for this run yet.</p>
               )}
             </div>
 

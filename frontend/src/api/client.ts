@@ -44,6 +44,7 @@ export type PipelineRunDetail = {
   pipeline_events: Record<string, unknown>[];
   prompt_preview?: string | null;
   content_critique?: Record<string, unknown> | null;
+  story_adherence_review?: Record<string, unknown> | null;
   review_sections?: Record<string, string> | null;
   review_preflight?: {
     scores?: Record<string, number>;

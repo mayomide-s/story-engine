@@ -89,5 +89,6 @@ class AggregatedPipelineRunResponse(BaseModel):
     pipeline_events: list[dict[str, Any]] = Field(default_factory=list)
     prompt_preview: str | None = None
     content_critique: dict[str, Any] | None = None
+    story_adherence_review: dict[str, Any] | None = None
     review_sections: dict[str, str] | None = None
     review_preflight: dict[str, Any] | None = None
