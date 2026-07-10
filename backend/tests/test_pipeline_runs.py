@@ -121,7 +121,7 @@ def test_runway_storyboard_timings_fit_requested_duration(client, monkeypatch):
     response = client.post("/api/pipeline-runs", json={"topic": "CORS", "auto_mode": False})
     assert response.status_code == 200
     scenes = response.json()["script"]["script_json"]["scenes"]
-    assert [scene["time"] for scene in scenes] == ["0-2s", "2-5s", "5-8s", "8-10s"]
+    assert [scene["time"] for scene in scenes] == ["0-3s", "3-7s", "7-10s"]
     assert response.json()["script"]["duration_seconds"] == 10
     get_settings.cache_clear()
 
@@ -134,13 +134,13 @@ def test_runway_prompt_preview_stays_within_provider_limit(client, monkeypatch):
     prompt_preview = response.json()["prompt_preview"]
     assert len(prompt_preview) <= 1000
     assert prompt_preview.startswith("TEXT-FREE VIDEO.")
-    assert prompt_preview.endswith("or subtitles.")
+    assert prompt_preview.count("TEXT-FREE VIDEO.") == 1
     assert "End tag:" not in prompt_preview
     assert "Made by CodeToons AI" not in prompt_preview
     assert "Here is why" not in prompt_preview
     assert "That is" not in prompt_preview
-    assert "One rule, one metaphor" not in prompt_preview
-    assert "Remember the mental model" not in prompt_preview
+    assert "core metaphor" not in prompt_preview.lower()
+    assert "tied to the topic" not in prompt_preview.lower()
     assert "core metaphor for with" not in prompt_preview.lower()
     positive_body = _runway_positive_prompt_body(prompt_preview)
     for banned_term in ("caption", "subtitle", "terminal", "code snippet", "whiteboard"):
@@ -243,8 +243,8 @@ def test_shorten_prompt_respects_provider_prompt_limits(client, monkeypatch):
     shortened = client.post(f"/api/pipeline-runs/{run_id}/prompt-actions", json={"action": "shorten"})
     assert shortened.status_code == 200
     payload = shortened.json()
-    assert len(payload["prompt_preview"]) <= 850
-    assert payload["review_preflight"]["prompt_length"]["target"] == 850
+    assert len(payload["prompt_preview"]) <= 700
+    assert payload["review_preflight"]["prompt_length"]["target"] == 700
     assert payload["review_preflight"]["prompt_length"]["limit"] == 1000
     get_settings.cache_clear()
 
@@ -256,8 +256,60 @@ def test_prompt_length_indicator_uses_correct_limit_and_target(client, monkeypat
     assert response.status_code == 200
     preflight = response.json()["review_preflight"]
     assert preflight["prompt_length"]["limit"] == 1000
-    assert preflight["prompt_length"]["target"] == 850
+    assert preflight["prompt_length"]["target"] == 700
     assert preflight["prompt_valid"] is True
+    get_settings.cache_clear()
+
+
+def test_runway_storyboard_scenes_include_concrete_contract_fields(client, monkeypatch):
+    monkeypatch.setenv("VIDEO_PROVIDER", "runway")
+    get_settings.cache_clear()
+    response = client.post("/api/pipeline-runs", json={"topic": "Developer fixes a bug with an AI assistant", "auto_mode": False, "style_preset": "office_comedy"})
+    assert response.status_code == 200
+    scene = response.json()["script"]["script_json"]["scenes"][0]
+    for key in ("purpose", "subject", "setting", "visible_action", "state_before", "state_after", "camera_direction", "forbidden_actions"):
+        assert scene[key]
+    assert "core metaphor" not in scene["visible_action"].lower()
+    get_settings.cache_clear()
+
+
+def test_controlled_topics_generate_distinct_storyboards_and_reject_generic_similarity(client, monkeypatch):
+    monkeypatch.setenv("VIDEO_PROVIDER", "runway")
+    get_settings.cache_clear()
+    first = client.post("/api/pipeline-runs", json={"topic": "Developer fixes a bug with an AI assistant", "auto_mode": False, "style_preset": "office_comedy"})
+    second = client.post("/api/pipeline-runs", json={"topic": "Messy code becomes clean and organised", "auto_mode": False, "style_preset": "office_comedy"})
+    third = client.post("/api/pipeline-runs", json={"topic": "A slow manual coding task becomes automated", "auto_mode": False, "style_preset": "office_comedy"})
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert third.status_code == 200
+
+    first_scenes = first.json()["script"]["script_json"]["scenes"]
+    second_scenes = second.json()["script"]["script_json"]["scenes"]
+    third_scenes = third.json()["script"]["script_json"]["scenes"]
+    assert "cracked gear" in json.dumps(first_scenes).lower()
+    assert "folders" in json.dumps(second_scenes).lower()
+    assert "conveyor" in json.dumps(third_scenes).lower()
+    assert first_scenes != second_scenes
+    assert second_scenes != third_scenes
+    assert third.json()["review_preflight"]["summary"] == "Preflight looks healthy for generation."
+    assert third.json()["review_preflight"]["generic_output_flags"]["similar_storyboards"] == []
+    get_settings.cache_clear()
+
+
+def test_preflight_rejects_generic_prompt_override_with_abstract_placeholders(client, monkeypatch):
+    monkeypatch.setenv("VIDEO_PROVIDER", "runway")
+    get_settings.cache_clear()
+    create = client.post("/api/pipeline-runs", json={"topic": "Developer fixes a bug with an AI assistant", "auto_mode": False})
+    run_id = create.json()["pipeline_run"]["id"]
+    patch = client.patch(
+        f"/api/pipeline-runs/{run_id}/review-config",
+        json={"prompt_override": "TEXT-FREE VIDEO. Show the core metaphor tied to the topic and explain the coding problem with one memorable interaction."},
+    )
+    assert patch.status_code == 200
+    preflight = patch.json()["review_preflight"]
+    assert preflight["prompt_valid"] is False
+    assert "core metaphor" in preflight["generic_output_flags"]["abstract_phrase_hits"]
+    assert preflight["summary"] == "Preflight rejected generic output. Make the scenes more topic-specific before spending credits."
     get_settings.cache_clear()
 
 
