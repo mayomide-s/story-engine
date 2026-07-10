@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 
 db_file = tempfile.NamedTemporaryFile(delete=False)
 os.environ["DATABASE_URL"] = f"sqlite:///{db_file.name}"
+os.environ["AUTH_ENABLED"] = "false"
 
 from app.db.base import Base  # noqa: E402
 from app.db.session import engine  # noqa: E402
@@ -34,6 +35,12 @@ def isolate_provider_environment(monkeypatch):
         "APP_ACCESS_PASSWORD",
         "APP_SESSION_SECRET",
         "RUNWAY_API_KEY",
+        "OPENAI_API_KEY",
+        "SEMANTIC_CRITIC_ENABLED",
+        "SEMANTIC_CRITIC_PROVIDER",
+        "SEMANTIC_CRITIC_MODEL",
+        "SEMANTIC_CRITIC_VERSION",
+        "SEMANTIC_CRITIC_TIMEOUT_SECONDS",
         "R2_ACCOUNT_ID",
         "R2_ACCESS_KEY_ID",
         "R2_SECRET_ACCESS_KEY",
@@ -44,7 +51,9 @@ def isolate_provider_environment(monkeypatch):
     for key in provider_env_keys:
         monkeypatch.delenv(key, raising=False)
 
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    monkeypatch.setenv("SEMANTIC_CRITIC_ENABLED", "false")
+
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()
-

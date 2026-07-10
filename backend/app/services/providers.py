@@ -18,3 +18,12 @@ def get_video_provider():
 def get_storage_provider():
     settings = get_settings()
     return R2StorageProvider() if settings.storage_provider == "r2" else LocalStorageProvider()
+
+
+def get_semantic_critic_provider():
+    settings = get_settings()
+    if not settings.semantic_critic_enabled:
+        return None
+    from app.providers.semantic_critic.openai_provider import OpenAISemanticCriticProvider
+
+    return OpenAISemanticCriticProvider()

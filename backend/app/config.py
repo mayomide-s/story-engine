@@ -30,6 +30,11 @@ class Settings(BaseSettings):
 
     openai_api_key: str = Field(default="", alias="OPENAI_API_KEY")
     runway_api_key: str = Field(default="", alias="RUNWAY_API_KEY")
+    semantic_critic_enabled: bool = Field(default=False, alias="SEMANTIC_CRITIC_ENABLED")
+    semantic_critic_provider: Literal["openai"] = Field(default="openai", alias="SEMANTIC_CRITIC_PROVIDER")
+    semantic_critic_model: str = Field(default="gpt-4.1-mini", alias="SEMANTIC_CRITIC_MODEL")
+    semantic_critic_version: str = Field(default="v1", alias="SEMANTIC_CRITIC_VERSION")
+    semantic_critic_timeout_seconds: int = Field(default=60, alias="SEMANTIC_CRITIC_TIMEOUT_SECONDS")
 
     video_provider: Literal["mock", "runway"] = Field(default="mock", alias="VIDEO_PROVIDER")
     storage_provider: Literal["local", "r2"] = Field(default="local", alias="STORAGE_PROVIDER")
@@ -57,6 +62,7 @@ class Settings(BaseSettings):
             "auth": [],
             "storage": [],
             "video": [],
+            "semantic_critic": [],
         }
         if self.auth_enabled:
             required["auth"] = ["APP_ACCESS_PASSWORD"]
@@ -70,6 +76,8 @@ class Settings(BaseSettings):
             ]
         if self.video_provider == "runway":
             required["video"] = ["RUNWAY_API_KEY"]
+        if self.semantic_critic_enabled and self.semantic_critic_provider == "openai":
+            required["semantic_critic"] = ["OPENAI_API_KEY"]
 
         values = {
             "DATABASE_URL": self.database_url,
@@ -83,6 +91,7 @@ class Settings(BaseSettings):
             "R2_BUCKET_NAME": self.r2_bucket_name,
             "R2_PUBLIC_BASE_URL": self.r2_public_base_url,
             "RUNWAY_API_KEY": self.runway_api_key,
+            "OPENAI_API_KEY": self.openai_api_key,
         }
 
         missing: dict[str, list[str]] = {}
@@ -104,6 +113,10 @@ class Settings(BaseSettings):
             errors.append(f"Missing required storage settings for {mode_label}: {', '.join(missing['storage'])}")
         if missing.get("video"):
             errors.append(f"Missing required video provider settings for {mode_label}: {', '.join(missing['video'])}")
+        if missing.get("semantic_critic"):
+            errors.append(
+                f"Missing required semantic critic settings for {mode_label}: {', '.join(missing['semantic_critic'])}"
+            )
         return errors
 
     def validate_configuration(self) -> None:

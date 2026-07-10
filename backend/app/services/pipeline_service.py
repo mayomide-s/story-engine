@@ -22,12 +22,29 @@ from app.models import (
     PromptLog,
     QualityCheck,
     Script,
+    StoryAdherenceReview,
     Storyboard,
     Video,
     VideoStatus,
 )
-from app.schemas.pipeline_runs import ContentIdeaPatch, PipelineRunCreate, ReviewConfigPatch, ScriptPatch, StoryboardPatch
+from app.schemas.pipeline_runs import (
+    ContentIdeaPatch,
+    HumanStoryAdherenceReviewPayload,
+    PipelineRunCreate,
+    ReviewConfigPatch,
+    ScriptPatch,
+    StoryAdherenceRecheckPayload,
+    StoryboardPatch,
+)
 from app.services.providers import get_llm_provider, get_storage_provider, get_video_provider
+from app.services.semantic_critic_service import (
+    build_story_adherence_payload,
+    get_human_story_adherence_review,
+    get_latest_story_adherence_review,
+    is_technically_reviewable,
+    record_human_story_review,
+    run_semantic_critic,
+)
 from app.services.security import redact_sensitive_data, sanitize_for_json
 
 
@@ -1528,42 +1545,15 @@ def build_story_adherence_review(db: Session, run: PipelineRun) -> dict[str, Any
             run_config["audience_level"],
             script.duration_seconds if script else get_target_duration_seconds(run_config, get_settings().video_provider),
         )
-    review_available = False
     has_video = bool(video and video.provider_job_id)
-    explanation = (
-        "Semantic story adherence review is unavailable because no configured vision-capable provider exists in this environment. "
-        "A multimodal model that can inspect representative video frames is required."
-    )
-    if not has_video:
-        explanation = "Preview only. Story adherence evidence is defined below, but no video has been generated yet."
-    return sanitize_for_json(
-        {
-            "available": review_available,
-            "status": "preview_only" if not has_video else "unavailable",
-            "review_source": "none",
-            "subject": contract.get("subject"),
-            "initial_state": contract.get("initial_state"),
-            "trigger": contract.get("trigger"),
-            "required_transformation": contract.get("required_transformation"),
-            "required_final_state": contract.get("required_final_state"),
-            "final_state_hold": contract.get("final_state_hold"),
-            "prohibited_actions": contract.get("prohibited_actions", []),
-            "duration_plan": contract.get("duration_plan", {}),
-            "setup_present": None,
-            "intended_subject_present": None,
-            "transformation_attempted": None,
-            "transformation_completed": None,
-            "required_final_state_visible": None,
-            "final_state_hold_achieved": None,
-            "unrelated_actions_detected": None,
-            "overall_adherence_score": None,
-            "explanation": explanation,
-            "recommendation": "Manual Review Required" if has_video else "Preview Only",
-            "technical_quality_score": latest_quality.score if latest_quality else None,
-            "technical_quality_result": (
-                "Pass" if latest_quality and latest_quality.passed else "Needs Review" if latest_quality else "Not Run"
-            ),
-        }
+    review = get_latest_story_adherence_review(db, video.id if video else None)
+    human_review = get_human_story_adherence_review(db, run.id)
+    return build_story_adherence_payload(
+        contract=contract,
+        latest_quality=latest_quality,
+        review=review,
+        human_review=human_review,
+        has_video=has_video,
     )
 
 
@@ -1580,6 +1570,48 @@ def finalize_post_video_processing(db: Session, run: PipelineRun) -> PipelineRun
         add_event(db, run.id, "pipeline.needs_review", "Quality check requires manual review", stage=PipelineStage.QUALITY_CHECK.value)
         db.commit()
         return run
+
+    video = db.get(Video, run.video_id) if run.video_id else None
+    asset = (
+        db.query(Asset)
+        .filter(Asset.pipeline_run_id == run.id, Asset.asset_type == "video_mp4")
+        .order_by(Asset.created_at.desc())
+        .first()
+    )
+    latest_quality = (
+        db.query(QualityCheck)
+        .filter(QualityCheck.pipeline_run_id == run.id)
+        .order_by(QualityCheck.created_at.desc())
+        .first()
+    )
+    if video and asset and is_technically_reviewable(latest_quality, asset):
+        adherence_contract = build_story_adherence_contract(
+            run.topic,
+            get_run_input_config(run).get("audience_level", "beginner"),
+            video.duration_seconds or get_target_duration_seconds(get_run_input_config(run), video.provider),
+        )
+        review = run_semantic_critic(
+            db,
+            pipeline_run_id=run.id,
+            topic=run.topic,
+            contract=adherence_contract,
+            video=video,
+            asset=asset,
+        )
+        if review:
+            add_event(
+                db,
+                run.id,
+                "story_adherence.reviewed",
+                f"Story adherence review recorded with status {review.review_status}",
+                stage=PipelineStage.QUALITY_CHECK.value,
+                metadata={
+                    "critic_version": review.critic_version,
+                    "review_status": review.review_status,
+                    "score": review.score,
+                },
+            )
+            db.commit()
 
     run.current_stage = PipelineStage.MANUAL_PACKAGE_CREATION
     create_manual_post_package(db, run)
@@ -1786,6 +1818,101 @@ def recheck_pipeline_assets(db: Session, run_id: str, review_notes: str | None =
     add_event(db, run.id, "pipeline.recheck_requested", "Quality check re-run requested", stage=PipelineStage.QUALITY_CHECK.value)
     db.commit()
     return finalize_post_video_processing(db, run)
+
+
+def recheck_story_adherence(db: Session, run_id: str, payload: StoryAdherenceRecheckPayload | None = None) -> PipelineRun:
+    run = db.get(PipelineRun, run_id)
+    if not run:
+        raise ValueError("Pipeline run not found")
+    video = db.get(Video, run.video_id) if run.video_id else None
+    asset = (
+        db.query(Asset)
+        .filter(Asset.pipeline_run_id == run.id, Asset.asset_type == "video_mp4")
+        .order_by(Asset.created_at.desc())
+        .first()
+    )
+    latest_quality = (
+        db.query(QualityCheck)
+        .filter(QualityCheck.pipeline_run_id == run.id)
+        .order_by(QualityCheck.created_at.desc())
+        .first()
+    )
+    if not video or not asset:
+        raise RuntimeError("Run does not have generated assets available for story adherence recheck")
+    if not is_technically_reviewable(latest_quality, asset):
+        raise RuntimeError("Story adherence recheck requires a technically reviewable completed video")
+
+    existing = get_latest_story_adherence_review(db, video.id, get_settings().semantic_critic_version)
+    if existing:
+        add_event(
+            db,
+            run.id,
+            "story_adherence.recheck_reused",
+            "Existing story adherence review returned for this video and critic version",
+            stage=PipelineStage.QUALITY_CHECK.value,
+            metadata={"critic_version": existing.critic_version, "review_status": existing.review_status},
+        )
+        db.commit()
+        return db.get(PipelineRun, run.id) or run
+
+    adherence_contract = build_story_adherence_contract(
+        run.topic,
+        get_run_input_config(run).get("audience_level", "beginner"),
+        video.duration_seconds or get_target_duration_seconds(get_run_input_config(run), video.provider),
+    )
+    review = run_semantic_critic(
+        db,
+        pipeline_run_id=run.id,
+        topic=run.topic,
+        contract=adherence_contract,
+        video=video,
+        asset=asset,
+    )
+    add_event(
+        db,
+        run.id,
+        "story_adherence.rechecked",
+        "Story adherence recheck completed",
+        stage=PipelineStage.QUALITY_CHECK.value,
+        metadata={
+            "critic_version": review.critic_version if review else get_settings().semantic_critic_version,
+            "review_status": review.review_status if review else "unavailable",
+            "review_notes": payload.review_notes if payload else None,
+        },
+    )
+    db.commit()
+    return db.get(PipelineRun, run.id) or run
+
+
+def record_story_adherence_human_review(
+    db: Session,
+    run_id: str,
+    payload: HumanStoryAdherenceReviewPayload,
+) -> PipelineRun:
+    run = db.get(PipelineRun, run_id)
+    if not run:
+        raise ValueError("Pipeline run not found")
+    video = db.get(Video, run.video_id) if run.video_id else None
+    if video is None:
+        raise RuntimeError("Run does not have a generated video available for human review")
+    latest_review = get_latest_story_adherence_review(db, video.id)
+    human_review = record_human_story_review(
+        db,
+        run_id=run.id,
+        decision=payload.decision,
+        notes=payload.notes,
+        review=latest_review,
+    )
+    add_event(
+        db,
+        run.id,
+        "story_adherence.human_reviewed",
+        "Human story adherence decision recorded",
+        stage=PipelineStage.QUALITY_CHECK.value,
+        metadata={"decision": human_review.decision, "notes": human_review.notes},
+    )
+    db.commit()
+    return db.get(PipelineRun, run.id) or run
 
 
 def ensure_text_review_editable(run: PipelineRun, video: Video | None = None) -> None:

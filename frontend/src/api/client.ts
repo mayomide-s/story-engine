@@ -61,6 +61,8 @@ export type PipelineRunDetail = {
   } | null;
 };
 
+export type StoryAdherenceHumanDecision = "approve" | "needs_review" | "regenerate";
+
 export type IdeaQueueItem = {
   id: string;
   account_id: string;
@@ -273,6 +275,16 @@ export const api = {
     request<PipelineRunDetail>(`/pipeline-runs/${runId}/recheck`, {
       method: "POST",
       body: JSON.stringify({ review_notes: reviewNotes })
+    }),
+  recheckStoryAdherence: (runId: string, reviewNotes = "") =>
+    request<PipelineRunDetail>(`/pipeline-runs/${runId}/story-adherence/recheck`, {
+      method: "POST",
+      body: JSON.stringify({ review_notes: reviewNotes })
+    }),
+  submitStoryAdherenceHumanReview: (runId: string, decision: StoryAdherenceHumanDecision, notes = "") =>
+    request<PipelineRunDetail>(`/pipeline-runs/${runId}/story-adherence/human-review`, {
+      method: "POST",
+      body: JSON.stringify({ decision, notes })
     }),
   cancelRun: (runId: string, reviewNotes = "") =>
     request<PipelineRunDetail>(`/pipeline-runs/${runId}/cancel`, {

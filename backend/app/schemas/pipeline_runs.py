@@ -51,6 +51,15 @@ class ReviewAction(BaseModel):
     confirm_paid_generation: bool = False
 
 
+class StoryAdherenceRecheckPayload(BaseModel):
+    review_notes: str | None = None
+
+
+class HumanStoryAdherenceReviewPayload(BaseModel):
+    decision: Literal["approve", "needs_review", "regenerate"]
+    notes: str | None = None
+
+
 class PromptActionRequest(BaseModel):
     action: Literal["improve", "shorten"]
 

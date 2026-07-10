@@ -82,6 +82,20 @@ def test_config_validation_accepts_mock_local_mode():
     assert settings.configuration_errors() == []
 
 
+def test_config_validation_does_not_require_openai_when_semantic_critic_disabled():
+    settings = Settings(
+        _env_file=None,
+        database_url="sqlite:///./test.db",
+        redis_url="redis://redis:6379/0",
+        video_provider="mock",
+        storage_provider="local",
+        semantic_critic_enabled=False,
+        openai_api_key="",
+    )
+
+    assert settings.configuration_errors() == []
+
+
 def test_config_validation_requires_r2_and_runway_settings():
     settings = Settings(
         _env_file=None,
@@ -275,7 +289,7 @@ def test_runway_storyboard_scenes_include_concrete_contract_fields(client, monke
     contract = payload["story_adherence_review"]
     for key in ("initial_state", "trigger", "required_transformation", "required_final_state", "final_state_hold", "prohibited_actions"):
         assert contract[key]
-    assert contract["status"] == "preview_only"
+    assert contract["review_status"] == "preview_only"
     get_settings.cache_clear()
 
 
@@ -325,9 +339,242 @@ def test_story_adherence_review_is_unavailable_without_vision_provider(client):
     review = response.json()["story_adherence_review"]
     assert review["available"] is False
     assert review["review_source"] == "none"
-    assert review["recommendation"] == "Preview Only"
+    assert review["review_status"] == "preview_only"
     assert "vision-capable provider" not in review["explanation"].lower()
     assert "preview only" in review["explanation"].lower()
+
+
+def test_semantic_critic_persists_review_without_changing_completed_run_status(client, monkeypatch):
+    from app.models import StoryAdherenceReview
+    from app.services import semantic_critic_service
+
+    class FakeCritic:
+        name = "openai"
+        model = "fake-vision-model"
+
+        def review(self, prompt: str, frames: list[dict], context: dict) -> dict:
+            assert "Topic:" in prompt
+            assert len(frames) == 5
+            return {
+                "summary": "The visual sequence stays on-topic and finishes cleanly.",
+                "issues": [],
+                "criteria": {
+                    "initial_problem_shown": {"value": "true", "confidence": 0.91, "evidence_frames": [1.0], "reason": "The blocked state is visible immediately."},
+                    "intended_subject_present": {"value": "true", "confidence": 0.9, "evidence_frames": [1.0, 4.0], "reason": "The same subject stays present."},
+                    "trigger_visible": {"value": "true", "confidence": 0.86, "evidence_frames": [4.0], "reason": "The trigger action is visible."},
+                    "transformation_attempted": {"value": "true", "confidence": 0.9, "evidence_frames": [4.0, 7.0], "reason": "The transformation begins on screen."},
+                    "transformation_completed": {"value": "true", "confidence": 0.93, "evidence_frames": [7.0, 8.3], "reason": "The mess is fully resolved."},
+                    "required_final_state_visible": {"value": "true", "confidence": 0.95, "evidence_frames": [8.3, 9.5], "reason": "The clean final state is obvious."},
+                    "ending_held_clearly": {"value": "true", "confidence": 0.89, "evidence_frames": [8.3, 9.5], "reason": "The final state remains visible across both hold frames."},
+                    "unrelated_characters_or_actions": {"value": "false", "confidence": 0.9, "evidence_frames": [1.0, 9.5], "reason": "No unrelated intrusions appear."},
+                    "unwanted_generated_text": {"value": "false", "confidence": 0.88, "evidence_frames": [1.0, 9.5], "reason": "No generated text is visible."},
+                },
+            }
+
+    monkeypatch.setenv("SEMANTIC_CRITIC_ENABLED", "true")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    get_settings.cache_clear()
+    monkeypatch.setattr(semantic_critic_service, "get_semantic_critic_provider", lambda: FakeCritic())
+    monkeypatch.setattr(
+        semantic_critic_service,
+        "sample_story_frames",
+        lambda _path: (
+            [
+                {"timestamp_seconds": 1.0, "frame_hash": "hash-1", "width": 540, "height": 960, "data_url": "data:image/jpeg;base64,QQ=="},
+                {"timestamp_seconds": 4.0, "frame_hash": "hash-2", "width": 540, "height": 960, "data_url": "data:image/jpeg;base64,QQ=="},
+                {"timestamp_seconds": 7.0, "frame_hash": "hash-3", "width": 540, "height": 960, "data_url": "data:image/jpeg;base64,QQ=="},
+                {"timestamp_seconds": 8.3, "frame_hash": "hash-4", "width": 540, "height": 960, "data_url": "data:image/jpeg;base64,QQ=="},
+                {"timestamp_seconds": 9.5, "frame_hash": "hash-5", "width": 540, "height": 960, "data_url": "data:image/jpeg;base64,QQ=="},
+            ],
+            {
+                "video_duration_seconds": 10.0,
+                "sampling_strategy": "fixed_10s",
+                "frames": [
+                    {"timestamp_seconds": 1.0, "frame_hash": "hash-1", "width": 540, "height": 960, "persisted_asset": None},
+                    {"timestamp_seconds": 4.0, "frame_hash": "hash-2", "width": 540, "height": 960, "persisted_asset": None},
+                    {"timestamp_seconds": 7.0, "frame_hash": "hash-3", "width": 540, "height": 960, "persisted_asset": None},
+                    {"timestamp_seconds": 8.3, "frame_hash": "hash-4", "width": 540, "height": 960, "persisted_asset": None},
+                    {"timestamp_seconds": 9.5, "frame_hash": "hash-5", "width": 540, "height": 960, "persisted_asset": None},
+                ],
+            },
+        ),
+    )
+
+    create = client.post("/api/pipeline-runs", json={"topic": "Messy code becomes clean and organised", "auto_mode": False})
+    run_id = create.json()["pipeline_run"]["id"]
+    resume = client.post(f"/api/pipeline-runs/{run_id}/resume", json={"review_notes": "Generate baseline"})
+    assert resume.status_code == 200
+    payload = resume.json()
+    assert payload["pipeline_run"]["status"] == "completed"
+    assert payload["story_adherence_review"]["review_status"] == "accept"
+    assert payload["story_adherence_review"]["score"] == 100.0
+    assert payload["story_adherence_review"]["human_review"] is None
+    assert payload["story_adherence_review"]["sampled_frames"]["frames"][0]["frame_hash"] == "hash-1"
+    assert "data_url" not in json.dumps(payload["story_adherence_review"]["sampled_frames"])
+
+    with SessionLocal() as db:
+        reviews = db.query(StoryAdherenceReview).filter(StoryAdherenceReview.pipeline_run_id == run_id).all()
+        assert len(reviews) == 1
+        assert reviews[0].review_status == "accept"
+        assert reviews[0].model == "fake-vision-model"
+    get_settings.cache_clear()
+
+
+def test_story_adherence_recheck_reuses_existing_review_without_new_provider_call(client, monkeypatch):
+    from app.services import semantic_critic_service
+
+    call_count = {"count": 0}
+
+    class FakeCritic:
+        name = "openai"
+        model = "fake-vision-model"
+
+        def review(self, prompt: str, frames: list[dict], context: dict) -> dict:
+            call_count["count"] += 1
+            return {
+                "summary": "The story completes.",
+                "issues": [],
+                "criteria": {
+                    "initial_problem_shown": {"value": "true", "confidence": 0.9, "evidence_frames": [1.0], "reason": "Visible."},
+                    "intended_subject_present": {"value": "true", "confidence": 0.9, "evidence_frames": [1.0], "reason": "Visible."},
+                    "trigger_visible": {"value": "true", "confidence": 0.9, "evidence_frames": [4.0], "reason": "Visible."},
+                    "transformation_attempted": {"value": "true", "confidence": 0.9, "evidence_frames": [4.0], "reason": "Visible."},
+                    "transformation_completed": {"value": "true", "confidence": 0.9, "evidence_frames": [7.0], "reason": "Visible."},
+                    "required_final_state_visible": {"value": "true", "confidence": 0.9, "evidence_frames": [8.3], "reason": "Visible."},
+                    "ending_held_clearly": {"value": "true", "confidence": 0.9, "evidence_frames": [8.3, 9.5], "reason": "Visible."},
+                    "unrelated_characters_or_actions": {"value": "false", "confidence": 0.9, "evidence_frames": [1.0], "reason": "None."},
+                    "unwanted_generated_text": {"value": "false", "confidence": 0.9, "evidence_frames": [1.0], "reason": "None."},
+                },
+            }
+
+    monkeypatch.setenv("SEMANTIC_CRITIC_ENABLED", "true")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    get_settings.cache_clear()
+    monkeypatch.setattr(semantic_critic_service, "get_semantic_critic_provider", lambda: FakeCritic())
+    monkeypatch.setattr(
+        semantic_critic_service,
+        "sample_story_frames",
+        lambda _path: (
+            [{"timestamp_seconds": 1.0, "frame_hash": "hash-1", "width": 540, "height": 960, "data_url": "data:image/jpeg;base64,QQ=="}] * 5,
+            {"video_duration_seconds": 10.0, "sampling_strategy": "fixed_10s", "frames": [{"timestamp_seconds": 1.0, "frame_hash": "hash-1", "width": 540, "height": 960, "persisted_asset": None}] * 5},
+        ),
+    )
+
+    create = client.post("/api/pipeline-runs", json={"topic": "Developer fixes a bug with an AI assistant", "auto_mode": False})
+    run_id = create.json()["pipeline_run"]["id"]
+    resume = client.post(f"/api/pipeline-runs/{run_id}/resume", json={"review_notes": "Generate baseline"})
+    assert resume.status_code == 200
+    assert call_count["count"] == 1
+
+    recheck = client.post(f"/api/pipeline-runs/{run_id}/story-adherence/recheck", json={"review_notes": "Try again"})
+    assert recheck.status_code == 200
+    payload = recheck.json()
+    assert payload["pipeline_run"]["status"] == "completed"
+    assert payload["story_adherence_review"]["review_status"] == "accept"
+    assert call_count["count"] == 1
+    get_settings.cache_clear()
+
+
+def test_human_story_review_is_stored_separately_from_critic_output(client, monkeypatch):
+    from app.models import StoryAdherenceHumanReview, StoryAdherenceReview
+    from app.services import semantic_critic_service
+
+    class FakeCritic:
+        name = "openai"
+        model = "fake-vision-model"
+
+        def review(self, prompt: str, frames: list[dict], context: dict) -> dict:
+            return {
+                "summary": "Final state is present but the hold is uncertain.",
+                "issues": ["Final hold is short."],
+                "criteria": {
+                    "initial_problem_shown": {"value": "true", "confidence": 0.9, "evidence_frames": [1.0], "reason": "Visible."},
+                    "intended_subject_present": {"value": "true", "confidence": 0.9, "evidence_frames": [1.0], "reason": "Visible."},
+                    "trigger_visible": {"value": "true", "confidence": 0.9, "evidence_frames": [4.0], "reason": "Visible."},
+                    "transformation_attempted": {"value": "true", "confidence": 0.9, "evidence_frames": [4.0], "reason": "Visible."},
+                    "transformation_completed": {"value": "true", "confidence": 0.9, "evidence_frames": [7.0], "reason": "Visible."},
+                    "required_final_state_visible": {"value": "true", "confidence": 0.9, "evidence_frames": [8.3], "reason": "Visible."},
+                    "ending_held_clearly": {"value": "uncertain", "confidence": 0.6, "evidence_frames": [8.3, 9.5], "reason": "Borderline hold."},
+                    "unrelated_characters_or_actions": {"value": "false", "confidence": 0.9, "evidence_frames": [1.0], "reason": "None."},
+                    "unwanted_generated_text": {"value": "false", "confidence": 0.9, "evidence_frames": [1.0], "reason": "None."},
+                },
+            }
+
+    monkeypatch.setenv("SEMANTIC_CRITIC_ENABLED", "true")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    get_settings.cache_clear()
+    monkeypatch.setattr(semantic_critic_service, "get_semantic_critic_provider", lambda: FakeCritic())
+    monkeypatch.setattr(
+        semantic_critic_service,
+        "sample_story_frames",
+        lambda _path: (
+            [{"timestamp_seconds": 1.0, "frame_hash": "hash-1", "width": 540, "height": 960, "data_url": "data:image/jpeg;base64,QQ=="}] * 5,
+            {"video_duration_seconds": 10.0, "sampling_strategy": "fixed_10s", "frames": [{"timestamp_seconds": 1.0, "frame_hash": "hash-1", "width": 540, "height": 960, "persisted_asset": None}] * 5},
+        ),
+    )
+
+    create = client.post("/api/pipeline-runs", json={"topic": "A slow manual coding task becomes automated", "auto_mode": False})
+    run_id = create.json()["pipeline_run"]["id"]
+    resume = client.post(f"/api/pipeline-runs/{run_id}/resume", json={"review_notes": "Generate baseline"})
+    assert resume.status_code == 200
+    before = resume.json()["story_adherence_review"]
+
+    human = client.post(
+        f"/api/pipeline-runs/{run_id}/story-adherence/human-review",
+        json={"decision": "approve", "notes": "Accepting this one manually."},
+    )
+    assert human.status_code == 200
+    payload = human.json()["story_adherence_review"]
+    assert payload["review_status"] == before["review_status"]
+    assert payload["score"] == before["score"]
+    assert payload["human_review"]["decision"] == "approve"
+    assert payload["human_review"]["notes"] == "Accepting this one manually."
+
+    with SessionLocal() as db:
+        critic = db.query(StoryAdherenceReview).filter(StoryAdherenceReview.pipeline_run_id == run_id).one()
+        human_review = db.query(StoryAdherenceHumanReview).filter(StoryAdherenceHumanReview.pipeline_run_id == run_id).one()
+        assert critic.review_status == "needs_review"
+        assert human_review.decision == "approve"
+    get_settings.cache_clear()
+
+
+def test_semantic_frame_sampling_scales_for_non_ten_second_videos():
+    from app.services.semantic_critic_service import build_sample_timestamps
+
+    timestamps, strategy = build_sample_timestamps(18.0)
+    assert strategy == "scaled_by_duration"
+    assert timestamps == [1.8, 7.2, 12.6, 14.94, 17.1]
+
+
+def test_semantic_critic_downloads_video_when_local_storage_path_is_missing(monkeypatch, tmp_path):
+    from app.services import semantic_critic_service
+
+    class FakeStorage:
+        name = "local"
+
+        def resolve_path(self, storage_key: str) -> str:
+            return str(tmp_path / storage_key)
+
+    class FakeAsset:
+        id = "asset-123"
+        storage_key = "videos/missing.mp4"
+        public_url = "https://example.com/video.mp4"
+
+    downloaded = {}
+
+    def fake_download(asset, destination):
+        downloaded["asset_id"] = asset.id
+        destination.write_bytes(b"video-bytes")
+
+    monkeypatch.setattr(semantic_critic_service, "get_storage_provider", lambda: FakeStorage())
+    monkeypatch.setattr(semantic_critic_service, "_download_video_to_temp", fake_download)
+
+    resolved_path, should_delete = semantic_critic_service.resolve_video_source_path(FakeAsset())
+
+    assert should_delete is True
+    assert resolved_path.exists()
+    assert resolved_path.read_bytes() == b"video-bytes"
+    assert downloaded["asset_id"] == "asset-123"
 
 
 def test_preflight_scoring_appears_in_run_detail(client):

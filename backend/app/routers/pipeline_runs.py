@@ -5,11 +5,13 @@ from app.db.session import get_db
 from app.schemas.pipeline_runs import (
     AggregatedPipelineRunResponse,
     ContentIdeaPatch,
+    HumanStoryAdherenceReviewPayload,
     PipelineRunCreate,
     PromptActionRequest,
     ReviewConfigPatch,
     ReviewAction,
     ScriptPatch,
+    StoryAdherenceRecheckPayload,
     StoryboardPatch,
 )
 from app.services.pipeline_service import (
@@ -25,8 +27,10 @@ from app.services.pipeline_service import (
     patch_review_config,
     patch_script,
     patch_storyboard,
+    record_story_adherence_human_review,
     regenerate_text_only,
     recheck_pipeline_assets,
+    recheck_story_adherence,
     resume_pipeline,
 )
 from app.services.access_service import require_app_access
@@ -85,6 +89,36 @@ def cancel_run(run_id: str, payload: ReviewAction | None = Body(default=None), d
 def recheck_run(run_id: str, payload: ReviewAction | None = Body(default=None), db: Session = Depends(get_db)):
     try:
         run = recheck_pipeline_assets(db, run_id, payload.review_notes if payload else None)
+        return get_pipeline_run_detail(db, run.id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/{run_id}/story-adherence/recheck")
+def recheck_run_story_adherence(
+    run_id: str,
+    payload: StoryAdherenceRecheckPayload | None = Body(default=None),
+    db: Session = Depends(get_db),
+):
+    try:
+        run = recheck_story_adherence(db, run_id, payload)
+        return get_pipeline_run_detail(db, run.id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/{run_id}/story-adherence/human-review")
+def save_human_story_review(
+    run_id: str,
+    payload: HumanStoryAdherenceReviewPayload,
+    db: Session = Depends(get_db),
+):
+    try:
+        run = record_story_adherence_human_review(db, run_id, payload)
         return get_pipeline_run_detail(db, run.id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

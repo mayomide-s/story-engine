@@ -4,7 +4,7 @@ import enum
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import Boolean, DateTime, Enum, Float, ForeignKey, Integer, JSON, String, Text
+from sqlalchemy import Boolean, DateTime, Enum, Float, ForeignKey, Integer, JSON, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -280,6 +280,37 @@ class QualityCheck(Base):
     score: Mapped[float] = mapped_column(Float, default=0.0)
     checks_json: Mapped[dict] = mapped_column(JSON, default=dict)
     llm_critique: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class StoryAdherenceReview(Base):
+    __tablename__ = "story_adherence_reviews"
+    __table_args__ = (UniqueConstraint("video_id", "critic_version", name="uq_story_adherence_video_version"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    pipeline_run_id: Mapped[str] = mapped_column(ForeignKey("pipeline_runs.id"), nullable=False)
+    video_id: Mapped[str] = mapped_column(ForeignKey("videos.id"), nullable=False)
+    critic_version: Mapped[str] = mapped_column(String(100), nullable=False)
+    model: Mapped[str] = mapped_column(String(100), nullable=False)
+    review_status: Mapped[str] = mapped_column(String(50), nullable=False)
+    score: Mapped[float | None] = mapped_column(Float)
+    criteria_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    explanation: Mapped[str] = mapped_column(Text, default="")
+    sampled_frames_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    failure_reason: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class StoryAdherenceHumanReview(Base):
+    __tablename__ = "story_adherence_human_reviews"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    pipeline_run_id: Mapped[str] = mapped_column(ForeignKey("pipeline_runs.id"), nullable=False, unique=True)
+    story_adherence_review_id: Mapped[str | None] = mapped_column(ForeignKey("story_adherence_reviews.id"))
+    decision: Mapped[str] = mapped_column(String(50), nullable=False)
+    notes: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 

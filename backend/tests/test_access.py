@@ -18,7 +18,7 @@ def _auth_headers(client):
 
 
 def test_auth_disabled_preserves_existing_behavior(client, monkeypatch):
-    monkeypatch.delenv("AUTH_ENABLED", raising=False)
+    monkeypatch.setenv("AUTH_ENABLED", "false")
     monkeypatch.delenv("APP_ACCESS_PASSWORD", raising=False)
     get_settings.cache_clear()
 

@@ -49,6 +49,18 @@ function formatAdherenceValue(value: unknown) {
   return String(value);
 }
 
+function formatStoryReviewStatus(value: unknown) {
+  const label = String(value ?? "unavailable");
+  return label.replace(/_/g, " ");
+}
+
+function formatCriterionValue(value: unknown) {
+  const normalized = String(value ?? "uncertain");
+  if (normalized === "true") return "Yes";
+  if (normalized === "false") return "No";
+  return "Uncertain";
+}
+
 function CopyButton({ text, label }: { text: string; label: string }) {
   const [copied, setCopied] = useState(false);
 
@@ -76,6 +88,7 @@ export function VideoReviewPage() {
   const [detail, setDetail] = useState<PipelineRunDetail | null>(null);
   const [error, setError] = useState<string>("");
   const [isRechecking, setIsRechecking] = useState(false);
+  const [isRecheckingStory, setIsRecheckingStory] = useState(false);
   const [showFullPrompt, setShowFullPrompt] = useState(false);
 
   useEffect(() => {
@@ -130,6 +143,7 @@ export function VideoReviewPage() {
     video &&
     (String(run?.status ?? "") === "needs_review" || String(video.status ?? "") === "rejected"),
   );
+  const canRecheckStory = Boolean(selectedRunId && videoAsset && video && String(run?.status ?? "") === "completed");
   const generatedProvider = String(video?.provider ?? videoProvider);
   const generatedStorage = inferStorageLabel(videoAsset?.public_url, storageProvider);
   const badgeLabel = `${generatedProvider}/${generatedStorage.toUpperCase()}`;
@@ -149,6 +163,22 @@ export function VideoReviewPage() {
       setError(requestError instanceof Error ? requestError.message : "Failed to re-run quality check.");
     } finally {
       setIsRechecking(false);
+    }
+  }
+
+  async function handleStoryRecheck() {
+    if (!selectedRunId) {
+      return;
+    }
+    setIsRecheckingStory(true);
+    setError("");
+    try {
+      const refreshed = await api.recheckStoryAdherence(selectedRunId, "Re-run sampled-frame story review");
+      setDetail(refreshed);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Failed to re-run story adherence review.");
+    } finally {
+      setIsRecheckingStory(false);
     }
   }
 
@@ -203,6 +233,11 @@ export function VideoReviewPage() {
                       {isRechecking ? "Rechecking..." : "Re-run Quality Check"}
                     </button>
                   ) : null}
+                  {canRecheckStory ? (
+                    <button type="button" className="secondary" onClick={handleStoryRecheck} disabled={isRecheckingStory}>
+                      {isRecheckingStory ? "Reviewing..." : "Re-run Story Review"}
+                    </button>
+                  ) : null}
                   {selectedRunId ? <Link className="inline-link" to={`/ideas?run=${selectedRunId}`}>Back To Ideas</Link> : null}
                 </div>
               </div>
@@ -211,6 +246,7 @@ export function VideoReviewPage() {
                 <div><span>Provider</span><strong>{formatProvider(String(video.provider))}</strong></div>
                 <div><span>Duration</span><strong>{String(video.duration_seconds)}s</strong></div>
                 <div><span>Run Status</span><strong>{formatRunStatus(String(run?.status ?? ""))}</strong></div>
+                <div><span>Story Review</span><strong>{formatStoryReviewStatus(storyAdherence?.review_status)}</strong></div>
               </div>
               <p className="subtle">Generated with {generatedProvider}, stored in {generatedStorage.toUpperCase()}.</p>
               <p><strong>Review Notes:</strong> {String(video.review_notes ?? run?.review_notes ?? "No review notes yet.")}</p>
@@ -347,17 +383,33 @@ export function VideoReviewPage() {
               {storyAdherence ? (
                 <div className="stack">
                   <div className="key-grid">
-                    <div><span>Status</span><strong>{String(storyAdherence.status ?? "unknown").split("_").join(" ")}</strong></div>
-                    <div><span>Recommendation</span><strong>{String(storyAdherence.recommendation ?? "n/a")}</strong></div>
+                    <div><span>Automated Status</span><strong>{formatStoryReviewStatus(storyAdherence.review_status)}</strong></div>
+                    <div><span>Score</span><strong>{formatAdherenceValue(storyAdherence.score)}</strong></div>
+                    <div><span>Critic Version</span><strong>{String(storyAdherence.critic_version ?? "n/a")}</strong></div>
+                    <div><span>Model</span><strong>{String(storyAdherence.model ?? "n/a")}</strong></div>
                   </div>
                   <p>{String(storyAdherence.explanation ?? "No story adherence review explanation available.")}</p>
-                  <div className="key-grid">
-                    <div><span>Setup Present</span><strong>{formatAdherenceValue(storyAdherence.setup_present)}</strong></div>
-                    <div><span>Subject Present</span><strong>{formatAdherenceValue(storyAdherence.intended_subject_present)}</strong></div>
-                    <div><span>Transformation Attempted</span><strong>{formatAdherenceValue(storyAdherence.transformation_attempted)}</strong></div>
-                    <div><span>Transformation Completed</span><strong>{formatAdherenceValue(storyAdherence.transformation_completed)}</strong></div>
-                    <div><span>Final State Visible</span><strong>{formatAdherenceValue(storyAdherence.required_final_state_visible)}</strong></div>
-                    <div><span>Final Hold Achieved</span><strong>{formatAdherenceValue(storyAdherence.final_state_hold_achieved)}</strong></div>
+                  {"failure_reason" in storyAdherence && storyAdherence.failure_reason ? <p><strong>Failure reason:</strong> {String(storyAdherence.failure_reason)}</p> : null}
+                  {(storyAdherence.human_review as Record<string, unknown> | null)?.decision ? (
+                    <div className="notice-card">
+                      <strong>Human review</strong>
+                      <p>
+                        {String((storyAdherence.human_review as Record<string, unknown>).decision ?? "")}
+                        {String((storyAdherence.human_review as Record<string, unknown>).notes ?? "") ? ` · ${String((storyAdherence.human_review as Record<string, unknown>).notes ?? "")}` : ""}
+                      </p>
+                    </div>
+                  ) : null}
+                  <div className="quality-list">
+                    {Object.entries((storyAdherence.criteria as Record<string, unknown> | undefined) ?? {}).map(([key, value]) => {
+                      const criterion = value as Record<string, unknown>;
+                      return (
+                        <div key={key} className="quality-item pass">
+                          <strong>{key.split("_").join(" ")}</strong>
+                          <span>{formatCriterionValue(criterion.value)}</span>
+                          <small>{String(criterion.reason ?? "")}</small>
+                        </div>
+                      );
+                    })}
                   </div>
                   <details className="technical-disclosure">
                     <summary>Show intended outcome contract</summary>
@@ -385,6 +437,10 @@ export function VideoReviewPage() {
                       <div className="copy-block">
                         <strong>Prohibited actions</strong>
                         <pre>{Array.isArray(storyAdherence.prohibited_actions) ? storyAdherence.prohibited_actions.map(String).join("\n") : String(storyAdherence.prohibited_actions ?? "")}</pre>
+                      </div>
+                      <div className="copy-block">
+                        <strong>Sampled frames</strong>
+                        <pre>{JSON.stringify(storyAdherence.sampled_frames ?? {}, null, 2)}</pre>
                       </div>
                     </div>
                   </details>
