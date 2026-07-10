@@ -119,7 +119,48 @@ export function ExportPackPanel({
         <div><span>Topic</span><strong>{pack.topic}</strong></div>
         <div><span>Style Preset</span><strong>{pack.style_preset}</strong></div>
         <div><span>Quality Score</span><strong>{String(pack.quality_score ?? "n/a")}</strong></div>
+        <div><span>Final Video</span><strong>{pack.final_asset_source === "narration_render" ? "Narrated" : "Original"}</strong></div>
+        <div><span>Selection Revision</span><strong>{String(pack.final_asset_selection_revision ?? 1)}</strong></div>
       </div>
+      <div className="copy-block">
+        <div className="content-meta">
+          <strong>Final Video URL</strong>
+          <CopyButton text={pack.video_public_url} label="final video URL" />
+        </div>
+        <pre>{pack.video_public_url}</pre>
+      </div>
+      {pack.original_video_public_url ? (
+        <div className="copy-block">
+          <div className="content-meta">
+            <strong>Original Video URL</strong>
+            <CopyButton text={pack.original_video_public_url} label="original video URL" />
+          </div>
+          <pre>{pack.original_video_public_url}</pre>
+        </div>
+      ) : null}
+      {pack.final_asset_source === "narration_render" ? (
+        <div className="copy-block">
+          <div className="content-meta">
+            <strong>Narration Selection</strong>
+          </div>
+          <pre>{[
+            `Narration render ID: ${pack.final_narration_render_id ?? "n/a"}`,
+            `AI voice disclosure: ${pack.ai_voice_disclosure ?? "n/a"}`,
+            `Voice is AI generated: ${pack.voice_is_ai_generated ? "Yes" : "No"}`,
+            "",
+            "Transcript:",
+            pack.narration_transcript ?? "",
+          ].join("\n")}</pre>
+        </div>
+      ) : null}
+      {pack.final_asset_source === "narration_render" && pack.caption_cues.length > 0 ? (
+        <div className="copy-block">
+          <div className="content-meta">
+            <strong>Caption Cues</strong>
+          </div>
+          <pre>{JSON.stringify(pack.caption_cues, null, 2)}</pre>
+        </div>
+      ) : null}
       <div className="copy-block">
         <div className="content-meta">
           <strong>Final Prompt Used</strong>

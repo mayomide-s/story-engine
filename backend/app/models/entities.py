@@ -236,6 +236,12 @@ class ManualPostPackage(Base):
         Enum(ManualPostingStatus),
         default=ManualPostingStatus.NOT_POSTED,
     )
+    final_asset_id: Mapped[str | None] = mapped_column(ForeignKey("assets.id"))
+    final_asset_source: Mapped[str | None] = mapped_column(String(50))
+    final_narration_render_id: Mapped[str | None] = mapped_column(ForeignKey("narration_renders.id"))
+    final_asset_selection_revision: Mapped[int] = mapped_column(Integer, default=1)
+    final_asset_selected_at: Mapped[datetime | None] = mapped_column(DateTime)
+    final_asset_metadata_json: Mapped[dict | None] = mapped_column(JSON)
     tiktok_post_url: Mapped[str | None] = mapped_column(Text)
     instagram_post_url: Mapped[str | None] = mapped_column(Text)
     youtube_post_url: Mapped[str | None] = mapped_column(Text)

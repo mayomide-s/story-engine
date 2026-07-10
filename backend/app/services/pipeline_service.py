@@ -36,6 +36,7 @@ from app.schemas.pipeline_runs import (
     StoryAdherenceRecheckPayload,
     StoryboardPatch,
 )
+from app.services.final_asset_service import ensure_manual_package_final_asset_defaults, get_final_asset_selection_payload, get_source_video_asset
 from app.services.providers import get_llm_provider, get_storage_provider, get_video_provider
 from app.services.narration_service import build_narration_payloads
 from app.services.semantic_critic_service import (
@@ -1628,7 +1629,8 @@ def finalize_post_video_processing(db: Session, run: PipelineRun) -> PipelineRun
 def create_manual_post_package(db: Session, run: PipelineRun):
     video = db.get(Video, run.video_id)
     if run.manual_post_package_id:
-        return db.get(ManualPostPackage, run.manual_post_package_id)
+        existing = db.get(ManualPostPackage, run.manual_post_package_id)
+        return ensure_manual_package_final_asset_defaults(db, run, existing)
     account = db.get(Account, run.account_id)
     run_config = get_run_input_config(run, account.account_config_json if account else {})
     emoji_prefix = {
@@ -1653,6 +1655,7 @@ def create_manual_post_package(db: Session, run: PipelineRun):
         f"{run.topic} clicks faster when the story stays visual.",
     ]
     is_runway_video = bool(video and video.provider == "runway")
+    source_asset = get_source_video_asset(db, run)
     pkg = ManualPostPackage(
         video_id=video.id,
         caption=caption,
@@ -1672,6 +1675,19 @@ def create_manual_post_package(db: Session, run: PipelineRun):
             "alternative_hooks": alternative_hooks,
         },
         status=ManualPackageStatus.READY,
+        final_asset_id=source_asset.id if source_asset else None,
+        final_asset_source="source_video",
+        final_asset_selection_revision=1,
+        final_asset_selected_at=now_utc(),
+        final_asset_metadata_json={
+            "narration_transcript": None,
+            "caption_cues": [],
+            "ai_voice_disclosure": None,
+            "voice_is_ai_generated": False,
+            "narration_render_status": None,
+            "caption_version": None,
+            "render_version": None,
+        },
     )
     db.add(pkg)
     db.flush()
@@ -2157,6 +2173,9 @@ def get_pipeline_run_detail(db: Session, run_id: str) -> dict[str, Any]:
     preflight = build_preflight_review(db, run) if run.script_id else None
     story_adherence_review = build_story_adherence_review(db, run)
     narration_payloads = build_narration_payloads(db, run)
+    manual_package = db.get(ManualPostPackage, run.manual_post_package_id) if run.manual_post_package_id else None
+    if manual_package:
+        manual_package = ensure_manual_package_final_asset_defaults(db, run, manual_package)
     return {
         "pipeline_run": serialize_model(run),
         "idea": serialize_model(idea) if idea else None,
@@ -2166,7 +2185,7 @@ def get_pipeline_run_detail(db: Session, run_id: str) -> dict[str, Any]:
         "assets": [serialize_model(item) for item in db.query(Asset).filter(Asset.pipeline_run_id == run.id).all()],
         "prompt_logs": [serialize_model(item) for item in db.query(PromptLog).filter(PromptLog.pipeline_run_id == run.id).all()],
         "quality_checks": [serialize_model(item) for item in db.query(QualityCheck).filter(QualityCheck.pipeline_run_id == run.id).all()],
-        "manual_post_package": serialize_model(db.get(ManualPostPackage, run.manual_post_package_id)) if run.manual_post_package_id else None,
+        "manual_post_package": serialize_model(manual_package) if manual_package else None,
         "pipeline_events": [
             serialize_model(item)
             for item in db.query(PipelineEvent).filter(PipelineEvent.pipeline_run_id == run.id).order_by(PipelineEvent.created_at.asc()).all()
@@ -2177,6 +2196,7 @@ def get_pipeline_run_detail(db: Session, run_id: str) -> dict[str, Any]:
         "narration_draft": narration_payloads["narration_draft"],
         "latest_narration_render": narration_payloads["latest_narration_render"],
         "narration_renders": narration_payloads["narration_renders"],
+        "final_asset_selection": get_final_asset_selection_payload(db, run, manual_package),
         "review_sections": review_sections,
         "review_preflight": preflight,
     }

@@ -1510,6 +1510,145 @@ def test_asset_export_pack_api_returns_manual_posting_bundle(client):
     assert payload["alternative_hooks"]
 
 
+def test_manual_post_package_defaults_final_asset_to_source_video(client):
+    run_id, payload = _create_completed_run(client)
+
+    manual_package = payload["manual_post_package"]
+    final_selection = payload["final_asset_selection"]
+    source_asset = next(asset for asset in payload["assets"] if asset["asset_type"] == "video_mp4")
+
+    assert manual_package["final_asset_source"] == "source_video"
+    assert manual_package["final_asset_id"] == source_asset["id"]
+    assert final_selection["source"] == "source_video"
+    assert final_selection["asset"]["id"] == source_asset["id"]
+    assert final_selection["original_video_asset"]["id"] == source_asset["id"]
+
+    export_pack = client.get(f"/api/asset-library/{run_id}/export-pack")
+    assert export_pack.status_code == 200
+    assert export_pack.json()["video_public_url"] == source_asset["public_url"]
+
+
+def test_final_asset_selection_uses_approved_same_run_narration_render(client, monkeypatch):
+    run_id, payload = _create_approved_narration_render(client, monkeypatch)
+    render = payload["latest_narration_render"]
+
+    response = client.post(
+        f"/api/pipeline-runs/{run_id}/final-asset/select",
+        json={"source": "narration_render", "narration_render_id": render["id"], "confirm_change_after_posting": False},
+    )
+    assert response.status_code == 200
+    selected = response.json()
+    final_selection = selected["final_asset_selection"]
+
+    assert final_selection["source"] == "narration_render"
+    assert final_selection["narration_render_id"] == render["id"]
+    assert final_selection["asset"]["id"] == render["rendered_video_asset_id"]
+    assert final_selection["narration_transcript"] == render["full_spoken_text"]
+    assert final_selection["caption_cues"] == render["caption_cues_json"]
+    assert final_selection["ai_voice_disclosure"] == render["ai_voice_disclosure"]
+
+    library_detail = client.get(f"/api/asset-library/{run_id}")
+    assert library_detail.status_code == 200
+    assert library_detail.json()["final_video_asset"]["id"] == render["rendered_video_asset_id"]
+
+    export_pack = client.get(f"/api/asset-library/{run_id}/export-pack")
+    assert export_pack.status_code == 200
+    export_payload = export_pack.json()
+    assert export_payload["final_asset_source"] == "narration_render"
+    assert export_payload["final_narration_render_id"] == render["id"]
+    assert export_payload["video_public_url"] == render["rendered_video_asset"]["public_url"]
+    assert export_payload["narration_transcript"] == render["full_spoken_text"]
+    assert export_payload["caption_cues"] == render["caption_cues_json"]
+
+
+def test_final_asset_selection_is_idempotent_for_same_asset(client, monkeypatch):
+    run_id, payload = _create_approved_narration_render(client, monkeypatch)
+    render = payload["latest_narration_render"]
+    first = client.post(
+        f"/api/pipeline-runs/{run_id}/final-asset/select",
+        json={"source": "narration_render", "narration_render_id": render["id"], "confirm_change_after_posting": False},
+    )
+    assert first.status_code == 200
+    second = client.post(
+        f"/api/pipeline-runs/{run_id}/final-asset/select",
+        json={"source": "narration_render", "narration_render_id": render["id"], "confirm_change_after_posting": False},
+    )
+    assert second.status_code == 200
+    assert first.json()["final_asset_selection"]["selection_revision"] == second.json()["final_asset_selection"]["selection_revision"]
+
+    events = [event for event in second.json()["pipeline_events"] if event["event_type"] == "final_asset.selected"]
+    assert len(events) == 1
+
+
+def test_final_asset_selection_requires_confirmation_after_posting(client, monkeypatch):
+    run_id, payload = _create_approved_narration_render(client, monkeypatch)
+    render = payload["latest_narration_render"]
+
+    posted = client.patch(
+        f"/api/asset-library/{run_id}/manual-posting",
+        json={
+            "manual_posting_status": "posted_tiktok",
+            "tiktok_post_url": "https://tiktok.com/@codextest/video/123",
+        },
+    )
+    assert posted.status_code == 200
+
+    blocked = client.post(
+        f"/api/pipeline-runs/{run_id}/final-asset/select",
+        json={"source": "narration_render", "narration_render_id": render["id"], "confirm_change_after_posting": False},
+    )
+    assert blocked.status_code == 409
+    assert "confirm_change_after_posting=true" in blocked.json()["detail"]
+
+    confirmed = client.post(
+        f"/api/pipeline-runs/{run_id}/final-asset/select",
+        json={"source": "narration_render", "narration_render_id": render["id"], "confirm_change_after_posting": True},
+    )
+    assert confirmed.status_code == 200
+    assert confirmed.json()["manual_post_package"]["manual_posting_status"] == "posted_tiktok"
+
+
+def test_final_asset_selection_rejects_non_approved_render(client, monkeypatch):
+    from app.models import NarrationRender, NarrationRenderStatus
+
+    run_id, payload = _create_approved_narration_render(client, monkeypatch)
+    render_id = payload["latest_narration_render"]["id"]
+    with SessionLocal() as db:
+        render = db.get(NarrationRender, render_id)
+        render.status = NarrationRenderStatus.NEEDS_REVISION
+        db.add(render)
+        db.commit()
+
+    response = client.post(
+        f"/api/pipeline-runs/{run_id}/final-asset/select",
+        json={"source": "narration_render", "narration_render_id": render_id, "confirm_change_after_posting": False},
+    )
+    assert response.status_code == 409
+    assert "not approved" in response.json()["detail"].lower()
+
+
+def test_final_asset_selection_can_revert_to_original_source(client, monkeypatch):
+    run_id, payload = _create_approved_narration_render(client, monkeypatch)
+    render = payload["latest_narration_render"]
+
+    select_narrated = client.post(
+        f"/api/pipeline-runs/{run_id}/final-asset/select",
+        json={"source": "narration_render", "narration_render_id": render["id"], "confirm_change_after_posting": False},
+    )
+    assert select_narrated.status_code == 200
+
+    revert = client.post(
+        f"/api/pipeline-runs/{run_id}/final-asset/select",
+        json={"source": "source_video", "confirm_change_after_posting": False},
+    )
+    assert revert.status_code == 200
+    final_selection = revert.json()["final_asset_selection"]
+    assert final_selection["source"] == "source_video"
+    assert final_selection["narration_render_id"] is None
+    assert final_selection["narration_transcript"] is None
+    assert final_selection["caption_cues"] == []
+
+
 def test_runway_quality_checklist_uses_provider_aware_branding_item(client, monkeypatch):
     from app.models import Asset, ManualPostPackage, PipelineRun, PipelineStage, PipelineStatus, QualityCheck, Video, VideoStatus
     from app.services import pipeline_service
@@ -1731,6 +1870,31 @@ def _create_completed_run(client):
     resume = client.post(f"/api/pipeline-runs/{run_id}/resume", json={"review_notes": "Looks good"})
     assert resume.status_code == 200
     return run_id, resume.json()
+
+
+def _create_approved_narration_render(client, monkeypatch):
+    _enable_mock_narration(monkeypatch)
+    run_id, _payload = _create_completed_run(client)
+    draft = client.post(f"/api/pipeline-runs/{run_id}/narration/draft", json={"confirm_paid_draft": False})
+    assert draft.status_code == 200
+    story_review = client.post(
+        f"/api/pipeline-runs/{run_id}/story-adherence/human-review",
+        json={"decision": "approve", "notes": "Approved for final asset selection."},
+    )
+    assert story_review.status_code == 200
+    render = client.post(
+        f"/api/pipeline-runs/{run_id}/narration/render",
+        json={"confirm_paid_narration": True, "voice": "alloy"},
+    )
+    assert render.status_code == 200
+    render_payload = render.json()
+    narration_render = render_payload["latest_narration_render"]
+    review = client.post(
+        f"/api/pipeline-runs/{run_id}/narration/human-review",
+        json={"narration_render_id": narration_render["id"], "decision": "approve", "notes": "Approved narration render."},
+    )
+    assert review.status_code == 200
+    return run_id, review.json()
 
 
 def test_narration_draft_creation_uses_mock_writer_and_persists_detail(client, monkeypatch):

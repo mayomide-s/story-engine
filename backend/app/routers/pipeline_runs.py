@@ -5,6 +5,7 @@ from app.db.session import get_db
 from app.schemas.pipeline_runs import (
     AggregatedPipelineRunResponse,
     ContentIdeaPatch,
+    FinalAssetSelectionPayload,
     HumanStoryAdherenceReviewPayload,
     NarrationDraftCreatePayload,
     NarrationDraftPatchPayload,
@@ -19,6 +20,7 @@ from app.schemas.pipeline_runs import (
     StoryAdherenceRecheckPayload,
     StoryboardPatch,
 )
+from app.services.final_asset_service import select_final_asset
 from app.services.pipeline_service import (
     PaidGenerationConfirmationRequiredError,
     UnsafeResumeError,
@@ -241,6 +243,23 @@ def save_narration_human_review(run_id: str, payload: NarrationHumanReviewPayloa
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/{run_id}/final-asset/select", response_model=AggregatedPipelineRunResponse)
+def select_run_final_asset(run_id: str, payload: FinalAssetSelectionPayload, db: Session = Depends(get_db)):
+    try:
+        run = select_final_asset(
+            db,
+            run_id,
+            payload.source,
+            narration_render_id=payload.narration_render_id,
+            confirm_change_after_posting=payload.confirm_change_after_posting,
+        )
+        return get_pipeline_run_detail(db, run.id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.patch("/{run_id}/idea")

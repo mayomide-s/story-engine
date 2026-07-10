@@ -134,6 +134,7 @@ export function VideoReviewPage() {
   }
 
   const manualPackage = detail?.manual_post_package as Record<string, unknown> | null;
+  const finalAssetSelection = detail?.final_asset_selection ?? null;
   const video = detail?.video as Record<string, unknown> | null;
   const run = detail?.pipeline_run as Record<string, unknown> | null;
   const narrationDraft = detail?.narration_draft as Record<string, unknown> | null;
@@ -208,12 +209,52 @@ export function VideoReviewPage() {
   const narrationAudioAsset = latestNarrationRender?.audio_asset as Record<string, unknown> | undefined;
   const narrationCaptionAsset = latestNarrationRender?.caption_asset as Record<string, unknown> | undefined;
   const narratedVideoAsset = latestNarrationRender?.rendered_video_asset as Record<string, unknown> | undefined;
+  const selectedFinalAsset = finalAssetSelection?.asset as Record<string, unknown> | undefined;
   const storyHumanReview = (storyAdherence?.human_review as Record<string, unknown> | null) ?? null;
   const storyApproved = Boolean(
     storyHumanReview?.decision === "approve" ||
     (!storyHumanReview?.decision && String(storyAdherence?.review_status ?? "") === "accept")
   );
   const narrationDraftUsable = Boolean(narrationDraft?.has_valid_content);
+  const manualPostingStarted = Boolean(
+    manualPackage &&
+    (
+      String(manualPackage.manual_posting_status ?? "not_posted") !== "not_posted" ||
+      manualPackage.tiktok_post_url ||
+      manualPackage.instagram_post_url ||
+      manualPackage.youtube_post_url
+    )
+  );
+  const narrationRenderApproved = latestNarrationRender?.status === "approved" && narratedVideoAsset;
+  const narrationAlreadySelected =
+    finalAssetSelection?.source === "narration_render" &&
+    finalAssetSelection?.narration_render_id === latestNarrationRender?.id;
+
+  async function handleSelectFinalAsset(source: "source_video" | "narration_render") {
+    if (!selectedRunId) return;
+    let confirmChangeAfterPosting = false;
+    const changingSelection = source !== finalAssetSelection?.source;
+    if (manualPostingStarted && changingSelection) {
+      confirmChangeAfterPosting = window.confirm(
+        "Manual posting has already started for this run. Change the selected final video anyway?"
+      );
+      if (!confirmChangeAfterPosting) return;
+    }
+    setIsNarrationBusy(true);
+    setError("");
+    try {
+      const refreshed = await api.selectFinalAsset(selectedRunId, {
+        source,
+        narration_render_id: source === "narration_render" ? String(latestNarrationRender?.id ?? "") : null,
+        confirm_change_after_posting: confirmChangeAfterPosting,
+      });
+      setDetail(refreshed);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Failed to update the final video selection.");
+    } finally {
+      setIsNarrationBusy(false);
+    }
+  }
 
   async function handleCreateNarrationDraft(regenerate = false) {
     if (!selectedRunId) return;
@@ -392,9 +433,9 @@ export function VideoReviewPage() {
             {videoAsset ? (
               <div className="panel inset feature-video">
               <div className="panel-header">
-                <h3>Generated Video</h3>
+                <h3>{finalAssetSelection?.source === "narration_render" ? "Selected Final Video" : "Generated Video"}</h3>
                 <div className="button-row">
-                  <CopyButton text={String(videoAsset.public_url)} label="video URL" />
+                  <CopyButton text={String((selectedFinalAsset ?? videoAsset).public_url)} label="video URL" />
                 </div>
               </div>
               <video
@@ -402,10 +443,14 @@ export function VideoReviewPage() {
                   controls
                   preload="metadata"
                   poster={thumbnailAsset ? String(thumbnailAsset.public_url) : undefined}
-                  src={String(videoAsset.public_url)}
+                  src={String((selectedFinalAsset ?? videoAsset).public_url)}
                 >
                   Your browser does not support the video preview.
                 </video>
+                <p className="subtle">
+                  Final video: {finalAssetSelection?.source === "narration_render" ? "Narrated" : "Original"}
+                  {finalAssetSelection?.selected_at ? ` · selected ${new Date(String(finalAssetSelection.selected_at)).toLocaleString()}` : ""}
+                </p>
               </div>
             ) : null}
 
@@ -737,9 +782,26 @@ export function VideoReviewPage() {
                     <button type="button" className="secondary" onClick={handleRecomposeNarratedVideo} disabled={isNarrationBusy || !latestNarrationRender.audio_asset || Boolean(latestNarrationRender.rendered_video_asset_id)}>
                       Recompose Narrated Video
                     </button>
+                    {narrationRenderApproved && !narrationAlreadySelected ? (
+                      <button type="button" onClick={() => handleSelectFinalAsset("narration_render")} disabled={isNarrationBusy}>
+                        Use as final video
+                      </button>
+                    ) : null}
+                    {narrationAlreadySelected ? <span className="status-pill success">Selected final video</span> : null}
+                    {finalAssetSelection?.source === "narration_render" ? (
+                      <button type="button" className="secondary" onClick={() => handleSelectFinalAsset("source_video")} disabled={isNarrationBusy}>
+                        Use original silent video
+                      </button>
+                    ) : null}
                     <button type="button" onClick={() => handleNarrationHumanReview("approve")} disabled={isNarrationBusy}>Approve</button>
                     <button type="button" className="secondary" onClick={() => handleNarrationHumanReview("needs_revision")} disabled={isNarrationBusy}>Needs Revision</button>
                     <button type="button" className="secondary" onClick={() => handleNarrationHumanReview("reject")} disabled={isNarrationBusy}>Reject</button>
+                  </div>
+                  <div className="key-grid">
+                    <div><span>Final asset source</span><strong>{finalAssetSelection?.source === "narration_render" ? "Narrated" : "Original"}</strong></div>
+                    <div><span>Selection revision</span><strong>{String(finalAssetSelection?.selection_revision ?? 1)}</strong></div>
+                    <div><span>Can revert</span><strong>{finalAssetSelection?.can_revert_to_source ? "Yes" : "No"}</strong></div>
+                    <div><span>Selected asset URL</span><strong>{String(selectedFinalAsset?.public_url ?? videoAsset?.public_url ?? "n/a")}</strong></div>
                   </div>
                 </div>
               ) : null}

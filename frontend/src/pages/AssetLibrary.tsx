@@ -110,6 +110,7 @@ export function AssetLibraryPage() {
 
   const selectedItem = useMemo(() => items.find((item) => item.run_id === selectedRunId) ?? null, [items, selectedRunId]);
   const manualPackage = detail?.manual_post_package as Record<string, unknown> | null;
+  const finalSelection = detail?.final_asset_selection ?? null;
   const platformVariants = (manualPackage?.platform_variants_json as Record<string, unknown> | undefined) ?? {};
   const instagramVariant = platformVariants.instagram as Record<string, unknown> | undefined;
   const tiktokVariant = platformVariants.tiktok as Record<string, unknown> | undefined;
@@ -217,14 +218,21 @@ export function AssetLibraryPage() {
               controls
               preload="metadata"
               poster={detail.thumbnail_asset ? String(detail.thumbnail_asset.public_url) : undefined}
-              src={String(detail.video_asset.public_url)}
+              src={String(detail.final_video_asset.public_url)}
             >
               Your browser does not support the video preview.
             </video>
             <div className="copy-block">
               <div className="content-meta">
-                <strong>Video URL</strong>
-                <CopyButton text={String(detail.video_asset.public_url)} label="video URL" />
+                <strong>Final Video URL</strong>
+                <CopyButton text={String(detail.final_video_asset.public_url)} label="video URL" />
+              </div>
+              <pre>{String(detail.final_video_asset.public_url)}</pre>
+            </div>
+            <div className="copy-block">
+              <div className="content-meta">
+                <strong>Original Video URL</strong>
+                <CopyButton text={String(detail.video_asset.public_url)} label="original video URL" />
               </div>
               <pre>{String(detail.video_asset.public_url)}</pre>
             </div>
@@ -245,11 +253,27 @@ export function AssetLibraryPage() {
               <div><span>Run Status</span><strong>{formatRunStatus(String(detail.pipeline_run.status))}</strong></div>
               <div><span>Video Status</span><strong>{formatVideoStatus(String(detail.video.status))}</strong></div>
               <div><span>Manual Posting</span><strong>{String(detail.manual_post_package?.manual_posting_status ?? "not_posted")}</strong></div>
+              <div><span>Final Video</span><strong>{finalSelection?.source === "narration_render" ? "Narrated" : "Original"}</strong></div>
             </div>
             <div className="button-row">
-              <CopyButton text={String(detail.video_asset.public_url)} label="video URL" />
+              <CopyButton text={String(detail.final_video_asset.public_url)} label="video URL" />
+              <CopyButton text={String(detail.video_asset.public_url)} label="original video URL" />
               {detail.thumbnail_asset ? <CopyButton text={String(detail.thumbnail_asset.public_url)} label="thumbnail URL" /> : null}
             </div>
+            {finalSelection?.source === "narration_render" ? (
+              <div className="notice-card">
+                <strong>Selected final video</strong>
+                <p>
+                  Narrated render {String(finalSelection.narration_render_id ?? "")} is the current final asset.
+                  {finalSelection.ai_voice_disclosure ? ` ${String(finalSelection.ai_voice_disclosure)}` : ""}
+                </p>
+              </div>
+            ) : (
+              <div className="notice-card">
+                <strong>Selected final video</strong>
+                <p>The original silent source video is currently selected as the final asset.</p>
+              </div>
+            )}
             {detail.idea ? (
               <div className="copy-block">
                 <div className="content-meta">
@@ -272,7 +296,7 @@ export function AssetLibraryPage() {
                   <div className="content-meta">
                     <strong>Video URL</strong>
                   </div>
-                  <pre>{String(detail.video_asset.public_url)}</pre>
+                  <pre>{String(detail.final_video_asset.public_url)}</pre>
                 </div>
                 {detail.thumbnail_asset ? (
                   <div className="copy-block">
@@ -286,7 +310,7 @@ export function AssetLibraryPage() {
                   <div className="content-meta">
                     <strong>Storage Keys</strong>
                   </div>
-                  <pre>{`Video: ${String(detail.video_asset.storage_key)}${detail.thumbnail_asset ? `\nThumbnail: ${String(detail.thumbnail_asset.storage_key)}` : ""}`}</pre>
+                  <pre>{`Final video: ${String(detail.final_video_asset.storage_key)}\nOriginal video: ${String(detail.video_asset.storage_key)}${detail.thumbnail_asset ? `\nThumbnail: ${String(detail.thumbnail_asset.storage_key)}` : ""}`}</pre>
                 </div>
               </div>
             </details>
