@@ -96,6 +96,7 @@ export function DashboardPage() {
   const [providerFilter, setProviderFilter] = useState<RunProviderFilter>("all");
   const [topicSearch, setTopicSearch] = useState("");
   const [showArchived, setShowArchived] = useState(false);
+  const [handoffNotice, setHandoffNotice] = useState<{ topic: string; sourceBatchName: string } | null>(null);
 
   function applyDefaults(config: AccountDefaults["account_config_json"]) {
     setStylePreset(String(config.default_style_preset ?? "clean_3d_cartoon"));
@@ -195,6 +196,12 @@ export function DashboardPage() {
     if (prefill.contentFormat) {
       setContentFormat(prefill.contentFormat);
     }
+    if (prefill.sourceBatchName) {
+      setHandoffNotice({
+        topic: prefill.topic,
+        sourceBatchName: prefill.sourceBatchName,
+      });
+    }
     clearDashboardPrefill();
   }, []);
 
@@ -290,6 +297,7 @@ export function DashboardPage() {
       });
       setDetail(created);
       setSelectedRunId(String(created.pipeline_run.id));
+      setHandoffNotice(null);
       await loadRuns();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create run.");
@@ -483,6 +491,19 @@ export function DashboardPage() {
             <button onClick={handleCreateRun}>Create Run</button>
           </div>
         </div>
+        {handoffNotice ? (
+          <div className="notice-card">
+            <div className="panel-header">
+              <strong>Dashboard handoff</strong>
+              <button className="secondary" type="button" onClick={() => setHandoffNotice(null)}>
+                Dismiss
+              </button>
+            </div>
+            <p>
+              Loaded '{handoffNotice.topic}' from {handoffNotice.sourceBatchName}. Review the settings, then create the run.
+            </p>
+          </div>
+        ) : null}
         <div className="form-grid">
           <label className="field">
             <span>Topic</span>
