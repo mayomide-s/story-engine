@@ -456,3 +456,232 @@ def test_platform_post_unique_constraint_is_global(client):
 
     assert first.status_code == 201
     assert second.status_code == 409
+
+
+def test_get_run_performance_builds_comparison_metrics_and_uses_latest_snapshot(client):
+    run_id, _payload = _create_completed_run(client)
+    first_post = client.post(
+        f"/api/pipeline-runs/{run_id}/performance/posts",
+        json={"platform": "tiktok", "post_url": "https://www.tiktok.com/@storyengine/video/compare-a", "posted_at": "2026-07-10T10:00:00+00:00"},
+    )
+    second_post = client.post(
+        f"/api/pipeline-runs/{run_id}/performance/posts",
+        json={"platform": "instagram", "post_url": "https://instagram.com/reel/compare-b", "posted_at": "2026-07-10T10:00:00+00:00"},
+    )
+    first_id = first_post.json()["id"]
+    second_id = second_post.json()["id"]
+
+    older = client.post(
+        f"/api/pipeline-runs/{run_id}/performance/posts/{first_id}/snapshots",
+        json={"captured_at": "2026-07-11T09:00:00+00:00", "views": 80, "likes": 8, "comments": 2, "shares": 1, "saves": 1},
+    )
+    newer = client.post(
+        f"/api/pipeline-runs/{run_id}/performance/posts/{first_id}/snapshots",
+        json={
+            "captured_at": "2026-07-11T10:00:00+00:00",
+            "views": 100,
+            "likes": 11,
+            "comments": 2,
+            "shares": 1,
+            "saves": 1,
+            "completion_rate": 0.625,
+            "average_watch_time_seconds": 8.5,
+            "followers_gained": 4,
+        },
+    )
+    second_snapshot = client.post(
+        f"/api/pipeline-runs/{run_id}/performance/posts/{second_id}/snapshots",
+        json={
+            "captured_at": "2026-07-11T11:00:00+00:00",
+            "views": 200,
+            "likes": 22,
+            "comments": 4,
+            "shares": 2,
+            "saves": 2,
+            "completion_rate": 0.625,
+            "average_watch_time_seconds": 8.5,
+            "followers_gained": 8,
+        },
+    )
+    assert older.status_code == 201
+    assert newer.status_code == 201
+    assert second_snapshot.status_code == 201
+
+    with SessionLocal() as db:
+        first_post_row = db.get(PlatformPost, first_id)
+        second_post_row = db.get(PlatformPost, second_id)
+        db.get(Asset, first_post_row.final_asset_id).duration_seconds = 10
+        db.get(Asset, second_post_row.final_asset_id).duration_seconds = 10
+        db.commit()
+
+    response = client.get(f"/api/pipeline-runs/{run_id}/performance")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["comparison"]["latest_snapshot_ordering"] == ["captured_at_desc", "created_at_desc", "id_desc"]
+
+    posts = {post["id"]: post for post in body["platform_posts"]}
+    first = posts[first_id]
+    second = posts[second_id]
+
+    assert first["latest_snapshot"]["views"] == 100
+    assert [snapshot["views"] for snapshot in first["snapshots"]] == [100, 80]
+    assert first["comparison_metrics"]["engagement_rate"] == 0.15
+    assert first["comparison_metrics"]["like_rate"] == 0.11
+    assert first["comparison_metrics"]["comment_rate"] == 0.02
+    assert first["comparison_metrics"]["share_rate"] == 0.01
+    assert first["comparison_metrics"]["save_rate"] == 0.01
+    assert first["comparison_metrics"]["completion_rate"] == 0.625
+    assert first["comparison_metrics"]["follower_conversion_rate"] == 0.04
+    assert first["comparison_metrics"]["average_watch_time_ratio"] == 0.85
+
+    assert second["comparison_metrics"]["engagement_rate"] == 0.15
+    assert second["comparison_metrics"]["like_rate"] == 0.11
+    assert body["comparison"]["metrics"]["views"]["status"] == "leader"
+    assert body["comparison"]["metrics"]["views"]["leader_post_ids"] == [second_id]
+    assert body["comparison"]["metrics"]["engagement_rate"]["status"] == "tie"
+    assert sorted(body["comparison"]["metrics"]["engagement_rate"]["leader_post_ids"]) == sorted([first_id, second_id])
+    assert body["comparison"]["metrics"]["like_rate"]["status"] == "tie"
+
+
+def test_get_run_performance_handles_missing_values_zero_values_and_only_available(client):
+    run_id, _payload = _create_completed_run(client)
+    created = client.post(
+        f"/api/pipeline-runs/{run_id}/performance/posts",
+        json={"platform": "youtube", "post_url": "https://youtube.com/shorts/only-available", "posted_at": "2026-07-11T10:00:00+00:00"},
+    )
+    post_id = created.json()["id"]
+
+    snapshot = client.post(
+        f"/api/pipeline-runs/{run_id}/performance/posts/{post_id}/snapshots",
+        json={
+            "captured_at": "2026-07-11T12:00:00+00:00",
+            "views": 0,
+            "likes": 0,
+            "comments": 0,
+            "shares": 0,
+            "completion_rate": 0,
+            "followers_gained": 0,
+        },
+    )
+    assert snapshot.status_code == 201
+
+    response = client.get(f"/api/pipeline-runs/{run_id}/performance")
+    assert response.status_code == 200
+    post = response.json()["platform_posts"][0]
+    comparison = response.json()["comparison"]["metrics"]
+
+    assert post["comparison_metrics"]["views"] == 0
+    assert post["comparison_metrics"]["engagement_rate"] is None
+    assert post["comparison_metrics"]["like_rate"] is None
+    assert post["comparison_metrics"]["completion_rate"] == 0
+    assert post["comparison_metrics"]["follower_conversion_rate"] is None
+    assert comparison["views"]["status"] == "only_available"
+    assert comparison["views"]["leader_post_ids"] == [post_id]
+    assert comparison["completion_rate"]["status"] == "only_available"
+    assert comparison["engagement_rate"]["status"] == "unavailable"
+
+
+def test_get_run_performance_uses_duration_fallback_and_null_ratio_when_missing(client):
+    run_id, payload = _create_completed_run(client)
+    created = client.post(
+        f"/api/pipeline-runs/{run_id}/performance/posts",
+        json={"platform": "other", "custom_platform_name": "Acceptance", "post_url": "https://example.com/perf/duration", "posted_at": "2026-07-11T10:00:00+00:00"},
+    )
+    post_id = created.json()["id"]
+    snapshot = client.post(
+        f"/api/pipeline-runs/{run_id}/performance/posts/{post_id}/snapshots",
+        json={"captured_at": "2026-07-11T11:00:00+00:00", "views": 100, "average_watch_time_seconds": 5},
+    )
+    assert snapshot.status_code == 201
+
+    with SessionLocal() as db:
+        post = db.get(PlatformPost, post_id)
+        asset = db.get(Asset, post.final_asset_id)
+        asset.duration_seconds = None
+        post.final_asset_metadata_json = {**(post.final_asset_metadata_json or {}), "duration_seconds": 20}
+        db.add(asset)
+        db.add(post)
+        db.commit()
+
+    response = client.get(f"/api/pipeline-runs/{run_id}/performance")
+    assert response.status_code == 200
+    post = next(item for item in response.json()["platform_posts"] if item["id"] == post_id)
+    assert post["attributed_asset_duration_seconds"] == 20
+    assert post["comparison_metrics"]["average_watch_time_ratio"] == 0.25
+
+    with SessionLocal() as db:
+        post = db.get(PlatformPost, post_id)
+        post.final_asset_metadata_json = {**(post.final_asset_metadata_json or {}), "duration_seconds": 0}
+        db.add(post)
+        db.commit()
+
+    response = client.get(f"/api/pipeline-runs/{run_id}/performance")
+    assert response.status_code == 200
+    post = next(item for item in response.json()["platform_posts"] if item["id"] == post_id)
+    assert post["comparison_metrics"]["average_watch_time_ratio"] is None
+
+
+def test_get_run_performance_builds_age_buckets_and_warnings(client):
+    run_id, _payload = _create_completed_run(client)
+    bodies = [
+        ("tiktok", "https://www.tiktok.com/@storyengine/video/age-1", "2026-07-10T10:00:00+00:00", "2026-07-10T16:00:00+00:00"),
+        ("instagram", "https://instagram.com/reel/age-2", "2026-07-10T10:00:00+00:00", "2026-07-12T10:00:00+00:00"),
+        ("youtube", "https://youtube.com/shorts/age-3", "2026-07-10T10:00:00+00:00", "2026-07-10T09:00:00+00:00"),
+    ]
+    post_ids = []
+    for platform, url, posted_at, captured_at in bodies:
+        created = client.post(
+            f"/api/pipeline-runs/{run_id}/performance/posts",
+            json={"platform": platform, "post_url": url, "posted_at": posted_at},
+        )
+        post_ids.append(created.json()["id"])
+        client.post(
+            f"/api/pipeline-runs/{run_id}/performance/posts/{created.json()['id']}/snapshots",
+            json={"captured_at": captured_at, "views": 100},
+        )
+
+    response = client.get(f"/api/pipeline-runs/{run_id}/performance")
+    assert response.status_code == 200
+    body = response.json()
+    posts = {post["id"]: post for post in body["platform_posts"]}
+
+    valid_under_24h = next(post for post in posts.values() if post["latest_snapshot_age_bucket"] == "under_24h")
+    valid_one_to_three = next(post for post in posts.values() if post["latest_snapshot_age_bucket"] == "1_3d")
+    invalid = next(post for post in posts.values() if post["latest_snapshot_age_status"] == "captured_before_posting")
+
+    assert valid_under_24h["latest_snapshot_age_label"] == "6h after posting"
+    assert valid_one_to_three["latest_snapshot_age_seconds"] == 172800
+    assert invalid["latest_snapshot_age_label"] == "Captured before posting"
+    assert body["comparison"]["mixed_age_warning"] is True
+    assert body["comparison"]["mixed_age_warning_text"] == "These posts were measured at different ages after posting, so raw comparisons may not reflect equivalent windows."
+    assert body["comparison"]["has_invalid_capture_age"] is True
+
+
+def test_get_run_performance_does_not_mutate_rows(client):
+    run_id, _payload = _create_completed_run(client)
+    created = client.post(
+        f"/api/pipeline-runs/{run_id}/performance/posts",
+        json={"platform": "tiktok", "post_url": "https://www.tiktok.com/@storyengine/video/read-only", "posted_at": "2026-07-11T10:00:00+00:00"},
+    )
+    post_id = created.json()["id"]
+    client.post(
+        f"/api/pipeline-runs/{run_id}/performance/posts/{post_id}/snapshots",
+        json={"captured_at": "2026-07-11T11:00:00+00:00", "views": 123},
+    )
+
+    with SessionLocal() as db:
+        package = db.query(ManualPostPackage).filter(ManualPostPackage.id == created.json()["manual_post_package_id"]).first()
+        post = db.get(PlatformPost, post_id)
+        event_count = db.query(PipelineEvent).filter(PipelineEvent.pipeline_run_id == run_id).count()
+        package_updated_at = package.updated_at
+        post_updated_at = post.updated_at
+
+    response = client.get(f"/api/pipeline-runs/{run_id}/performance")
+    assert response.status_code == 200
+
+    with SessionLocal() as db:
+        package = db.query(ManualPostPackage).filter(ManualPostPackage.id == created.json()["manual_post_package_id"]).first()
+        post = db.get(PlatformPost, post_id)
+        assert db.query(PipelineEvent).filter(PipelineEvent.pipeline_run_id == run_id).count() == event_count
+        assert package.updated_at == package_updated_at
+        assert post.updated_at == post_updated_at

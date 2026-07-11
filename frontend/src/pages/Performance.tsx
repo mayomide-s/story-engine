@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
-import { api, PlatformPost, RunPerformance } from "../api/client";
+import { api, PerformanceComparisonMetricName, PlatformPost, RunPerformance } from "../api/client";
 
 const PLATFORM_OPTIONS = [
   { value: "tiktok", label: "TikTok" },
@@ -58,6 +58,51 @@ function formatMetric(value?: number | null) {
   return String(value);
 }
 
+function formatCount(value?: number | null) {
+  if (value === null || value === undefined) return "â€”";
+  return value.toLocaleString();
+}
+
+function formatRate(value?: number | null) {
+  if (value === null || value === undefined) return "â€”";
+  return `${(value * 100).toFixed(1)}%`;
+}
+
+function formatRatio(value?: number | null) {
+  if (value === null || value === undefined) return "â€”";
+  return `${(value * 100).toFixed(1)}%`;
+}
+
+function formatAgeLabel(post: PlatformPost) {
+  if (post.latest_snapshot_age_label) return post.latest_snapshot_age_label;
+  if (post.latest_snapshot_age_status === "captured_before_posting") return "Captured before posting";
+  return "â€”";
+}
+
+function metricIndicatorLabel(status?: string, isLeader = false) {
+  if (status === "only_available") return "Only available result";
+  if (!isLeader) return null;
+  if (status === "tie") return "Tied leader";
+  if (status === "leader") return "Leader";
+  return null;
+}
+
+const COMPARISON_COLUMNS: Array<{
+  key: PerformanceComparisonMetricName;
+  label: string;
+  render: (post: PlatformPost) => string;
+}> = [
+  { key: "views", label: "Views", render: (post) => formatCount(post.comparison_metrics.views) },
+  { key: "engagement_rate", label: "Engagement", render: (post) => formatRate(post.comparison_metrics.engagement_rate) },
+  { key: "like_rate", label: "Like rate", render: (post) => formatRate(post.comparison_metrics.like_rate) },
+  { key: "comment_rate", label: "Comment rate", render: (post) => formatRate(post.comparison_metrics.comment_rate) },
+  { key: "share_rate", label: "Share rate", render: (post) => formatRate(post.comparison_metrics.share_rate) },
+  { key: "save_rate", label: "Save rate", render: (post) => formatRate(post.comparison_metrics.save_rate) },
+  { key: "completion_rate", label: "Completion", render: (post) => formatRate(post.comparison_metrics.completion_rate) },
+  { key: "follower_conversion_rate", label: "Follower conversion", render: (post) => formatRate(post.comparison_metrics.follower_conversion_rate) },
+  { key: "average_watch_time_ratio", label: "Watch-time ratio", render: (post) => formatRatio(post.comparison_metrics.average_watch_time_ratio) },
+];
+
 function createEmptySnapshotForm(): SnapshotFormState {
   return {
     capturedAt: createLocalDateTimeValue(),
@@ -93,6 +138,9 @@ export function PerformancePage() {
   const [snapshotFormErrors, setSnapshotFormErrors] = useState<Record<string, string>>({});
   const [snapshotForms, setSnapshotForms] = useState<Record<string, SnapshotFormState>>({});
   const [editForms, setEditForms] = useState<Record<string, typeof postForm>>({});
+  const [isCompactComparison, setIsCompactComparison] = useState(() =>
+    typeof window !== "undefined" ? window.innerWidth < 768 : false,
+  );
 
   async function loadPerformance() {
     if (!runId) return;
@@ -136,10 +184,27 @@ export function PerformancePage() {
     loadPerformance().catch(() => undefined);
   }, [runId]);
 
+  useEffect(() => {
+    function handleResize() {
+      setIsCompactComparison(window.innerWidth < 768);
+    }
+
+    handleResize();
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
   const currentFinalSelection = data?.current_final_asset_selection ?? null;
   const canTrackPerformance = Boolean(data?.run_id);
+  const comparison = data?.comparison ?? null;
 
   const sortedPosts = useMemo(() => data?.platform_posts ?? [], [data]);
+
+  function getMetricIndicator(postId: string, metricName: PerformanceComparisonMetricName) {
+    const summary = comparison?.metrics?.[metricName];
+    const isLeader = Boolean(summary?.leader_post_ids?.includes(postId));
+    return metricIndicatorLabel(summary?.status, isLeader);
+  }
 
   function updateSnapshotForm(postId: string, patch: Partial<SnapshotFormState>) {
     setSnapshotForms((current) => ({
@@ -320,6 +385,90 @@ export function PerformancePage() {
       </section>
 
       {error ? <p className="error">{error}</p> : null}
+
+      <section className="panel">
+        <div className="panel-header">
+          <h3>Comparison Snapshot</h3>
+          <span>{sortedPosts.length} post{sortedPosts.length === 1 ? "" : "s"}</span>
+        </div>
+        <p className="subtle">These comparisons describe the recorded results. They do not prove that a specific topic, format, or creative choice caused the difference.</p>
+        {comparison?.mixed_age_warning ? (
+          <div className="notice-card">
+            <strong>Mixed measurement ages</strong>
+            <p>{comparison.mixed_age_warning_text}</p>
+          </div>
+        ) : null}
+        {comparison?.has_invalid_capture_age ? (
+          <div className="notice-card danger">
+            <strong>Timestamp check needed</strong>
+            <p>{comparison.invalid_capture_age_warning_text}</p>
+          </div>
+        ) : null}
+        {!sortedPosts.length ? (
+          <p className="subtle">Add at least one platform post and one snapshot to compare recorded performance.</p>
+        ) : null}
+        {sortedPosts.length > 0 && isCompactComparison ? (
+          <div className="stack">
+            {sortedPosts.map((post) => (
+              <div key={`comparison-${post.id}`} className="panel inset stack">
+                <div className="panel-header">
+                  <strong>{formatPlatformLabel(post)}</strong>
+                  <span>{formatTimestamp(post.latest_snapshot?.captured_at ?? null)}</span>
+                </div>
+                <div className="key-grid">
+                  <div><span>Age at capture</span><strong>{formatAgeLabel(post)}</strong></div>
+                  <div><span>Attributed duration</span><strong>{post.attributed_asset_duration_seconds ?? "â€”"}</strong></div>
+                </div>
+                <div className="stack compact">
+                  {COMPARISON_COLUMNS.map((column) => {
+                    const indicator = getMetricIndicator(post.id, column.key);
+                    return (
+                      <div key={`${post.id}-${column.key}`} className="key-grid">
+                        <div><span>{column.label}</span><strong>{column.render(post)}</strong></div>
+                        <div><span>Status</span><strong>{indicator ?? "â€”"}</strong></div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : null}
+        {sortedPosts.length > 0 && !isCompactComparison ? (
+          <div className="scroll-panel">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Post</th>
+                  <th>Latest capture</th>
+                  <th>Age at capture</th>
+                  {COMPARISON_COLUMNS.map((column) => (
+                    <th key={column.key}>{column.label}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {sortedPosts.map((post) => (
+                  <tr key={`comparison-row-${post.id}`}>
+                    <td>{formatPlatformLabel(post)}</td>
+                    <td>{formatTimestamp(post.latest_snapshot?.captured_at ?? null)}</td>
+                    <td>{formatAgeLabel(post)}</td>
+                    {COMPARISON_COLUMNS.map((column) => {
+                      const indicator = getMetricIndicator(post.id, column.key);
+                      return (
+                        <td key={`${post.id}-${column.key}`}>
+                          <div>{column.render(post)}</div>
+                          {indicator ? <span className="status-pill muted">{indicator}</span> : null}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : null}
+      </section>
 
       <section className="panel">
         <div className="panel-header">

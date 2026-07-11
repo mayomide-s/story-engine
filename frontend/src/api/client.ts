@@ -214,6 +214,48 @@ export type PerformanceSnapshot = {
   created_at: string;
 };
 
+export type PerformanceComparisonMetricName =
+  | "views"
+  | "engagement_rate"
+  | "like_rate"
+  | "comment_rate"
+  | "share_rate"
+  | "save_rate"
+  | "completion_rate"
+  | "follower_conversion_rate"
+  | "average_watch_time_ratio";
+
+export type PerformanceComparisonMetricStatus = "unavailable" | "only_available" | "leader" | "tie";
+export type PerformanceComparisonAgeStatus = "valid" | "captured_before_posting" | "unavailable";
+export type PerformanceComparisonAgeBucket = "under_24h" | "1_3d" | "3_7d" | "7_30d" | "30d_plus";
+
+export type PerformanceComparisonMetricValues = {
+  views?: number | null;
+  engagement_rate?: number | null;
+  like_rate?: number | null;
+  comment_rate?: number | null;
+  share_rate?: number | null;
+  save_rate?: number | null;
+  completion_rate?: number | null;
+  follower_conversion_rate?: number | null;
+  average_watch_time_ratio?: number | null;
+};
+
+export type PerformanceMetricLeadershipSummary = {
+  status: PerformanceComparisonMetricStatus;
+  comparable_post_count: number;
+  leader_post_ids: string[];
+};
+
+export type PerformanceComparisonSummary = {
+  latest_snapshot_ordering: string[];
+  mixed_age_warning: boolean;
+  mixed_age_warning_text?: string | null;
+  has_invalid_capture_age: boolean;
+  invalid_capture_age_warning_text?: string | null;
+  metrics: Record<PerformanceComparisonMetricName, PerformanceMetricLeadershipSummary>;
+};
+
 export type PlatformPost = {
   id: string;
   pipeline_run_id: string;
@@ -231,6 +273,13 @@ export type PlatformPost = {
   created_at: string;
   updated_at: string;
   final_asset?: Record<string, unknown> | null;
+  attributed_asset_duration_seconds?: number | null;
+  latest_snapshot?: PerformanceSnapshot | null;
+  latest_snapshot_age_seconds?: number | null;
+  latest_snapshot_age_label?: string | null;
+  latest_snapshot_age_bucket?: PerformanceComparisonAgeBucket | null;
+  latest_snapshot_age_status: PerformanceComparisonAgeStatus;
+  comparison_metrics: PerformanceComparisonMetricValues;
   snapshots: PerformanceSnapshot[];
 };
 
@@ -238,6 +287,7 @@ export type RunPerformance = {
   run_id: string;
   topic: string;
   current_final_asset_selection: FinalAssetSelection | null;
+  comparison: PerformanceComparisonSummary;
   platform_posts: PlatformPost[];
 };
 
