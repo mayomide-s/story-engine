@@ -49,6 +49,7 @@ export type PipelineRunDetail = {
   latest_narration_render?: Record<string, unknown> | null;
   narration_renders?: Record<string, unknown>[];
   final_asset_selection?: FinalAssetSelection | null;
+  winner_selection?: WinnerSelection | null;
   review_sections?: Record<string, string> | null;
   review_preflight?: {
     scores?: Record<string, number>;
@@ -77,6 +78,23 @@ export type FinalAssetSelection = {
   voice_is_ai_generated: boolean;
   original_video_asset: Record<string, unknown>;
   can_revert_to_source: boolean;
+};
+
+export type WinnerPostSummary = {
+  id: string;
+  platform: "tiktok" | "instagram" | "youtube" | "other";
+  custom_platform_name?: string | null;
+  post_url: string;
+  posted_at: string;
+  final_asset_id: string;
+  final_asset_source: "source_video" | "narration_render";
+};
+
+export type WinnerSelection = {
+  platform_post_id: string | null;
+  selected_at: string | null;
+  selection_revision: number;
+  post: WinnerPostSummary | null;
 };
 
 export type StoryAdherenceHumanDecision = "approve" | "needs_review" | "regenerate";
@@ -137,6 +155,7 @@ export type AssetLibraryDetail = {
   video_asset: Record<string, unknown>;
   final_video_asset: Record<string, unknown>;
   final_asset_selection: FinalAssetSelection | null;
+  winner_selection: WinnerSelection | null;
   thumbnail_asset: Record<string, unknown> | null;
   idea: Record<string, unknown> | null;
   quality_check: Record<string, unknown> | null;
@@ -287,6 +306,7 @@ export type RunPerformance = {
   run_id: string;
   topic: string;
   current_final_asset_selection: FinalAssetSelection | null;
+  winner_selection: WinnerSelection | null;
   comparison: PerformanceComparisonSummary;
   platform_posts: PlatformPost[];
 };
@@ -559,5 +579,14 @@ export const api = {
     request<PerformanceSnapshot>(`/pipeline-runs/${runId}/performance/posts/${postId}/snapshots`, {
       method: "POST",
       body: JSON.stringify(payload)
+    }),
+  selectPerformanceWinner: (runId: string, platformPostId: string) =>
+    request<RunPerformance>(`/pipeline-runs/${runId}/performance/winner`, {
+      method: "PUT",
+      body: JSON.stringify({ platform_post_id: platformPostId })
+    }),
+  clearPerformanceWinner: (runId: string) =>
+    request<RunPerformance>(`/pipeline-runs/${runId}/performance/winner`, {
+      method: "DELETE"
     }),
 };
