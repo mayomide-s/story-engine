@@ -211,7 +211,12 @@ export function AssetLibraryPage() {
           <div className="stack scroll-panel asset-detail-scroll">
             <div className="panel-header">
               <h2>{selectedItem.topic}</h2>
-              <Link className="inline-link" to={`/review?run=${selectedItem.run_id}`}>Open Video Review</Link>
+              <div className="button-row">
+                <Link className="inline-link" to={`/review?run=${selectedItem.run_id}`}>Open Video Review</Link>
+                {String(detail.pipeline_run.status ?? "") === "completed" && detail.manual_post_package ? (
+                  <Link className="inline-link" to={`/performance/${selectedItem.run_id}`}>Open Performance</Link>
+                ) : null}
+              </div>
             </div>
             <video
               className="video-player large"

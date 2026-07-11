@@ -11,6 +11,7 @@ import { IdeaQueuePage } from "./pages/IdeaQueue";
 import { IdeasPage } from "./pages/Ideas";
 import { SettingsPage } from "./pages/Settings";
 import { VideoReviewPage } from "./pages/VideoReview";
+import { PerformancePage } from "./pages/Performance";
 
 const SIDEBAR_COLLAPSED_STORAGE_KEY = "story-engine-sidebar-collapsed";
 
@@ -222,6 +223,7 @@ export default function App() {
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/ideas" element={<IdeasPage />} />
           <Route path="/review" element={<VideoReviewPage />} />
+          <Route path="/performance/:runId" element={<PerformancePage />} />
         </Routes>
       </main>
     </div>

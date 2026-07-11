@@ -4,7 +4,22 @@ import enum
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import Boolean, DateTime, Enum, Float, ForeignKey, Integer, JSON, String, Text, UniqueConstraint
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    Enum,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    JSON,
+    Numeric,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -94,6 +109,21 @@ class NarrationRenderStatus(str, enum.Enum):
     REJECTED = "rejected"
     FAILED = "failed"
     UNAVAILABLE = "unavailable"
+
+
+class PerformancePlatform(str, enum.Enum):
+    TIKTOK = "tiktok"
+    INSTAGRAM = "instagram"
+    YOUTUBE = "youtube"
+    OTHER = "other"
+
+
+PERFORMANCE_PLATFORM_ENUM = Enum(
+    PerformancePlatform,
+    values_callable=lambda enum_cls: [item.value for item in enum_cls],
+    native_enum=False,
+    name="performanceplatform",
+)
 
 
 class Account(Base):
@@ -442,6 +472,78 @@ class NarrationRender(Base):
     ai_voice_disclosure: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class PlatformPost(Base):
+    __tablename__ = "platform_posts"
+    __table_args__ = (
+        UniqueConstraint("platform", "post_url", name="uq_platform_posts_platform_post_url"),
+        CheckConstraint(
+            "(platform = 'other' AND custom_platform_name IS NOT NULL AND length(trim(custom_platform_name)) > 0) "
+            "OR (platform != 'other' AND custom_platform_name IS NULL)",
+            name="ck_platform_posts_custom_platform_name",
+        ),
+        Index("ix_platform_posts_pipeline_run_id", "pipeline_run_id"),
+        Index("ix_platform_posts_manual_post_package_id", "manual_post_package_id"),
+        Index("ix_platform_posts_platform", "platform"),
+        Index("ix_platform_posts_posted_at", "posted_at"),
+        Index("ix_platform_posts_final_asset_id", "final_asset_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    pipeline_run_id: Mapped[str] = mapped_column(ForeignKey("pipeline_runs.id"), nullable=False)
+    manual_post_package_id: Mapped[str] = mapped_column(ForeignKey("manual_post_packages.id"), nullable=False)
+    final_asset_id: Mapped[str] = mapped_column(ForeignKey("assets.id"), nullable=False)
+    final_asset_source: Mapped[str] = mapped_column(String(50), nullable=False)
+    platform: Mapped[PerformancePlatform] = mapped_column(PERFORMANCE_PLATFORM_ENUM, nullable=False)
+    post_url: Mapped[str] = mapped_column(String(2048), nullable=False)
+    posted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    custom_platform_name: Mapped[str | None] = mapped_column(String(80))
+    final_narration_render_id: Mapped[str | None] = mapped_column(ForeignKey("narration_renders.id"))
+    final_asset_selection_revision: Mapped[int | None] = mapped_column(Integer)
+    final_asset_metadata_json: Mapped[dict | None] = mapped_column(JSON)
+    notes: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
+
+
+class PerformanceSnapshot(Base):
+    __tablename__ = "performance_snapshots"
+    __table_args__ = (
+        UniqueConstraint("platform_post_id", "captured_at", name="uq_performance_snapshots_post_captured_at"),
+        CheckConstraint("views IS NULL OR views >= 0", name="ck_performance_snapshots_views_non_negative"),
+        CheckConstraint("likes IS NULL OR likes >= 0", name="ck_performance_snapshots_likes_non_negative"),
+        CheckConstraint("comments IS NULL OR comments >= 0", name="ck_performance_snapshots_comments_non_negative"),
+        CheckConstraint("shares IS NULL OR shares >= 0", name="ck_performance_snapshots_shares_non_negative"),
+        CheckConstraint("saves IS NULL OR saves >= 0", name="ck_performance_snapshots_saves_non_negative"),
+        CheckConstraint(
+            "average_watch_time_seconds IS NULL OR average_watch_time_seconds >= 0",
+            name="ck_performance_snapshots_watch_time_non_negative",
+        ),
+        CheckConstraint(
+            "completion_rate IS NULL OR (completion_rate >= 0 AND completion_rate <= 1)",
+            name="ck_performance_snapshots_completion_rate_range",
+        ),
+        CheckConstraint(
+            "followers_gained IS NULL OR followers_gained >= 0",
+            name="ck_performance_snapshots_followers_gained_non_negative",
+        ),
+        Index("ix_performance_snapshots_post_captured_at", "platform_post_id", "captured_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    platform_post_id: Mapped[str] = mapped_column(ForeignKey("platform_posts.id"), nullable=False)
+    captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    views: Mapped[int | None] = mapped_column(BigInteger)
+    likes: Mapped[int | None] = mapped_column(BigInteger)
+    comments: Mapped[int | None] = mapped_column(BigInteger)
+    shares: Mapped[int | None] = mapped_column(BigInteger)
+    saves: Mapped[int | None] = mapped_column(BigInteger)
+    average_watch_time_seconds: Mapped[float | None] = mapped_column(Numeric(10, 3))
+    completion_rate: Mapped[float | None] = mapped_column(Numeric(6, 5))
+    followers_gained: Mapped[int | None] = mapped_column(BigInteger)
+    notes: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
 
 
 class IdeaQueueItem(Base):

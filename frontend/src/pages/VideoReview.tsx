@@ -411,6 +411,9 @@ export function VideoReviewPage() {
                     </button>
                   ) : null}
                   {selectedRunId ? <Link className="inline-link" to={`/ideas?run=${selectedRunId}`}>Back To Ideas</Link> : null}
+                  {selectedRunId && String(run?.status ?? "") === "completed" && manualPackage ? (
+                    <Link className="inline-link" to={`/performance/${selectedRunId}`}>Open Performance</Link>
+                  ) : null}
                 </div>
               </div>
               <div className="key-grid">
