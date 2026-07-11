@@ -137,5 +137,6 @@ class AggregatedPipelineRunResponse(BaseModel):
     narration_renders: list[dict[str, Any]] = Field(default_factory=list)
     final_asset_selection: dict[str, Any] | None = None
     winner_selection: dict[str, Any] | None = None
+    performance_learnings_summary: dict[str, Any] | None = None
     review_sections: dict[str, str] | None = None
     review_preflight: dict[str, Any] | None = None

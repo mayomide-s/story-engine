@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 
 ALLOWED_PLATFORMS = {"tiktok", "instagram", "youtube", "other"}
+ALLOWED_LEARNING_TYPES = {"worked", "did_not_work", "next_test", "observation"}
 
 
 def _normalize_url(value: str) -> str:
@@ -34,6 +35,21 @@ def _normalize_custom_platform_name(value: str | None) -> str | None:
         return None
     if len(normalized) > 80:
         raise ValueError("Custom platform name must be 80 characters or fewer.")
+    return normalized
+
+
+def _normalize_learning_text(value: str | None, *, required: bool, field_label: str) -> str | None:
+    if value is None:
+        if required:
+            raise ValueError(f"{field_label} is required.")
+        return None
+    normalized = value.strip()
+    if not normalized:
+        if required:
+            raise ValueError(f"{field_label} is required.")
+        return None
+    if len(normalized) > 2000:
+        raise ValueError(f"{field_label} must be 2000 characters or fewer.")
     return normalized
 
 
@@ -167,6 +183,78 @@ class PerformanceSnapshotCreatePayload(BaseModel):
         return self
 
 
+class PerformanceLearningCreatePayload(BaseModel):
+    learning_type: str
+    observation: str
+    evidence: str | None = None
+    next_action: str | None = None
+    platform_post_id: UUID | None = None
+
+    @field_validator("learning_type")
+    @classmethod
+    def validate_learning_type(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if normalized not in ALLOWED_LEARNING_TYPES:
+            raise ValueError("learning_type must be worked, did_not_work, next_test, or observation.")
+        return normalized
+
+    @field_validator("observation")
+    @classmethod
+    def validate_observation(cls, value: str) -> str:
+        return _normalize_learning_text(value, required=True, field_label="observation") or ""
+
+    @field_validator("evidence")
+    @classmethod
+    def validate_evidence(cls, value: str | None) -> str | None:
+        return _normalize_learning_text(value, required=False, field_label="evidence")
+
+    @field_validator("next_action")
+    @classmethod
+    def validate_next_action(cls, value: str | None) -> str | None:
+        return _normalize_learning_text(value, required=False, field_label="next_action")
+
+
+class PerformanceLearningPatchPayload(BaseModel):
+    learning_type: str | None = None
+    observation: str | None = None
+    evidence: str | None = None
+    next_action: str | None = None
+    platform_post_id: UUID | None = None
+
+    @field_validator("learning_type")
+    @classmethod
+    def validate_learning_type(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip().lower()
+        if normalized not in ALLOWED_LEARNING_TYPES:
+            raise ValueError("learning_type must be worked, did_not_work, next_test, or observation.")
+        return normalized
+
+    @field_validator("observation")
+    @classmethod
+    def validate_observation(cls, value: str | None) -> str | None:
+        return _normalize_learning_text(value, required=False, field_label="observation")
+
+    @field_validator("evidence")
+    @classmethod
+    def validate_evidence(cls, value: str | None) -> str | None:
+        return _normalize_learning_text(value, required=False, field_label="evidence")
+
+    @field_validator("next_action")
+    @classmethod
+    def validate_next_action(cls, value: str | None) -> str | None:
+        return _normalize_learning_text(value, required=False, field_label="next_action")
+
+    @model_validator(mode="after")
+    def validate_patch_payload(self) -> "PerformanceLearningPatchPayload":
+        if "learning_type" in self.model_fields_set and self.learning_type is None:
+            raise ValueError("learning_type is required.")
+        if "observation" in self.model_fields_set and self.observation is None:
+            raise ValueError("observation is required.")
+        return self
+
+
 class PerformanceSnapshotResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -195,11 +283,39 @@ class WinnerPostSummary(BaseModel):
     final_asset_source: str
 
 
+class LearningAssociatedPostSummary(BaseModel):
+    id: str
+    platform: str
+    custom_platform_name: str | None = None
+    post_url: str
+    posted_at: datetime
+
+
 class WinnerSelectionSummary(BaseModel):
     platform_post_id: str | None = None
     selected_at: datetime | None = None
     selection_revision: int = 0
     post: WinnerPostSummary | None = None
+
+
+class PerformanceLearningResponse(BaseModel):
+    id: str
+    pipeline_run_id: str
+    learning_type: str
+    observation: str
+    evidence: str | None = None
+    next_action: str | None = None
+    platform_post_id: str | None = None
+    associated_post: LearningAssociatedPostSummary | None = None
+    is_archived: bool
+    archived_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class PerformanceLearningsSummary(BaseModel):
+    active_count: int = 0
+    items: list[PerformanceLearningResponse] = Field(default_factory=list)
 
 
 ComparisonMetricName = Literal[
@@ -282,6 +398,7 @@ class RunPerformanceResponse(BaseModel):
     winner_selection: WinnerSelectionSummary = Field(default_factory=WinnerSelectionSummary)
     comparison: PerformanceComparisonSummary = Field(default_factory=PerformanceComparisonSummary)
     platform_posts: list[PlatformPostResponse] = Field(default_factory=list)
+    learnings: list[PerformanceLearningResponse] = Field(default_factory=list)
 
 
 class PerformanceWinnerSelectionPayload(BaseModel):

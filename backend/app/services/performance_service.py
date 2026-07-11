@@ -20,6 +20,7 @@ from app.models import (
 from app.schemas.performance import PlatformPostCreatePayload, PlatformPostUpdatePayload, RunPerformanceResponse
 from app.schemas.performance import PerformanceWinnerSelectionPayload
 from app.services.final_asset_service import get_final_asset_selection_payload, get_selected_final_asset
+from app.services.performance_learning_service import list_performance_learnings
 from app.services.pipeline_service import add_event, serialize_model
 from app.services.performance_winner_service import build_winner_selection_payload
 
@@ -358,6 +359,7 @@ def get_run_performance_data(db: Session, run_id: str) -> dict[str, Any]:
         winner_selection=build_winner_selection_payload(db, run, package),
         comparison=_build_comparison_summary(serialized_posts := [_serialize_platform_post(db, post) for post in posts]),
         platform_posts=serialized_posts,
+        learnings=list_performance_learnings(db, run.id),
     )
     return payload.model_dump(mode="json")
 

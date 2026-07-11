@@ -50,6 +50,7 @@ export type PipelineRunDetail = {
   narration_renders?: Record<string, unknown>[];
   final_asset_selection?: FinalAssetSelection | null;
   winner_selection?: WinnerSelection | null;
+  performance_learnings_summary?: PerformanceLearningsSummary | null;
   review_sections?: Record<string, string> | null;
   review_preflight?: {
     scores?: Record<string, number>;
@@ -95,6 +96,40 @@ export type WinnerSelection = {
   selected_at: string | null;
   selection_revision: number;
   post: WinnerPostSummary | null;
+};
+
+export type PerformanceLearningType =
+  | "worked"
+  | "did_not_work"
+  | "next_test"
+  | "observation";
+
+export type PerformanceLearningAssociatedPostSummary = {
+  id: string;
+  platform: "tiktok" | "instagram" | "youtube" | "other";
+  custom_platform_name?: string | null;
+  post_url: string;
+  posted_at: string;
+};
+
+export type PerformanceLearning = {
+  id: string;
+  pipeline_run_id: string;
+  learning_type: PerformanceLearningType;
+  observation: string;
+  evidence?: string | null;
+  next_action?: string | null;
+  platform_post_id?: string | null;
+  associated_post?: PerformanceLearningAssociatedPostSummary | null;
+  is_archived: boolean;
+  archived_at?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type PerformanceLearningsSummary = {
+  active_count: number;
+  items: PerformanceLearning[];
 };
 
 export type StoryAdherenceHumanDecision = "approve" | "needs_review" | "regenerate";
@@ -156,6 +191,7 @@ export type AssetLibraryDetail = {
   final_video_asset: Record<string, unknown>;
   final_asset_selection: FinalAssetSelection | null;
   winner_selection: WinnerSelection | null;
+  performance_learnings_summary?: PerformanceLearningsSummary | null;
   thumbnail_asset: Record<string, unknown> | null;
   idea: Record<string, unknown> | null;
   quality_check: Record<string, unknown> | null;
@@ -308,7 +344,24 @@ export type RunPerformance = {
   current_final_asset_selection: FinalAssetSelection | null;
   winner_selection: WinnerSelection | null;
   comparison: PerformanceComparisonSummary;
+  learnings: PerformanceLearning[];
   platform_posts: PlatformPost[];
+};
+
+export type PerformanceLearningCreatePayload = {
+  learning_type: PerformanceLearningType;
+  observation: string;
+  evidence?: string | null;
+  next_action?: string | null;
+  platform_post_id?: string | null;
+};
+
+export type PerformanceLearningPatchPayload = {
+  learning_type?: PerformanceLearningType;
+  observation?: string;
+  evidence?: string | null;
+  next_action?: string | null;
+  platform_post_id?: string | null;
 };
 
 export type HealthCheck = {
@@ -588,5 +641,19 @@ export const api = {
   clearPerformanceWinner: (runId: string) =>
     request<RunPerformance>(`/pipeline-runs/${runId}/performance/winner`, {
       method: "DELETE"
+    }),
+  createPerformanceLearning: (runId: string, payload: PerformanceLearningCreatePayload) =>
+    request<RunPerformance>(`/pipeline-runs/${runId}/performance/learnings`, {
+      method: "POST",
+      body: JSON.stringify(payload)
+    }),
+  updatePerformanceLearning: (runId: string, learningId: string, payload: PerformanceLearningPatchPayload) =>
+    request<RunPerformance>(`/pipeline-runs/${runId}/performance/learnings/${learningId}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload)
+    }),
+  archivePerformanceLearning: (runId: string, learningId: string) =>
+    request<RunPerformance>(`/pipeline-runs/${runId}/performance/learnings/${learningId}/archive`, {
+      method: "POST"
     }),
 };

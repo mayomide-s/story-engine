@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.models import Asset, ContentIdea, IdeaQueueItem, ManualPostPackage, ManualPostingStatus, PipelineRun, QualityCheck, Video
 from app.services.final_asset_service import get_final_asset_selection_payload, get_selected_final_asset
+from app.services.performance_learning_service import build_performance_learnings_summary
 from app.services.performance_winner_service import build_winner_selection_payload
 from app.services.pipeline_service import serialize_model
 
@@ -339,6 +340,7 @@ def get_asset_library_detail(db: Session, run_id: str) -> dict[str, Any]:
         "final_video_asset": serialize_model(final_video_asset),
         "final_asset_selection": final_asset_selection,
         "winner_selection": build_winner_selection_payload(db, run, manual_package),
+        "performance_learnings_summary": build_performance_learnings_summary(db, run.id),
         "thumbnail_asset": serialize_model(thumbnail_asset) if thumbnail_asset else None,
         "idea": serialize_model(idea) if idea else None,
         "quality_check": serialize_model(quality_check) if quality_check else None,
