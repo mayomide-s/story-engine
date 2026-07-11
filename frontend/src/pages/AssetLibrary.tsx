@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { api, AssetLibraryDetail, AssetLibraryItem } from "../api/client";
+import { PerformanceLearningsSummary } from "../components/PerformanceLearningsSummary";
 import { PerformanceWinnerSummary } from "../components/PerformanceWinnerSummary";
 import { ExportPackPanel } from "../components/ExportPackPanel";
 import { normalizeQualityChecklist } from "../qualityChecklist";
@@ -113,6 +114,7 @@ export function AssetLibraryPage() {
   const manualPackage = detail?.manual_post_package as Record<string, unknown> | null;
   const finalSelection = detail?.final_asset_selection ?? null;
   const winnerSelection = detail?.winner_selection ?? null;
+  const learningsSummary = detail?.performance_learnings_summary ?? null;
   const platformVariants = (manualPackage?.platform_variants_json as Record<string, unknown> | undefined) ?? {};
   const instagramVariant = platformVariants.instagram as Record<string, unknown> | undefined;
   const tiktokVariant = platformVariants.tiktok as Record<string, unknown> | undefined;
@@ -285,6 +287,11 @@ export function AssetLibraryPage() {
               winnerSelection={winnerSelection}
               performanceHref={selectedItem ? `/performance/${selectedItem.run_id}` : undefined}
               heading="Manual winner"
+              compact
+            />
+            <PerformanceLearningsSummary
+              summary={learningsSummary}
+              performanceHref={selectedItem ? `/performance/${selectedItem.run_id}` : undefined}
               compact
             />
             {detail.idea ? (

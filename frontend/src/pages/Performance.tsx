@@ -1,7 +1,19 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
-import { api, PerformanceComparisonMetricName, PlatformPost, RunPerformance } from "../api/client";
+import {
+  api,
+  PerformanceComparisonMetricName,
+  PerformanceLearning,
+  PerformanceLearningPatchPayload,
+  PerformanceLearningType,
+  PlatformPost,
+  RunPerformance,
+} from "../api/client";
+import {
+  formatPerformanceLearningAssociatedPostLabel,
+  getPerformanceLearningTypeLabel,
+} from "../components/PerformanceLearningsSummary";
 import { PerformanceWinnerSummary } from "../components/PerformanceWinnerSummary";
 
 const PLATFORM_OPTIONS = [
@@ -24,6 +36,14 @@ type SnapshotFormState = {
   completionRatePercent: string;
   followersGained: string;
   notes: string;
+};
+
+type LearningFormState = {
+  learningType: PerformanceLearningType;
+  observation: string;
+  evidence: string;
+  nextAction: string;
+  platformPostId: string;
 };
 
 function createLocalDateTimeValue(date = new Date()) {
@@ -119,6 +139,29 @@ function createEmptySnapshotForm(): SnapshotFormState {
   };
 }
 
+function createEmptyLearningForm(): LearningFormState {
+  return {
+    learningType: "observation",
+    observation: "",
+    evidence: "",
+    nextAction: "",
+    platformPostId: "",
+  };
+}
+
+function normalizeLearningText(value: string, blankToNull = false) {
+  const trimmed = value.trim();
+  if (!trimmed && blankToNull) return null;
+  return trimmed;
+}
+
+function formatAssociatedPostOptionLabel(post: PlatformPost, winnerPostId?: string | null) {
+  const baseLabel = formatPlatformLabel(post);
+  const date = formatTimestamp(post.posted_at);
+  const winnerSuffix = winnerPostId === post.id ? " — Current manual winner" : "";
+  return `${baseLabel}${winnerSuffix} — ${date}`;
+}
+
 export function PerformancePage() {
   const { runId = "" } = useParams();
   const [data, setData] = useState<RunPerformance | null>(null);
@@ -141,6 +184,16 @@ export function PerformancePage() {
   const [editForms, setEditForms] = useState<Record<string, typeof postForm>>({});
   const [winnerError, setWinnerError] = useState("");
   const [winnerMutation, setWinnerMutation] = useState<{ action: "select" | "replace" | "clear"; postId?: string } | null>(null);
+  const [learningForm, setLearningForm] = useState<LearningFormState>(createEmptyLearningForm);
+  const [learningFormError, setLearningFormError] = useState("");
+  const [isSavingLearning, setIsSavingLearning] = useState(false);
+  const [editingLearningId, setEditingLearningId] = useState<string | null>(null);
+  const [editingLearningForm, setEditingLearningForm] = useState<LearningFormState>(createEmptyLearningForm);
+  const [editingLearningError, setEditingLearningError] = useState("");
+  const [savingLearningId, setSavingLearningId] = useState<string | null>(null);
+  const [archivingLearningId, setArchivingLearningId] = useState<string | null>(null);
+  const [learningActionError, setLearningActionError] = useState<{ learningId: string; message: string } | null>(null);
+  const [showArchivedLearnings, setShowArchivedLearnings] = useState(false);
   const [isCompactComparison, setIsCompactComparison] = useState(() =>
     typeof window !== "undefined" ? window.innerWidth < 768 : false,
   );
@@ -201,8 +254,12 @@ export function PerformancePage() {
   const winnerSelection = data?.winner_selection ?? null;
   const canTrackPerformance = Boolean(data?.run_id);
   const comparison = data?.comparison ?? null;
-
   const sortedPosts = useMemo(() => data?.platform_posts ?? [], [data]);
+  const learnings = useMemo(() => data?.learnings ?? [], [data]);
+  const activeLearnings = useMemo(() => learnings.filter((learning) => !learning.is_archived), [learnings]);
+  const archivedLearnings = useMemo(() => learnings.filter((learning) => learning.is_archived), [learnings]);
+  const winnerPostId = winnerSelection?.platform_post_id ?? null;
+  const learningPostIds = useMemo(() => new Set(sortedPosts.map((post) => post.id)), [sortedPosts]);
 
   function getMetricIndicator(postId: string, metricName: PerformanceComparisonMetricName) {
     const summary = comparison?.metrics?.[metricName];
@@ -294,6 +351,55 @@ export function PerformancePage() {
     };
   }
 
+  function validateLearningForm(form: LearningFormState) {
+    const observation = normalizeLearningText(form.observation);
+    if (!observation) return "Observation is required.";
+    if (observation.length > 2000) return "Observation must be 2000 characters or fewer.";
+
+    const evidence = normalizeLearningText(form.evidence, true);
+    if (evidence && evidence.length > 2000) return "Evidence must be 2000 characters or fewer.";
+
+    const nextAction = normalizeLearningText(form.nextAction, true);
+    if (nextAction && nextAction.length > 2000) return "Next action must be 2000 characters or fewer.";
+
+    if (form.platformPostId && !learningPostIds.has(form.platformPostId)) {
+      return "Select an associated post from this run.";
+    }
+
+    return "";
+  }
+
+  function buildLearningPayload(form: LearningFormState) {
+    const observation = normalizeLearningText(form.observation) ?? "";
+    return {
+      learning_type: form.learningType,
+      observation,
+      evidence: normalizeLearningText(form.evidence, true),
+      next_action: normalizeLearningText(form.nextAction, true),
+      platform_post_id: form.platformPostId || null,
+    };
+  }
+
+  function createLearningEditPayload(
+    learning: PerformanceLearning,
+    form: LearningFormState,
+  ): PerformanceLearningPatchPayload | null {
+    const normalized = buildLearningPayload(form);
+    const currentObservation = learning.observation;
+    const currentEvidence = learning.evidence ?? null;
+    const currentNextAction = learning.next_action ?? null;
+    const currentPlatformPostId = learning.platform_post_id ?? null;
+
+    const payload: PerformanceLearningPatchPayload = {};
+    if (normalized.learning_type !== learning.learning_type) payload.learning_type = normalized.learning_type;
+    if (normalized.observation !== currentObservation) payload.observation = normalized.observation;
+    if (normalized.evidence !== currentEvidence) payload.evidence = normalized.evidence;
+    if (normalized.next_action !== currentNextAction) payload.next_action = normalized.next_action;
+    if (normalized.platform_post_id !== currentPlatformPostId) payload.platform_post_id = normalized.platform_post_id;
+
+    return Object.keys(payload).length ? payload : null;
+  }
+
   async function handleCreatePost(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const validationError = validatePostForm(postForm);
@@ -360,6 +466,94 @@ export function PerformancePage() {
       }));
     } finally {
       setSavingSnapshotPostId(null);
+    }
+  }
+
+  async function handleCreateLearning(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!runId) return;
+
+    const validationError = validateLearningForm(learningForm);
+    setLearningFormError(validationError);
+    if (validationError) return;
+
+    setIsSavingLearning(true);
+    setLearningActionError(null);
+    try {
+      const response = await api.createPerformanceLearning(runId, buildLearningPayload(learningForm));
+      setData(response);
+      setLearningForm(createEmptyLearningForm());
+      setLearningFormError("");
+    } catch (requestError) {
+      setLearningFormError(requestError instanceof Error ? requestError.message : "Failed to save the performance learning.");
+    } finally {
+      setIsSavingLearning(false);
+    }
+  }
+
+  function handleStartEditLearning(learning: PerformanceLearning) {
+    setEditingLearningId(learning.id);
+    setEditingLearningError("");
+    setLearningActionError(null);
+    setEditingLearningForm({
+      learningType: learning.learning_type,
+      observation: learning.observation,
+      evidence: learning.evidence ?? "",
+      nextAction: learning.next_action ?? "",
+      platformPostId: learning.platform_post_id ?? "",
+    });
+  }
+
+  async function handleSaveLearning(learning: PerformanceLearning) {
+    if (!runId) return;
+    const validationError = validateLearningForm(editingLearningForm);
+    setEditingLearningError(validationError);
+    if (validationError) return;
+
+    const payload = createLearningEditPayload(learning, editingLearningForm);
+    if (!payload) {
+      setEditingLearningError("");
+      setEditingLearningId(null);
+      return;
+    }
+
+    setSavingLearningId(learning.id);
+    setLearningActionError(null);
+    try {
+      const response = await api.updatePerformanceLearning(runId, learning.id, payload);
+      setData(response);
+      setEditingLearningId(null);
+      setEditingLearningError("");
+    } catch (requestError) {
+      setEditingLearningError(requestError instanceof Error ? requestError.message : "Failed to update the performance learning.");
+    } finally {
+      setSavingLearningId(null);
+    }
+  }
+
+  async function handleArchiveLearning(learning: PerformanceLearning) {
+    if (!runId) return;
+    const confirmed = window.confirm(
+      "Archive this performance learning? It will become read-only and remain available under archived learnings.",
+    );
+    if (!confirmed) return;
+
+    setArchivingLearningId(learning.id);
+    setEditingLearningError("");
+    setLearningActionError(null);
+    try {
+      const response = await api.archivePerformanceLearning(runId, learning.id);
+      setData(response);
+      if (editingLearningId === learning.id) {
+        setEditingLearningId(null);
+      }
+    } catch (requestError) {
+      setLearningActionError({
+        learningId: learning.id,
+        message: requestError instanceof Error ? requestError.message : "Failed to archive the performance learning.",
+      });
+    } finally {
+      setArchivingLearningId(null);
     }
   }
 
@@ -570,6 +764,329 @@ export function PerformancePage() {
             </table>
           </div>
         ) : null}
+      </section>
+
+      <section className="panel">
+        <div className="panel-header">
+          <h3>Performance learnings</h3>
+          <span>{activeLearnings.length} active</span>
+        </div>
+        <p className="subtle">Saved observations describe the available evidence but do not prove causation.</p>
+        <form className="stack" onSubmit={handleCreateLearning}>
+          <div className="form-grid">
+            <label className="field">
+              <span>Category</span>
+              <select
+                value={learningForm.learningType}
+                onChange={(event) =>
+                  setLearningForm((current) => ({
+                    ...current,
+                    learningType: event.target.value as PerformanceLearningType,
+                  }))}
+              >
+                <option value="worked">Worked</option>
+                <option value="did_not_work">Did not work</option>
+                <option value="next_test">Test next</option>
+                <option value="observation">Observation</option>
+              </select>
+            </label>
+            <label className="field">
+              <span>Associated post</span>
+              <select
+                value={learningForm.platformPostId}
+                onChange={(event) => setLearningForm((current) => ({ ...current, platformPostId: event.target.value }))}
+              >
+                <option value="">No specific post</option>
+                {sortedPosts.map((post) => (
+                  <option key={post.id} value={post.id}>
+                    {formatAssociatedPostOptionLabel(post, winnerPostId)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field field-wide">
+              <span>Observation</span>
+              <textarea
+                value={learningForm.observation}
+                rows={4}
+                maxLength={2000}
+                onChange={(event) => setLearningForm((current) => ({ ...current, observation: event.target.value }))}
+              />
+              <span className="subtle">{learningForm.observation.length}/2000</span>
+            </label>
+            <label className="field field-wide">
+              <span>Evidence</span>
+              <textarea
+                value={learningForm.evidence}
+                rows={3}
+                maxLength={2000}
+                onChange={(event) => setLearningForm((current) => ({ ...current, evidence: event.target.value }))}
+              />
+              <span className="subtle">{learningForm.evidence.length}/2000</span>
+            </label>
+            <label className="field field-wide">
+              <span>Next action</span>
+              <textarea
+                value={learningForm.nextAction}
+                rows={3}
+                maxLength={2000}
+                onChange={(event) => setLearningForm((current) => ({ ...current, nextAction: event.target.value }))}
+              />
+              <span className="subtle">{learningForm.nextAction.length}/2000</span>
+            </label>
+          </div>
+          {learningFormError ? <p className="error-text">{learningFormError}</p> : null}
+          <div className="button-row">
+            <button type="submit" disabled={isSavingLearning}>
+              {isSavingLearning ? "Saving..." : "Save learning"}
+            </button>
+          </div>
+        </form>
+
+        <div className="stack">
+          <div className="panel-header">
+            <h4>Active learnings</h4>
+            {archivedLearnings.length ? (
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => setShowArchivedLearnings((current) => !current)}
+              >
+                {showArchivedLearnings ? "Hide archived" : `Show archived (${archivedLearnings.length})`}
+              </button>
+            ) : null}
+          </div>
+          {!activeLearnings.length ? (
+            <p className="subtle">
+              {archivedLearnings.length
+                ? "No active performance learnings."
+                : "No performance learnings have been saved yet."}
+            </p>
+          ) : null}
+          {activeLearnings.map((learning) => {
+            const isEditing = editingLearningId === learning.id;
+            const associatedLabel = formatPerformanceLearningAssociatedPostLabel(learning);
+            const isCurrentWinner = winnerPostId !== null && learning.platform_post_id === winnerPostId;
+            const updatedChanged = learning.updated_at !== learning.created_at;
+
+            return (
+              <div key={learning.id} className="panel inset stack">
+                <div className="panel-header">
+                  <div className="button-row">
+                    <span className="status-pill muted">{getPerformanceLearningTypeLabel(learning.learning_type)}</span>
+                    {learning.is_archived ? <span className="status-pill">Archived</span> : null}
+                  </div>
+                  {!learning.is_archived ? (
+                    <div className="button-row">
+                      <button
+                        type="button"
+                        className="secondary"
+                        onClick={() => {
+                          if (isEditing) {
+                            setEditingLearningId(null);
+                            setEditingLearningError("");
+                            return;
+                          }
+                          handleStartEditLearning(learning);
+                        }}
+                        disabled={savingLearningId === learning.id || archivingLearningId === learning.id}
+                      >
+                        {isEditing ? "Cancel" : "Edit"}
+                      </button>
+                      <button
+                        type="button"
+                        className="secondary"
+                        onClick={() => handleArchiveLearning(learning)}
+                        disabled={savingLearningId === learning.id || archivingLearningId === learning.id}
+                      >
+                        {archivingLearningId === learning.id ? "Archiving..." : "Archive"}
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+
+                {isEditing ? (
+                  <div className="stack">
+                    <div className="form-grid">
+                      <label className="field">
+                        <span>Category</span>
+                        <select
+                          value={editingLearningForm.learningType}
+                          onChange={(event) =>
+                            setEditingLearningForm((current) => ({
+                              ...current,
+                              learningType: event.target.value as PerformanceLearningType,
+                            }))}
+                        >
+                          <option value="worked">Worked</option>
+                          <option value="did_not_work">Did not work</option>
+                          <option value="next_test">Test next</option>
+                          <option value="observation">Observation</option>
+                        </select>
+                      </label>
+                      <label className="field">
+                        <span>Associated post</span>
+                        <select
+                          value={editingLearningForm.platformPostId}
+                          onChange={(event) =>
+                            setEditingLearningForm((current) => ({ ...current, platformPostId: event.target.value }))}
+                        >
+                          <option value="">No specific post</option>
+                          {sortedPosts.map((post) => (
+                            <option key={post.id} value={post.id}>
+                              {formatAssociatedPostOptionLabel(post, winnerPostId)}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="field field-wide">
+                        <span>Observation</span>
+                        <textarea
+                          value={editingLearningForm.observation}
+                          rows={4}
+                          maxLength={2000}
+                          onChange={(event) =>
+                            setEditingLearningForm((current) => ({ ...current, observation: event.target.value }))}
+                        />
+                        <span className="subtle">{editingLearningForm.observation.length}/2000</span>
+                      </label>
+                      <label className="field field-wide">
+                        <span>Evidence</span>
+                        <textarea
+                          value={editingLearningForm.evidence}
+                          rows={3}
+                          maxLength={2000}
+                          onChange={(event) =>
+                            setEditingLearningForm((current) => ({ ...current, evidence: event.target.value }))}
+                        />
+                        <span className="subtle">{editingLearningForm.evidence.length}/2000</span>
+                      </label>
+                      <label className="field field-wide">
+                        <span>Next action</span>
+                        <textarea
+                          value={editingLearningForm.nextAction}
+                          rows={3}
+                          maxLength={2000}
+                          onChange={(event) =>
+                            setEditingLearningForm((current) => ({ ...current, nextAction: event.target.value }))}
+                        />
+                        <span className="subtle">{editingLearningForm.nextAction.length}/2000</span>
+                      </label>
+                    </div>
+                    {editingLearningError ? <p className="error-text">{editingLearningError}</p> : null}
+                    <div className="button-row">
+                      <button
+                        type="button"
+                        onClick={() => handleSaveLearning(learning)}
+                        disabled={savingLearningId === learning.id}
+                      >
+                        {savingLearningId === learning.id ? "Saving..." : "Save changes"}
+                      </button>
+                      <button
+                        type="button"
+                        className="secondary"
+                        onClick={() => {
+                          setEditingLearningId(null);
+                          setEditingLearningError("");
+                        }}
+                        disabled={savingLearningId === learning.id}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <p style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{learning.observation}</p>
+                    {learning.evidence ? (
+                      <div>
+                        <strong>Evidence</strong>
+                        <p style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{learning.evidence}</p>
+                      </div>
+                    ) : null}
+                    {learning.next_action ? (
+                      <div>
+                        <strong>Next action</strong>
+                        <p style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{learning.next_action}</p>
+                      </div>
+                    ) : null}
+                  </>
+                )}
+
+                {associatedLabel ? (
+                  <div className="stack compact">
+                    <div className="button-row">
+                      <strong>Associated post</strong>
+                      {isCurrentWinner ? <span className="status-pill muted">Current manual winner</span> : null}
+                    </div>
+                    <p>{associatedLabel}</p>
+                    {learning.associated_post?.posted_at ? <p className="subtle">Posted {formatTimestamp(learning.associated_post.posted_at)}</p> : null}
+                    {learning.associated_post?.post_url ? (
+                      <a className="inline-link" href={learning.associated_post.post_url} target="_blank" rel="noreferrer">
+                        Open associated post
+                      </a>
+                    ) : null}
+                  </div>
+                ) : null}
+
+                <div className="key-grid">
+                  <div><span>Created</span><strong>{formatTimestamp(learning.created_at)}</strong></div>
+                  <div><span>Updated</span><strong>{updatedChanged ? formatTimestamp(learning.updated_at) : "—"}</strong></div>
+                </div>
+                {learningActionError?.learningId === learning.id ? <p className="error-text">{learningActionError.message}</p> : null}
+              </div>
+            );
+          })}
+
+          {showArchivedLearnings && archivedLearnings.length ? (
+            <div className="stack">
+              <h4>Archived learnings</h4>
+              {archivedLearnings.map((learning) => {
+                const associatedLabel = formatPerformanceLearningAssociatedPostLabel(learning);
+                return (
+                  <div key={learning.id} className="panel inset stack">
+                    <div className="panel-header">
+                      <div className="button-row">
+                        <span className="status-pill muted">{getPerformanceLearningTypeLabel(learning.learning_type)}</span>
+                        <span className="status-pill">Archived</span>
+                      </div>
+                      <span>{learning.archived_at ? formatTimestamp(learning.archived_at) : "Archived"}</span>
+                    </div>
+                    <p style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{learning.observation}</p>
+                    {learning.evidence ? (
+                      <div>
+                        <strong>Evidence</strong>
+                        <p style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{learning.evidence}</p>
+                      </div>
+                    ) : null}
+                    {learning.next_action ? (
+                      <div>
+                        <strong>Next action</strong>
+                        <p style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{learning.next_action}</p>
+                      </div>
+                    ) : null}
+                    {associatedLabel ? (
+                      <div className="stack compact">
+                        <strong>Associated post</strong>
+                        <p>{associatedLabel}</p>
+                        {learning.associated_post?.post_url ? (
+                          <a className="inline-link" href={learning.associated_post.post_url} target="_blank" rel="noreferrer">
+                            Open associated post
+                          </a>
+                        ) : null}
+                      </div>
+                    ) : null}
+                    <div className="key-grid">
+                      <div><span>Created</span><strong>{formatTimestamp(learning.created_at)}</strong></div>
+                      <div><span>Updated</span><strong>{formatTimestamp(learning.updated_at)}</strong></div>
+                      <div><span>Archived</span><strong>{formatTimestamp(learning.archived_at)}</strong></div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : null}
+        </div>
       </section>
 
       <section className="panel">

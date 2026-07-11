@@ -4,6 +4,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { api, PipelineRunDetail, PipelineRunSummary } from "../api/client";
 import { ExportPackPanel } from "../components/ExportPackPanel";
 import { EventTimeline } from "../components/EventTimeline";
+import { PerformanceLearningsSummary } from "../components/PerformanceLearningsSummary";
 import { PerformanceWinnerSummary } from "../components/PerformanceWinnerSummary";
 import { normalizeQualityChecklist } from "../qualityChecklist";
 import { formatProvider, formatRunStatus, formatVideoStatus } from "../utils/display";
@@ -137,6 +138,7 @@ export function VideoReviewPage() {
   const manualPackage = detail?.manual_post_package as Record<string, unknown> | null;
   const finalAssetSelection = detail?.final_asset_selection ?? null;
   const winnerSelection = detail?.winner_selection ?? null;
+  const learningsSummary = detail?.performance_learnings_summary ?? null;
   const video = detail?.video as Record<string, unknown> | null;
   const run = detail?.pipeline_run as Record<string, unknown> | null;
   const narrationDraft = detail?.narration_draft as Record<string, unknown> | null;
@@ -463,6 +465,11 @@ export function VideoReviewPage() {
               winnerSelection={winnerSelection}
               performanceHref={selectedRunId ? `/performance/${selectedRunId}` : undefined}
               heading="Manual winner"
+              compact
+            />
+            <PerformanceLearningsSummary
+              summary={learningsSummary}
+              performanceHref={selectedRunId ? `/performance/${selectedRunId}` : undefined}
               compact
             />
 
