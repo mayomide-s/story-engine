@@ -15,11 +15,13 @@ import {
   loadBatches,
   saveBatches,
   saveDashboardPrefill,
+  SPRINT_1_BATCH_NAME,
   type BatchContentAngle,
   type BatchProductionStatus,
   type BatchStatus,
   type BatchTargetPlatform,
   type BatchTopicIdea,
+  upsertSprint1Batch,
 } from "../utils/batchPlanner";
 
 type Filters = {
@@ -58,6 +60,7 @@ export function BatchPlannerPage() {
   const [batches, setBatches] = useState<ContentBatch[]>([]);
   const [selectedBatchId, setSelectedBatchId] = useState("");
   const [filters, setFilters] = useState<Filters>(CONTENT_OPS_FILTERS);
+  const [plannerMessage, setPlannerMessage] = useState<string | null>(null);
 
   useEffect(() => {
     const stored = loadBatches();
@@ -93,6 +96,28 @@ export function BatchPlannerPage() {
       return true;
     });
   }, [filters, selectedBatch]);
+
+  const sprintSummary = useMemo(() => {
+    if (!selectedBatch) {
+      return null;
+    }
+    return {
+      totalIdeas: selectedBatch.topics.length,
+      selected: selectedBatch.topics.filter((topic) => topic.productionStatus === "selected").length,
+      inProduction: selectedBatch.topics.filter((topic) => topic.productionStatus === "in_production").length,
+      generated: selectedBatch.topics.filter((topic) => topic.productionStatus === "generated").length,
+      readyToPost: selectedBatch.topics.filter((topic) => topic.productionStatus === "ready_to_post").length,
+      posted: selectedBatch.topics.filter((topic) => topic.productionStatus === "posted").length,
+      winners: selectedBatch.topics.filter((topic) => topic.isWinner).length,
+    };
+  }, [selectedBatch]);
+
+  const nextSelectedTopic = useMemo(() => {
+    if (!selectedBatch) {
+      return null;
+    }
+    return selectedBatch.topics.find((topic) => topic.productionStatus === "selected") ?? null;
+  }, [selectedBatch]);
 
   function persistBatch(nextBatch: ContentBatch) {
     setBatches((current) => current.map((batch) => (batch.id === nextBatch.id ? nextBatch : batch)));
@@ -166,13 +191,59 @@ export function BatchPlannerPage() {
     updateTopic(topicId, { productionStatus });
   }
 
-  function useInDashboard(topic: BatchTopicIdea) {
+  function markWinner(topicId: string, isWinner: boolean) {
+    updateTopic(topicId, { isWinner });
+  }
+
+  function createSprint1() {
+    const sprintExists = batches.some((batch) => batch.batchName === SPRINT_1_BATCH_NAME);
+    const next = upsertSprint1Batch(batches);
+    setBatches(next.batches);
+    setSelectedBatchId(next.batchId);
+    setPlannerMessage(
+      sprintExists
+        ? "Sprint 1 already exists and has been selected."
+        : `Created ${SPRINT_1_BATCH_NAME}.`,
+    );
+    window.setTimeout(() => setPlannerMessage(null), 2200);
+  }
+
+  function sendTopicToDashboard(topic: BatchTopicIdea) {
+    if (!selectedBatch) {
+      return;
+    }
+    const nextBatch = {
+      ...selectedBatch,
+      topics: selectedBatch.topics.map((currentTopic) => (
+        currentTopic.id === topic.id
+          ? { ...currentTopic, productionStatus: "in_production" as BatchProductionStatus }
+          : currentTopic
+      )),
+      updatedAt: new Date().toISOString(),
+    };
+    const nextBatches = batches.map((batch) => (batch.id === selectedBatch.id ? nextBatch : batch));
     saveDashboardPrefill({
       topic: topic.topic,
       audienceLevel: topic.audienceLevel,
       contentFormat: selectedBatch?.contentAngle === "funny metaphor" ? "coding metaphor" : "quick concept explainer",
+      sourceBatchName: selectedBatch.batchName,
     });
+    setBatches(nextBatches);
+    saveBatches(nextBatches);
     navigate("/");
+  }
+
+  function sendNextSelectedTopicToDashboard() {
+    if (!selectedBatch) {
+      return;
+    }
+    const nextTopic = selectedBatch.topics.find((topic) => topic.productionStatus === "selected");
+    if (!nextTopic) {
+      setPlannerMessage("No selected topics are waiting to be sent.");
+      window.setTimeout(() => setPlannerMessage(null), 2200);
+      return;
+    }
+    sendTopicToDashboard(nextTopic);
   }
 
   return (
@@ -183,8 +254,12 @@ export function BatchPlannerPage() {
             <p className="eyebrow">Batch Planner</p>
             <h2>Plan repeatable batches of coding explainers before production.</h2>
           </div>
-          <button type="button" onClick={addBatch}>New Batch</button>
+          <div className="button-row">
+            <button className="secondary" type="button" onClick={createSprint1}>Create Sprint 1</button>
+            <button type="button" onClick={addBatch}>New Batch</button>
+          </div>
         </div>
+        {plannerMessage ? <p className="subtle">{plannerMessage}</p> : null}
       </section>
 
       <div className="review-grid">
@@ -221,10 +296,34 @@ export function BatchPlannerPage() {
               <div className="panel-header">
                 <h2>Batch Setup</h2>
                 <div className="button-row">
+                  <button
+                    className="secondary"
+                    type="button"
+                    onClick={sendNextSelectedTopicToDashboard}
+                    disabled={!nextSelectedTopic}
+                  >
+                    {nextSelectedTopic ? `Send next: ${nextSelectedTopic.topic}` : "Send next selected topic"}
+                  </button>
                   <button className="secondary" type="button" onClick={addManualTopic}>Add Topic</button>
                   <button className="secondary" type="button" onClick={addStarterTopics}>Add Starter Ideas</button>
                 </div>
               </div>
+              <p className="subtle">
+                {nextSelectedTopic
+                  ? `The next selected topic in this batch order is "${nextSelectedTopic.topic}".`
+                  : "No selected topics are waiting to be sent to the Dashboard."}
+              </p>
+              {sprintSummary ? (
+                <div className="key-grid">
+                  <div><span>Total Ideas</span><strong>{sprintSummary.totalIdeas}</strong></div>
+                  <div><span>Selected</span><strong>{sprintSummary.selected}</strong></div>
+                  <div><span>In Production</span><strong>{sprintSummary.inProduction}</strong></div>
+                  <div><span>Generated</span><strong>{sprintSummary.generated}</strong></div>
+                  <div><span>Ready To Post</span><strong>{sprintSummary.readyToPost}</strong></div>
+                  <div><span>Posted</span><strong>{sprintSummary.posted}</strong></div>
+                  <div><span>Winners</span><strong>{sprintSummary.winners}</strong></div>
+                </div>
+              ) : null}
               <div className="form-grid">
                 <label className="field">
                   <span>Batch Name</span>
@@ -325,6 +424,7 @@ export function BatchPlannerPage() {
                     <span className="status-pill">{formatBatchStatus(topic.platformFit)}</span>
                     <span className="status-pill muted">{formatBatchStatus(topic.audienceLevel)}</span>
                     <span className="status-pill muted">Hook {topic.hookScore}/5</span>
+                    {topic.isWinner ? <span className="status-pill success">Winner</span> : null}
                   </div>
                   <div className="form-grid">
                     <label className="field">
@@ -379,7 +479,10 @@ export function BatchPlannerPage() {
                     <button className="secondary" type="button" onClick={() => moveTopic(topic.id, "selected")}>Mark Selected</button>
                     <button className="secondary" type="button" onClick={() => moveTopic(topic.id, "in_production")}>Mark In Production</button>
                     <button className="secondary" type="button" onClick={() => moveTopic(topic.id, "ready_to_post")}>Mark Ready To Post</button>
-                    <button type="button" onClick={() => useInDashboard(topic)}>Use In Dashboard</button>
+                    <button className="secondary" type="button" onClick={() => markWinner(topic.id, !topic.isWinner)}>
+                      {topic.isWinner ? "Remove Winner" : "Mark Winner"}
+                    </button>
+                    <button type="button" onClick={() => sendTopicToDashboard(topic)}>Send to Dashboard</button>
                     <button className="secondary" type="button" onClick={() => deleteTopic(topic.id)}>Delete</button>
                   </div>
                 </article>

@@ -44,6 +44,11 @@ export type PipelineRunDetail = {
   pipeline_events: Record<string, unknown>[];
   prompt_preview?: string | null;
   content_critique?: Record<string, unknown> | null;
+  story_adherence_review?: Record<string, unknown> | null;
+  narration_draft?: Record<string, unknown> | null;
+  latest_narration_render?: Record<string, unknown> | null;
+  narration_renders?: Record<string, unknown>[];
+  final_asset_selection?: FinalAssetSelection | null;
   review_sections?: Record<string, string> | null;
   review_preflight?: {
     scores?: Record<string, number>;
@@ -59,6 +64,23 @@ export type PipelineRunDetail = {
     summary?: string;
   } | null;
 };
+
+export type FinalAssetSelection = {
+  source: "source_video" | "narration_render";
+  asset: Record<string, unknown>;
+  narration_render_id?: string | null;
+  selection_revision: number;
+  selected_at?: string | null;
+  narration_transcript?: string | null;
+  caption_cues: Record<string, unknown>[];
+  ai_voice_disclosure?: string | null;
+  voice_is_ai_generated: boolean;
+  original_video_asset: Record<string, unknown>;
+  can_revert_to_source: boolean;
+};
+
+export type StoryAdherenceHumanDecision = "approve" | "needs_review" | "regenerate";
+export type NarrationHumanDecision = "approve" | "needs_revision" | "reject";
 
 export type IdeaQueueItem = {
   id: string;
@@ -100,6 +122,9 @@ export type AssetLibraryItem = {
   created_at: string;
   thumbnail_url?: string | null;
   video_url: string;
+  original_video_url?: string | null;
+  final_asset_source?: string | null;
+  final_narration_render_id?: string | null;
   target_platform?: string | null;
   caption?: string | null;
   prompt_text?: string | null;
@@ -110,6 +135,8 @@ export type AssetLibraryDetail = {
   pipeline_run: Record<string, unknown>;
   video: Record<string, unknown>;
   video_asset: Record<string, unknown>;
+  final_video_asset: Record<string, unknown>;
+  final_asset_selection: FinalAssetSelection | null;
   thumbnail_asset: Record<string, unknown> | null;
   idea: Record<string, unknown> | null;
   quality_check: Record<string, unknown> | null;
@@ -134,6 +161,7 @@ export type AssetExportPack = {
   provider: string;
   created_at: string;
   video_public_url: string;
+  original_video_public_url?: string | null;
   thumbnail_public_url?: string | null;
   caption: string;
   hashtags: string[];
@@ -151,6 +179,15 @@ export type AssetExportPack = {
     instagram?: string | null;
     youtube?: string | null;
   };
+  final_asset_id: string;
+  final_asset_source: "source_video" | "narration_render";
+  final_narration_render_id?: string | null;
+  final_asset_selection_revision: number;
+  final_asset_selected_at?: string | null;
+  narration_transcript?: string | null;
+  caption_cues: Record<string, unknown>[];
+  ai_voice_disclosure?: string | null;
+  voice_is_ai_generated: boolean;
   target_platform?: string | null;
   linked_pipeline_run_id: string;
   linked_idea_queue_item_id?: string | null;
@@ -272,6 +309,57 @@ export const api = {
     request<PipelineRunDetail>(`/pipeline-runs/${runId}/recheck`, {
       method: "POST",
       body: JSON.stringify({ review_notes: reviewNotes })
+    }),
+  recheckStoryAdherence: (runId: string, reviewNotes = "") =>
+    request<PipelineRunDetail>(`/pipeline-runs/${runId}/story-adherence/recheck`, {
+      method: "POST",
+      body: JSON.stringify({ review_notes: reviewNotes })
+    }),
+  submitStoryAdherenceHumanReview: (runId: string, decision: StoryAdherenceHumanDecision, notes = "") =>
+    request<PipelineRunDetail>(`/pipeline-runs/${runId}/story-adherence/human-review`, {
+      method: "POST",
+      body: JSON.stringify({ decision, notes })
+    }),
+  createNarrationDraft: (runId: string, confirmPaidDraft = false) =>
+    request<PipelineRunDetail>(`/pipeline-runs/${runId}/narration/draft`, {
+      method: "POST",
+      body: JSON.stringify({ confirm_paid_draft: confirmPaidDraft })
+    }),
+  regenerateNarrationDraft: (runId: string, confirmPaidDraft = false) =>
+    request<PipelineRunDetail>(`/pipeline-runs/${runId}/narration/draft/regenerate`, {
+      method: "POST",
+      body: JSON.stringify({ confirm_paid_draft: confirmPaidDraft })
+    }),
+  patchNarrationDraft: (runId: string, payload: Record<string, unknown>) =>
+    request<PipelineRunDetail>(`/pipeline-runs/${runId}/narration/draft`, {
+      method: "PATCH",
+      body: JSON.stringify(payload)
+    }),
+  createNarrationRender: (runId: string, payload: { confirm_paid_narration: boolean; confirm_unapproved_story?: boolean; voice?: string | null }) =>
+    request<PipelineRunDetail>(`/pipeline-runs/${runId}/narration/render`, {
+      method: "POST",
+      body: JSON.stringify(payload)
+    }),
+  recomposeNarrationRender: (runId: string, renderId: string) =>
+    request<PipelineRunDetail>(`/pipeline-runs/${runId}/narration/renders/${renderId}/recompose`, {
+      method: "POST"
+    }),
+  submitNarrationHumanReview: (runId: string, narrationRenderId: string, decision: NarrationHumanDecision, notes = "") =>
+    request<PipelineRunDetail>(`/pipeline-runs/${runId}/narration/human-review`, {
+      method: "POST",
+      body: JSON.stringify({ narration_render_id: narrationRenderId, decision, notes })
+    }),
+  selectFinalAsset: (
+    runId: string,
+    payload: {
+      source: "source_video" | "narration_render";
+      narration_render_id?: string | null;
+      confirm_change_after_posting?: boolean;
+    },
+  ) =>
+    request<PipelineRunDetail>(`/pipeline-runs/${runId}/final-asset/select`, {
+      method: "POST",
+      body: JSON.stringify(payload)
     }),
   cancelRun: (runId: string, reviewNotes = "") =>
     request<PipelineRunDetail>(`/pipeline-runs/${runId}/cancel`, {

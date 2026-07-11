@@ -5,6 +5,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.models import Asset, ContentIdea, IdeaQueueItem, ManualPostPackage, ManualPostingStatus, PipelineRun, QualityCheck, Video
+from app.services.final_asset_service import get_final_asset_selection_payload, get_selected_final_asset
 from app.services.pipeline_service import serialize_model
 
 PLATFORM_CHECKLISTS = {
@@ -138,11 +139,13 @@ def _build_export_pack(
     run: PipelineRun,
     video: Video,
     video_asset: Asset,
+    final_video_asset: Asset,
     thumbnail_asset: Asset | None,
     idea: ContentIdea | None,
     quality_check: QualityCheck | None,
     manual_package: ManualPostPackage | None,
     queue_item: IdeaQueueItem | None,
+    final_asset_selection: dict[str, Any] | None,
 ) -> dict[str, Any]:
     hashtags = manual_package.hashtags_json if manual_package else []
     platform_variants = manual_package.platform_variants_json if manual_package else {}
@@ -183,7 +186,8 @@ def _build_export_pack(
         "style_preset": run.style_preset,
         "provider": video.provider,
         "created_at": run.created_at,
-        "video_public_url": video_asset.public_url,
+        "video_public_url": final_video_asset.public_url,
+        "original_video_public_url": video_asset.public_url,
         "thumbnail_public_url": thumbnail_asset.public_url if thumbnail_asset else None,
         "caption": manual_package.caption if manual_package else "",
         "hashtags": hashtags,
@@ -201,6 +205,15 @@ def _build_export_pack(
             "instagram": manual_package.instagram_post_url if manual_package else None,
             "youtube": manual_package.youtube_post_url if manual_package else None,
         },
+        "final_asset_id": final_video_asset.id,
+        "final_asset_source": final_asset_selection.get("source") if final_asset_selection else "source_video",
+        "final_narration_render_id": final_asset_selection.get("narration_render_id") if final_asset_selection else None,
+        "final_asset_selection_revision": final_asset_selection.get("selection_revision") if final_asset_selection else 1,
+        "final_asset_selected_at": final_asset_selection.get("selected_at") if final_asset_selection else None,
+        "narration_transcript": final_asset_selection.get("narration_transcript") if final_asset_selection else None,
+        "caption_cues": final_asset_selection.get("caption_cues") if final_asset_selection else [],
+        "ai_voice_disclosure": final_asset_selection.get("ai_voice_disclosure") if final_asset_selection else None,
+        "voice_is_ai_generated": bool(final_asset_selection.get("voice_is_ai_generated")) if final_asset_selection else False,
         "target_platform": queue_item.target_platform if queue_item else None,
         "linked_pipeline_run_id": run.id,
         "linked_idea_queue_item_id": queue_item.id if queue_item else None,
@@ -219,10 +232,14 @@ def _build_asset_summary(db: Session, run: PipelineRun) -> dict[str, Any] | None
     video_asset = _find_video_asset(db, run.id, "video_mp4")
     if video_asset is None:
         return None
+    manual_package = db.get(ManualPostPackage, run.manual_post_package_id) if run.manual_post_package_id else None
+    final_asset_selection = get_final_asset_selection_payload(db, run, manual_package)
+    final_video_asset = get_selected_final_asset(db, run, manual_package)
+    if final_video_asset is None:
+        final_video_asset = video_asset
     thumbnail_asset = _find_video_asset(db, run.id, "thumbnail")
     quality_check = _find_latest_quality_check(db, run.id, video.id)
     idea = db.get(ContentIdea, run.idea_id) if run.idea_id else None
-    manual_package = db.get(ManualPostPackage, run.manual_post_package_id) if run.manual_post_package_id else None
     queue_item = _find_linked_idea_queue_item(db, run.id)
     return {
         "run_id": run.id,
@@ -234,7 +251,10 @@ def _build_asset_summary(db: Session, run: PipelineRun) -> dict[str, Any] | None
         "quality_score": video.quality_score,
         "created_at": run.created_at,
         "thumbnail_url": thumbnail_asset.public_url if thumbnail_asset else None,
-        "video_url": video_asset.public_url,
+        "video_url": final_video_asset.public_url,
+        "original_video_url": video_asset.public_url,
+        "final_asset_source": final_asset_selection.get("source") if final_asset_selection else "source_video",
+        "final_narration_render_id": final_asset_selection.get("narration_render_id") if final_asset_selection else None,
         "target_platform": queue_item.target_platform if queue_item else None,
         "caption": manual_package.caption if manual_package else None,
         "prompt_text": video.prompt_text,
@@ -301,16 +321,22 @@ def get_asset_library_detail(db: Session, run_id: str) -> dict[str, Any]:
     video_asset = _find_video_asset(db, run.id, "video_mp4")
     if video_asset is None:
         raise ValueError("Asset library item not found")
+    manual_package = db.get(ManualPostPackage, run.manual_post_package_id) if run.manual_post_package_id else None
+    final_asset_selection = get_final_asset_selection_payload(db, run, manual_package)
+    final_video_asset = get_selected_final_asset(db, run, manual_package)
+    if final_video_asset is None:
+        final_video_asset = video_asset
     thumbnail_asset = _find_video_asset(db, run.id, "thumbnail")
     idea = db.get(ContentIdea, run.idea_id) if run.idea_id else None
     quality_check = _find_latest_quality_check(db, run.id, video.id)
-    manual_package = db.get(ManualPostPackage, run.manual_post_package_id) if run.manual_post_package_id else None
     queue_item = _find_linked_idea_queue_item(db, run.id)
 
     return {
         "pipeline_run": serialize_model(run),
         "video": serialize_model(video),
         "video_asset": serialize_model(video_asset),
+        "final_video_asset": serialize_model(final_video_asset),
+        "final_asset_selection": final_asset_selection,
         "thumbnail_asset": serialize_model(thumbnail_asset) if thumbnail_asset else None,
         "idea": serialize_model(idea) if idea else None,
         "quality_check": serialize_model(quality_check) if quality_check else None,
@@ -329,12 +355,27 @@ def get_asset_export_pack(db: Session, run_id: str) -> dict[str, Any]:
     video_asset = _find_video_asset(db, run.id, "video_mp4")
     if video_asset is None:
         raise ValueError("Asset library item not found")
+    manual_package = db.get(ManualPostPackage, run.manual_post_package_id) if run.manual_post_package_id else None
+    final_asset_selection = get_final_asset_selection_payload(db, run, manual_package)
+    final_video_asset = get_selected_final_asset(db, run, manual_package)
+    if final_video_asset is None:
+        final_video_asset = video_asset
     thumbnail_asset = _find_video_asset(db, run.id, "thumbnail")
     idea = db.get(ContentIdea, run.idea_id) if run.idea_id else None
     quality_check = _find_latest_quality_check(db, run.id, video.id)
-    manual_package = db.get(ManualPostPackage, run.manual_post_package_id) if run.manual_post_package_id else None
     queue_item = _find_linked_idea_queue_item(db, run.id)
-    return _build_export_pack(run, video, video_asset, thumbnail_asset, idea, quality_check, manual_package, queue_item)
+    return _build_export_pack(
+        run,
+        video,
+        video_asset,
+        final_video_asset,
+        thumbnail_asset,
+        idea,
+        quality_check,
+        manual_package,
+        queue_item,
+        final_asset_selection,
+    )
 
 
 def update_asset_manual_posting(db: Session, run_id: str, updates: dict[str, Any]) -> dict[str, Any]:

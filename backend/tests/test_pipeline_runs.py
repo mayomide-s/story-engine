@@ -82,6 +82,44 @@ def test_config_validation_accepts_mock_local_mode():
     assert settings.configuration_errors() == []
 
 
+def test_settings_support_local_storage_path_env_alias(tmp_path):
+    settings = Settings(
+        _env_file=None,
+        database_url="sqlite:///./test.db",
+        redis_url="redis://redis:6379/0",
+        video_provider="mock",
+        storage_provider="local",
+        LOCAL_STORAGE_PATH=str(tmp_path),
+    )
+
+    assert settings.local_storage_path == str(tmp_path)
+
+
+def test_backend_assets_route_serves_local_storage_file(client):
+    asset_root = Path(get_settings().local_storage_path)
+    asset_path = asset_root / "narration" / "shared-route-check.txt"
+    asset_path.parent.mkdir(parents=True, exist_ok=True)
+    asset_path.write_text("shared local asset", encoding="utf-8")
+
+    response = client.get("/assets/narration/shared-route-check.txt")
+    assert response.status_code == 200
+    assert response.text == "shared local asset"
+
+
+def test_config_validation_does_not_require_openai_when_semantic_critic_disabled():
+    settings = Settings(
+        _env_file=None,
+        database_url="sqlite:///./test.db",
+        redis_url="redis://redis:6379/0",
+        video_provider="mock",
+        storage_provider="local",
+        semantic_critic_enabled=False,
+        openai_api_key="",
+    )
+
+    assert settings.configuration_errors() == []
+
+
 def test_config_validation_requires_r2_and_runway_settings():
     settings = Settings(
         _env_file=None,
@@ -121,7 +159,7 @@ def test_runway_storyboard_timings_fit_requested_duration(client, monkeypatch):
     response = client.post("/api/pipeline-runs", json={"topic": "CORS", "auto_mode": False})
     assert response.status_code == 200
     scenes = response.json()["script"]["script_json"]["scenes"]
-    assert [scene["time"] for scene in scenes] == ["0-2s", "2-5s", "5-8s", "8-10s"]
+    assert [scene["time"] for scene in scenes] == ["0-2s", "2-8s", "8-10s"]
     assert response.json()["script"]["duration_seconds"] == 10
     get_settings.cache_clear()
 
@@ -134,13 +172,14 @@ def test_runway_prompt_preview_stays_within_provider_limit(client, monkeypatch):
     prompt_preview = response.json()["prompt_preview"]
     assert len(prompt_preview) <= 1000
     assert prompt_preview.startswith("TEXT-FREE VIDEO.")
-    assert prompt_preview.endswith("or subtitles.")
+    assert prompt_preview.count("TEXT-FREE VIDEO.") == 1
     assert "End tag:" not in prompt_preview
     assert "Made by CodeToons AI" not in prompt_preview
     assert "Here is why" not in prompt_preview
     assert "That is" not in prompt_preview
-    assert "One rule, one metaphor" not in prompt_preview
-    assert "Remember the mental model" not in prompt_preview
+    assert "Story beats:" not in prompt_preview
+    assert "core metaphor" not in prompt_preview.lower()
+    assert "tied to the topic" not in prompt_preview.lower()
     assert "core metaphor for with" not in prompt_preview.lower()
     positive_body = _runway_positive_prompt_body(prompt_preview)
     for banned_term in ("caption", "subtitle", "terminal", "code snippet", "whiteboard"):
@@ -243,8 +282,8 @@ def test_shorten_prompt_respects_provider_prompt_limits(client, monkeypatch):
     shortened = client.post(f"/api/pipeline-runs/{run_id}/prompt-actions", json={"action": "shorten"})
     assert shortened.status_code == 200
     payload = shortened.json()
-    assert len(payload["prompt_preview"]) <= 850
-    assert payload["review_preflight"]["prompt_length"]["target"] == 850
+    assert len(payload["prompt_preview"]) <= 700
+    assert payload["review_preflight"]["prompt_length"]["target"] == 700
     assert payload["review_preflight"]["prompt_length"]["limit"] == 1000
     get_settings.cache_clear()
 
@@ -256,9 +295,310 @@ def test_prompt_length_indicator_uses_correct_limit_and_target(client, monkeypat
     assert response.status_code == 200
     preflight = response.json()["review_preflight"]
     assert preflight["prompt_length"]["limit"] == 1000
-    assert preflight["prompt_length"]["target"] == 850
+    assert preflight["prompt_length"]["target"] == 700
     assert preflight["prompt_valid"] is True
     get_settings.cache_clear()
+
+
+def test_runway_storyboard_scenes_include_concrete_contract_fields(client, monkeypatch):
+    monkeypatch.setenv("VIDEO_PROVIDER", "runway")
+    get_settings.cache_clear()
+    response = client.post("/api/pipeline-runs", json={"topic": "Developer fixes a bug with an AI assistant", "auto_mode": False, "style_preset": "office_comedy"})
+    assert response.status_code == 200
+    payload = response.json()
+    scene = payload["script"]["script_json"]["scenes"][0]
+    for key in ("purpose", "subject", "setting", "visible_action", "state_before", "state_after", "camera_direction", "forbidden_actions"):
+        assert scene[key]
+    assert "core metaphor" not in scene["visible_action"].lower()
+    contract = payload["story_adherence_review"]
+    for key in ("initial_state", "trigger", "required_transformation", "required_final_state", "final_state_hold", "prohibited_actions"):
+        assert contract[key]
+    assert contract["review_status"] == "preview_only"
+    get_settings.cache_clear()
+
+
+def test_controlled_topics_generate_distinct_storyboards_and_reject_generic_similarity(client, monkeypatch):
+    monkeypatch.setenv("VIDEO_PROVIDER", "runway")
+    get_settings.cache_clear()
+    first = client.post("/api/pipeline-runs", json={"topic": "Developer fixes a bug with an AI assistant", "auto_mode": False, "style_preset": "office_comedy"})
+    second = client.post("/api/pipeline-runs", json={"topic": "Messy code becomes clean and organised", "auto_mode": False, "style_preset": "office_comedy"})
+    third = client.post("/api/pipeline-runs", json={"topic": "A slow manual coding task becomes automated", "auto_mode": False, "style_preset": "office_comedy"})
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert third.status_code == 200
+
+    first_scenes = first.json()["script"]["script_json"]["scenes"]
+    second_scenes = second.json()["script"]["script_json"]["scenes"]
+    third_scenes = third.json()["script"]["script_json"]["scenes"]
+    assert "cracked gear" in json.dumps(first_scenes).lower()
+    assert "folders" in json.dumps(second_scenes).lower()
+    assert "conveyor" in json.dumps(third_scenes).lower()
+    assert first_scenes != second_scenes
+    assert second_scenes != third_scenes
+    assert third.json()["review_preflight"]["summary"] == "Preflight looks healthy for generation."
+    assert third.json()["review_preflight"]["generic_output_flags"]["similar_storyboards"] == []
+    get_settings.cache_clear()
+
+
+def test_preflight_rejects_generic_prompt_override_with_abstract_placeholders(client, monkeypatch):
+    monkeypatch.setenv("VIDEO_PROVIDER", "runway")
+    get_settings.cache_clear()
+    create = client.post("/api/pipeline-runs", json={"topic": "Developer fixes a bug with an AI assistant", "auto_mode": False})
+    run_id = create.json()["pipeline_run"]["id"]
+    patch = client.patch(
+        f"/api/pipeline-runs/{run_id}/review-config",
+        json={"prompt_override": "TEXT-FREE VIDEO. Show the core metaphor tied to the topic and explain the coding problem with one memorable interaction."},
+    )
+    assert patch.status_code == 200
+    preflight = patch.json()["review_preflight"]
+    assert preflight["prompt_valid"] is False
+    assert "core metaphor" in preflight["generic_output_flags"]["abstract_phrase_hits"]
+    assert preflight["summary"] == "Preflight rejected generic output. Make the scenes more topic-specific before spending credits."
+    get_settings.cache_clear()
+
+
+def test_story_adherence_review_is_unavailable_without_vision_provider(client):
+    response = client.post("/api/pipeline-runs", json={"topic": "Messy code becomes clean and organised", "auto_mode": False, "style_preset": "office_comedy"})
+    assert response.status_code == 200
+    review = response.json()["story_adherence_review"]
+    assert review["available"] is False
+    assert review["review_source"] == "none"
+    assert review["review_status"] == "preview_only"
+    assert "vision-capable provider" not in review["explanation"].lower()
+    assert "preview only" in review["explanation"].lower()
+
+
+def test_semantic_critic_persists_review_without_changing_completed_run_status(client, monkeypatch):
+    from app.models import StoryAdherenceReview
+    from app.services import semantic_critic_service
+
+    class FakeCritic:
+        name = "openai"
+        model = "fake-vision-model"
+
+        def review(self, prompt: str, frames: list[dict], context: dict) -> dict:
+            assert "Topic:" in prompt
+            assert len(frames) == 5
+            return {
+                "summary": "The visual sequence stays on-topic and finishes cleanly.",
+                "issues": [],
+                "criteria": {
+                    "initial_problem_shown": {"value": "true", "confidence": 0.91, "evidence_frames": [1.0], "reason": "The blocked state is visible immediately."},
+                    "intended_subject_present": {"value": "true", "confidence": 0.9, "evidence_frames": [1.0, 4.0], "reason": "The same subject stays present."},
+                    "trigger_visible": {"value": "true", "confidence": 0.86, "evidence_frames": [4.0], "reason": "The trigger action is visible."},
+                    "transformation_attempted": {"value": "true", "confidence": 0.9, "evidence_frames": [4.0, 7.0], "reason": "The transformation begins on screen."},
+                    "transformation_completed": {"value": "true", "confidence": 0.93, "evidence_frames": [7.0, 8.3], "reason": "The mess is fully resolved."},
+                    "required_final_state_visible": {"value": "true", "confidence": 0.95, "evidence_frames": [8.3, 9.5], "reason": "The clean final state is obvious."},
+                    "ending_held_clearly": {"value": "true", "confidence": 0.89, "evidence_frames": [8.3, 9.5], "reason": "The final state remains visible across both hold frames."},
+                    "unrelated_characters_or_actions": {"value": "false", "confidence": 0.9, "evidence_frames": [1.0, 9.5], "reason": "No unrelated intrusions appear."},
+                    "unwanted_generated_text": {"value": "false", "confidence": 0.88, "evidence_frames": [1.0, 9.5], "reason": "No generated text is visible."},
+                },
+            }
+
+    monkeypatch.setenv("SEMANTIC_CRITIC_ENABLED", "true")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    get_settings.cache_clear()
+    monkeypatch.setattr(semantic_critic_service, "get_semantic_critic_provider", lambda: FakeCritic())
+    monkeypatch.setattr(
+        semantic_critic_service,
+        "sample_story_frames",
+        lambda _path: (
+            [
+                {"timestamp_seconds": 1.0, "frame_hash": "hash-1", "width": 540, "height": 960, "data_url": "data:image/jpeg;base64,QQ=="},
+                {"timestamp_seconds": 4.0, "frame_hash": "hash-2", "width": 540, "height": 960, "data_url": "data:image/jpeg;base64,QQ=="},
+                {"timestamp_seconds": 7.0, "frame_hash": "hash-3", "width": 540, "height": 960, "data_url": "data:image/jpeg;base64,QQ=="},
+                {"timestamp_seconds": 8.3, "frame_hash": "hash-4", "width": 540, "height": 960, "data_url": "data:image/jpeg;base64,QQ=="},
+                {"timestamp_seconds": 9.5, "frame_hash": "hash-5", "width": 540, "height": 960, "data_url": "data:image/jpeg;base64,QQ=="},
+            ],
+            {
+                "video_duration_seconds": 10.0,
+                "sampling_strategy": "fixed_10s",
+                "frames": [
+                    {"timestamp_seconds": 1.0, "frame_hash": "hash-1", "width": 540, "height": 960, "persisted_asset": None},
+                    {"timestamp_seconds": 4.0, "frame_hash": "hash-2", "width": 540, "height": 960, "persisted_asset": None},
+                    {"timestamp_seconds": 7.0, "frame_hash": "hash-3", "width": 540, "height": 960, "persisted_asset": None},
+                    {"timestamp_seconds": 8.3, "frame_hash": "hash-4", "width": 540, "height": 960, "persisted_asset": None},
+                    {"timestamp_seconds": 9.5, "frame_hash": "hash-5", "width": 540, "height": 960, "persisted_asset": None},
+                ],
+            },
+        ),
+    )
+
+    create = client.post("/api/pipeline-runs", json={"topic": "Messy code becomes clean and organised", "auto_mode": False})
+    run_id = create.json()["pipeline_run"]["id"]
+    resume = client.post(f"/api/pipeline-runs/{run_id}/resume", json={"review_notes": "Generate baseline"})
+    assert resume.status_code == 200
+    payload = resume.json()
+    assert payload["pipeline_run"]["status"] == "completed"
+    assert payload["story_adherence_review"]["review_status"] == "accept"
+    assert payload["story_adherence_review"]["score"] == 100.0
+    assert payload["story_adherence_review"]["human_review"] is None
+    assert payload["story_adherence_review"]["sampled_frames"]["frames"][0]["frame_hash"] == "hash-1"
+    assert "data_url" not in json.dumps(payload["story_adherence_review"]["sampled_frames"])
+
+    with SessionLocal() as db:
+        reviews = db.query(StoryAdherenceReview).filter(StoryAdherenceReview.pipeline_run_id == run_id).all()
+        assert len(reviews) == 1
+        assert reviews[0].review_status == "accept"
+        assert reviews[0].model == "fake-vision-model"
+    get_settings.cache_clear()
+
+
+def test_story_adherence_recheck_reuses_existing_review_without_new_provider_call(client, monkeypatch):
+    from app.services import semantic_critic_service
+
+    call_count = {"count": 0}
+
+    class FakeCritic:
+        name = "openai"
+        model = "fake-vision-model"
+
+        def review(self, prompt: str, frames: list[dict], context: dict) -> dict:
+            call_count["count"] += 1
+            return {
+                "summary": "The story completes.",
+                "issues": [],
+                "criteria": {
+                    "initial_problem_shown": {"value": "true", "confidence": 0.9, "evidence_frames": [1.0], "reason": "Visible."},
+                    "intended_subject_present": {"value": "true", "confidence": 0.9, "evidence_frames": [1.0], "reason": "Visible."},
+                    "trigger_visible": {"value": "true", "confidence": 0.9, "evidence_frames": [4.0], "reason": "Visible."},
+                    "transformation_attempted": {"value": "true", "confidence": 0.9, "evidence_frames": [4.0], "reason": "Visible."},
+                    "transformation_completed": {"value": "true", "confidence": 0.9, "evidence_frames": [7.0], "reason": "Visible."},
+                    "required_final_state_visible": {"value": "true", "confidence": 0.9, "evidence_frames": [8.3], "reason": "Visible."},
+                    "ending_held_clearly": {"value": "true", "confidence": 0.9, "evidence_frames": [8.3, 9.5], "reason": "Visible."},
+                    "unrelated_characters_or_actions": {"value": "false", "confidence": 0.9, "evidence_frames": [1.0], "reason": "None."},
+                    "unwanted_generated_text": {"value": "false", "confidence": 0.9, "evidence_frames": [1.0], "reason": "None."},
+                },
+            }
+
+    monkeypatch.setenv("SEMANTIC_CRITIC_ENABLED", "true")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    get_settings.cache_clear()
+    monkeypatch.setattr(semantic_critic_service, "get_semantic_critic_provider", lambda: FakeCritic())
+    monkeypatch.setattr(
+        semantic_critic_service,
+        "sample_story_frames",
+        lambda _path: (
+            [{"timestamp_seconds": 1.0, "frame_hash": "hash-1", "width": 540, "height": 960, "data_url": "data:image/jpeg;base64,QQ=="}] * 5,
+            {"video_duration_seconds": 10.0, "sampling_strategy": "fixed_10s", "frames": [{"timestamp_seconds": 1.0, "frame_hash": "hash-1", "width": 540, "height": 960, "persisted_asset": None}] * 5},
+        ),
+    )
+
+    create = client.post("/api/pipeline-runs", json={"topic": "Developer fixes a bug with an AI assistant", "auto_mode": False})
+    run_id = create.json()["pipeline_run"]["id"]
+    resume = client.post(f"/api/pipeline-runs/{run_id}/resume", json={"review_notes": "Generate baseline"})
+    assert resume.status_code == 200
+    assert call_count["count"] == 1
+
+    recheck = client.post(f"/api/pipeline-runs/{run_id}/story-adherence/recheck", json={"review_notes": "Try again"})
+    assert recheck.status_code == 200
+    payload = recheck.json()
+    assert payload["pipeline_run"]["status"] == "completed"
+    assert payload["story_adherence_review"]["review_status"] == "accept"
+    assert call_count["count"] == 1
+    get_settings.cache_clear()
+
+
+def test_human_story_review_is_stored_separately_from_critic_output(client, monkeypatch):
+    from app.models import StoryAdherenceHumanReview, StoryAdherenceReview
+    from app.services import semantic_critic_service
+
+    class FakeCritic:
+        name = "openai"
+        model = "fake-vision-model"
+
+        def review(self, prompt: str, frames: list[dict], context: dict) -> dict:
+            return {
+                "summary": "Final state is present but the hold is uncertain.",
+                "issues": ["Final hold is short."],
+                "criteria": {
+                    "initial_problem_shown": {"value": "true", "confidence": 0.9, "evidence_frames": [1.0], "reason": "Visible."},
+                    "intended_subject_present": {"value": "true", "confidence": 0.9, "evidence_frames": [1.0], "reason": "Visible."},
+                    "trigger_visible": {"value": "true", "confidence": 0.9, "evidence_frames": [4.0], "reason": "Visible."},
+                    "transformation_attempted": {"value": "true", "confidence": 0.9, "evidence_frames": [4.0], "reason": "Visible."},
+                    "transformation_completed": {"value": "true", "confidence": 0.9, "evidence_frames": [7.0], "reason": "Visible."},
+                    "required_final_state_visible": {"value": "true", "confidence": 0.9, "evidence_frames": [8.3], "reason": "Visible."},
+                    "ending_held_clearly": {"value": "uncertain", "confidence": 0.6, "evidence_frames": [8.3, 9.5], "reason": "Borderline hold."},
+                    "unrelated_characters_or_actions": {"value": "false", "confidence": 0.9, "evidence_frames": [1.0], "reason": "None."},
+                    "unwanted_generated_text": {"value": "false", "confidence": 0.9, "evidence_frames": [1.0], "reason": "None."},
+                },
+            }
+
+    monkeypatch.setenv("SEMANTIC_CRITIC_ENABLED", "true")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    get_settings.cache_clear()
+    monkeypatch.setattr(semantic_critic_service, "get_semantic_critic_provider", lambda: FakeCritic())
+    monkeypatch.setattr(
+        semantic_critic_service,
+        "sample_story_frames",
+        lambda _path: (
+            [{"timestamp_seconds": 1.0, "frame_hash": "hash-1", "width": 540, "height": 960, "data_url": "data:image/jpeg;base64,QQ=="}] * 5,
+            {"video_duration_seconds": 10.0, "sampling_strategy": "fixed_10s", "frames": [{"timestamp_seconds": 1.0, "frame_hash": "hash-1", "width": 540, "height": 960, "persisted_asset": None}] * 5},
+        ),
+    )
+
+    create = client.post("/api/pipeline-runs", json={"topic": "A slow manual coding task becomes automated", "auto_mode": False})
+    run_id = create.json()["pipeline_run"]["id"]
+    resume = client.post(f"/api/pipeline-runs/{run_id}/resume", json={"review_notes": "Generate baseline"})
+    assert resume.status_code == 200
+    before = resume.json()["story_adherence_review"]
+
+    human = client.post(
+        f"/api/pipeline-runs/{run_id}/story-adherence/human-review",
+        json={"decision": "approve", "notes": "Accepting this one manually."},
+    )
+    assert human.status_code == 200
+    payload = human.json()["story_adherence_review"]
+    assert payload["review_status"] == before["review_status"]
+    assert payload["score"] == before["score"]
+    assert payload["human_review"]["decision"] == "approve"
+    assert payload["human_review"]["notes"] == "Accepting this one manually."
+
+    with SessionLocal() as db:
+        critic = db.query(StoryAdherenceReview).filter(StoryAdherenceReview.pipeline_run_id == run_id).one()
+        human_review = db.query(StoryAdherenceHumanReview).filter(StoryAdherenceHumanReview.pipeline_run_id == run_id).one()
+        assert critic.review_status == "needs_review"
+        assert human_review.decision == "approve"
+    get_settings.cache_clear()
+
+
+def test_semantic_frame_sampling_scales_for_non_ten_second_videos():
+    from app.services.semantic_critic_service import build_sample_timestamps
+
+    timestamps, strategy = build_sample_timestamps(18.0)
+    assert strategy == "scaled_by_duration"
+    assert timestamps == [1.8, 7.2, 12.6, 14.94, 17.1]
+
+
+def test_semantic_critic_downloads_video_when_local_storage_path_is_missing(monkeypatch, tmp_path):
+    from app.services import semantic_critic_service
+
+    class FakeStorage:
+        name = "local"
+
+        def resolve_path(self, storage_key: str) -> str:
+            return str(tmp_path / storage_key)
+
+    class FakeAsset:
+        id = "asset-123"
+        storage_key = "videos/missing.mp4"
+        public_url = "https://example.com/video.mp4"
+
+    downloaded = {}
+
+    def fake_download(asset, destination):
+        downloaded["asset_id"] = asset.id
+        destination.write_bytes(b"video-bytes")
+
+    monkeypatch.setattr(semantic_critic_service, "get_storage_provider", lambda: FakeStorage())
+    monkeypatch.setattr(semantic_critic_service, "_download_video_to_temp", fake_download)
+
+    resolved_path, should_delete = semantic_critic_service.resolve_video_source_path(FakeAsset())
+
+    assert should_delete is True
+    assert resolved_path.exists()
+    assert resolved_path.read_bytes() == b"video-bytes"
+    assert downloaded["asset_id"] == "asset-123"
 
 
 def test_preflight_scoring_appears_in_run_detail(client):
@@ -1170,6 +1510,145 @@ def test_asset_export_pack_api_returns_manual_posting_bundle(client):
     assert payload["alternative_hooks"]
 
 
+def test_manual_post_package_defaults_final_asset_to_source_video(client):
+    run_id, payload = _create_completed_run(client)
+
+    manual_package = payload["manual_post_package"]
+    final_selection = payload["final_asset_selection"]
+    source_asset = next(asset for asset in payload["assets"] if asset["asset_type"] == "video_mp4")
+
+    assert manual_package["final_asset_source"] == "source_video"
+    assert manual_package["final_asset_id"] == source_asset["id"]
+    assert final_selection["source"] == "source_video"
+    assert final_selection["asset"]["id"] == source_asset["id"]
+    assert final_selection["original_video_asset"]["id"] == source_asset["id"]
+
+    export_pack = client.get(f"/api/asset-library/{run_id}/export-pack")
+    assert export_pack.status_code == 200
+    assert export_pack.json()["video_public_url"] == source_asset["public_url"]
+
+
+def test_final_asset_selection_uses_approved_same_run_narration_render(client, monkeypatch):
+    run_id, payload = _create_approved_narration_render(client, monkeypatch)
+    render = payload["latest_narration_render"]
+
+    response = client.post(
+        f"/api/pipeline-runs/{run_id}/final-asset/select",
+        json={"source": "narration_render", "narration_render_id": render["id"], "confirm_change_after_posting": False},
+    )
+    assert response.status_code == 200
+    selected = response.json()
+    final_selection = selected["final_asset_selection"]
+
+    assert final_selection["source"] == "narration_render"
+    assert final_selection["narration_render_id"] == render["id"]
+    assert final_selection["asset"]["id"] == render["rendered_video_asset_id"]
+    assert final_selection["narration_transcript"] == render["full_spoken_text"]
+    assert final_selection["caption_cues"] == render["caption_cues_json"]
+    assert final_selection["ai_voice_disclosure"] == render["ai_voice_disclosure"]
+
+    library_detail = client.get(f"/api/asset-library/{run_id}")
+    assert library_detail.status_code == 200
+    assert library_detail.json()["final_video_asset"]["id"] == render["rendered_video_asset_id"]
+
+    export_pack = client.get(f"/api/asset-library/{run_id}/export-pack")
+    assert export_pack.status_code == 200
+    export_payload = export_pack.json()
+    assert export_payload["final_asset_source"] == "narration_render"
+    assert export_payload["final_narration_render_id"] == render["id"]
+    assert export_payload["video_public_url"] == render["rendered_video_asset"]["public_url"]
+    assert export_payload["narration_transcript"] == render["full_spoken_text"]
+    assert export_payload["caption_cues"] == render["caption_cues_json"]
+
+
+def test_final_asset_selection_is_idempotent_for_same_asset(client, monkeypatch):
+    run_id, payload = _create_approved_narration_render(client, monkeypatch)
+    render = payload["latest_narration_render"]
+    first = client.post(
+        f"/api/pipeline-runs/{run_id}/final-asset/select",
+        json={"source": "narration_render", "narration_render_id": render["id"], "confirm_change_after_posting": False},
+    )
+    assert first.status_code == 200
+    second = client.post(
+        f"/api/pipeline-runs/{run_id}/final-asset/select",
+        json={"source": "narration_render", "narration_render_id": render["id"], "confirm_change_after_posting": False},
+    )
+    assert second.status_code == 200
+    assert first.json()["final_asset_selection"]["selection_revision"] == second.json()["final_asset_selection"]["selection_revision"]
+
+    events = [event for event in second.json()["pipeline_events"] if event["event_type"] == "final_asset.selected"]
+    assert len(events) == 1
+
+
+def test_final_asset_selection_requires_confirmation_after_posting(client, monkeypatch):
+    run_id, payload = _create_approved_narration_render(client, monkeypatch)
+    render = payload["latest_narration_render"]
+
+    posted = client.patch(
+        f"/api/asset-library/{run_id}/manual-posting",
+        json={
+            "manual_posting_status": "posted_tiktok",
+            "tiktok_post_url": "https://tiktok.com/@codextest/video/123",
+        },
+    )
+    assert posted.status_code == 200
+
+    blocked = client.post(
+        f"/api/pipeline-runs/{run_id}/final-asset/select",
+        json={"source": "narration_render", "narration_render_id": render["id"], "confirm_change_after_posting": False},
+    )
+    assert blocked.status_code == 409
+    assert "confirm_change_after_posting=true" in blocked.json()["detail"]
+
+    confirmed = client.post(
+        f"/api/pipeline-runs/{run_id}/final-asset/select",
+        json={"source": "narration_render", "narration_render_id": render["id"], "confirm_change_after_posting": True},
+    )
+    assert confirmed.status_code == 200
+    assert confirmed.json()["manual_post_package"]["manual_posting_status"] == "posted_tiktok"
+
+
+def test_final_asset_selection_rejects_non_approved_render(client, monkeypatch):
+    from app.models import NarrationRender, NarrationRenderStatus
+
+    run_id, payload = _create_approved_narration_render(client, monkeypatch)
+    render_id = payload["latest_narration_render"]["id"]
+    with SessionLocal() as db:
+        render = db.get(NarrationRender, render_id)
+        render.status = NarrationRenderStatus.NEEDS_REVISION
+        db.add(render)
+        db.commit()
+
+    response = client.post(
+        f"/api/pipeline-runs/{run_id}/final-asset/select",
+        json={"source": "narration_render", "narration_render_id": render_id, "confirm_change_after_posting": False},
+    )
+    assert response.status_code == 409
+    assert "not approved" in response.json()["detail"].lower()
+
+
+def test_final_asset_selection_can_revert_to_original_source(client, monkeypatch):
+    run_id, payload = _create_approved_narration_render(client, monkeypatch)
+    render = payload["latest_narration_render"]
+
+    select_narrated = client.post(
+        f"/api/pipeline-runs/{run_id}/final-asset/select",
+        json={"source": "narration_render", "narration_render_id": render["id"], "confirm_change_after_posting": False},
+    )
+    assert select_narrated.status_code == 200
+
+    revert = client.post(
+        f"/api/pipeline-runs/{run_id}/final-asset/select",
+        json={"source": "source_video", "confirm_change_after_posting": False},
+    )
+    assert revert.status_code == 200
+    final_selection = revert.json()["final_asset_selection"]
+    assert final_selection["source"] == "source_video"
+    assert final_selection["narration_render_id"] is None
+    assert final_selection["narration_transcript"] is None
+    assert final_selection["caption_cues"] == []
+
+
 def test_runway_quality_checklist_uses_provider_aware_branding_item(client, monkeypatch):
     from app.models import Asset, ManualPostPackage, PipelineRun, PipelineStage, PipelineStatus, QualityCheck, Video, VideoStatus
     from app.services import pipeline_service
@@ -1376,3 +1855,941 @@ def test_asset_library_filters_by_manual_posting_status(client):
     items = response.json()
     assert any(item["run_id"] == run_id for item in items)
     assert all(item["manual_posting_status"] == "posted_youtube" for item in items)
+
+
+def _enable_mock_narration(monkeypatch):
+    monkeypatch.setenv("NARRATION_ENABLED", "true")
+    monkeypatch.setenv("NARRATION_WRITER_PROVIDER", "mock")
+    monkeypatch.setenv("NARRATION_SPEECH_PROVIDER", "mock")
+    get_settings.cache_clear()
+
+
+def _create_completed_run(client):
+    create = client.post("/api/pipeline-runs", json={"topic": "CORS", "auto_mode": False})
+    run_id = create.json()["pipeline_run"]["id"]
+    resume = client.post(f"/api/pipeline-runs/{run_id}/resume", json={"review_notes": "Looks good"})
+    assert resume.status_code == 200
+    return run_id, resume.json()
+
+
+def _create_approved_narration_render(client, monkeypatch):
+    _enable_mock_narration(monkeypatch)
+    run_id, _payload = _create_completed_run(client)
+    draft = client.post(f"/api/pipeline-runs/{run_id}/narration/draft", json={"confirm_paid_draft": False})
+    assert draft.status_code == 200
+    story_review = client.post(
+        f"/api/pipeline-runs/{run_id}/story-adherence/human-review",
+        json={"decision": "approve", "notes": "Approved for final asset selection."},
+    )
+    assert story_review.status_code == 200
+    render = client.post(
+        f"/api/pipeline-runs/{run_id}/narration/render",
+        json={"confirm_paid_narration": True, "voice": "alloy"},
+    )
+    assert render.status_code == 200
+    render_payload = render.json()
+    narration_render = render_payload["latest_narration_render"]
+    review = client.post(
+        f"/api/pipeline-runs/{run_id}/narration/human-review",
+        json={"narration_render_id": narration_render["id"], "decision": "approve", "notes": "Approved narration render."},
+    )
+    assert review.status_code == 200
+    return run_id, review.json()
+
+
+def test_narration_draft_creation_uses_mock_writer_and_persists_detail(client, monkeypatch):
+    _enable_mock_narration(monkeypatch)
+    run_id, _payload = _create_completed_run(client)
+
+    response = client.post(f"/api/pipeline-runs/{run_id}/narration/draft", json={"confirm_paid_draft": False})
+    assert response.status_code == 200
+    payload = response.json()
+    draft = payload["narration_draft"]
+    assert draft is not None
+    assert draft["status"] == "ready"
+    assert draft["has_valid_content"] is True
+    assert draft["full_spoken_text"]
+    assert payload["latest_narration_render"] is None
+
+
+def test_narration_draft_duplicate_create_returns_existing_draft(client, monkeypatch):
+    from app.models import NarrationDraft
+
+    _enable_mock_narration(monkeypatch)
+    run_id, _payload = _create_completed_run(client)
+
+    first = client.post(f"/api/pipeline-runs/{run_id}/narration/draft", json={"confirm_paid_draft": False})
+    second = client.post(f"/api/pipeline-runs/{run_id}/narration/draft", json={"confirm_paid_draft": False})
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.json()["narration_draft"]["id"] == second.json()["narration_draft"]["id"]
+
+    with SessionLocal() as db:
+        assert db.query(NarrationDraft).filter(NarrationDraft.pipeline_run_id == run_id).count() == 1
+
+
+def test_narration_draft_patch_updates_manual_text(client, monkeypatch):
+    _enable_mock_narration(monkeypatch)
+    run_id, _payload = _create_completed_run(client)
+    created = client.post(f"/api/pipeline-runs/{run_id}/narration/draft", json={"confirm_paid_draft": False}).json()
+    segments = created["narration_draft"]["script_json"]["segments"]
+    segments[0]["spoken_text"] = "Updated spoken text."
+    segments[0]["caption_text"] = "Updated spoken text."
+    patch = client.patch(
+        f"/api/pipeline-runs/{run_id}/narration/draft",
+        json={
+            "segments": segments,
+            "full_spoken_text": "Updated spoken text. The fix lands. The solved result holds at the end.",
+        },
+    )
+    assert patch.status_code == 200
+    payload = patch.json()
+    assert payload["narration_draft"]["manually_modified"] is True
+    assert payload["narration_draft"]["script_json"]["segments"][0]["caption_text"] == "Updated spoken text."
+
+
+def test_narration_render_requires_paid_confirmation(client, monkeypatch):
+    _enable_mock_narration(monkeypatch)
+    run_id, _payload = _create_completed_run(client)
+    client.post(f"/api/pipeline-runs/{run_id}/narration/draft", json={"confirm_paid_draft": False})
+
+    response = client.post(f"/api/pipeline-runs/{run_id}/narration/render", json={"confirm_paid_narration": False})
+    assert response.status_code == 409
+    assert "confirm_paid_narration=true" in response.json()["detail"]
+
+
+def test_narration_render_requires_unapproved_story_confirmation(client, monkeypatch):
+    _enable_mock_narration(monkeypatch)
+    run_id, _payload = _create_completed_run(client)
+    client.post(f"/api/pipeline-runs/{run_id}/narration/draft", json={"confirm_paid_draft": False})
+
+    response = client.post(
+        f"/api/pipeline-runs/{run_id}/narration/render",
+        json={"confirm_paid_narration": True, "confirm_unapproved_story": False},
+    )
+    assert response.status_code == 409
+    assert "confirm_unapproved_story=true" in response.json()["detail"]
+
+
+def test_narration_render_creates_derived_assets_without_changing_run_status(client, monkeypatch):
+    _enable_mock_narration(monkeypatch)
+    run_id, resumed = _create_completed_run(client)
+    original_story_status = resumed["story_adherence_review"]["review_status"]
+    original_quality_score = resumed["quality_checks"][-1]["score"]
+    client.post(f"/api/pipeline-runs/{run_id}/narration/draft", json={"confirm_paid_draft": False})
+    client.post(
+        f"/api/pipeline-runs/{run_id}/story-adherence/human-review",
+        json={"decision": "approve", "notes": "Approved for narration."},
+    )
+
+    response = client.post(
+        f"/api/pipeline-runs/{run_id}/narration/render",
+        json={"confirm_paid_narration": True, "voice": "alloy"},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    render = payload["latest_narration_render"]
+    assert render is not None
+    assert render["status"] == "pending_review"
+    assert render["voice_is_ai_generated"] is True
+    assert render["audio_asset"] is not None
+    assert render["caption_asset"] is not None
+    assert render["rendered_video_asset"] is not None
+    assert payload["pipeline_run"]["status"] == "completed"
+    assert payload["story_adherence_review"]["review_status"] == original_story_status
+    assert payload["quality_checks"][-1]["score"] == original_quality_score
+    asset_types = {asset["asset_type"] for asset in payload["assets"]}
+    assert "video_mp4" in asset_types
+    assert "narration_audio" in asset_types
+    assert "narration_captions" in asset_types
+    assert "narrated_video_mp4" in asset_types
+
+
+def test_narration_timing_plan_uses_actual_audio_window_for_shorter_audio():
+    from app.services import narration_service
+
+    window = narration_service._narration_window_plan(10.0, 7.42)
+    assert window["lead_in_seconds"] == 0.4
+    assert window["speech_window_start_seconds"] == 0.4
+    assert window["speech_window_end_seconds"] == 7.82
+    assert window["ending_silence_seconds"] == 2.18
+    assert window["available_speech_window_seconds"] == 9.2
+
+
+def test_narration_caption_cues_follow_actual_narration_window():
+    from app.models import NarrationRender
+    from app.services import narration_service
+
+    render = NarrationRender(
+        source_duration_seconds=10.0,
+        script_json={
+            "segments": [
+                {"spoken_text": "Repeated failures stop the build.", "caption_text": "Repeated failures stop the build."},
+                {"spoken_text": "The AI spots the broken gear.", "caption_text": "The AI spots the broken gear."},
+                {"spoken_text": "Replace it, and the machine runs smoothly again.", "caption_text": "Replace it, and the machine runs smoothly again."},
+            ]
+        },
+    )
+
+    cues, metadata = narration_service._derive_caption_cues(render, 7.42)
+    assert cues[0]["start_seconds"] == 0.4
+    assert cues[-1]["end_seconds"] == 7.82
+    assert metadata["speech_window_end_seconds"] == 7.82
+    assert metadata["ending_silence_seconds"] == 2.18
+    assert metadata["available_speech_window_seconds"] == 9.2
+
+
+def test_failed_narration_regeneration_keeps_previous_draft_usable(client, monkeypatch):
+    from app.services import narration_service
+
+    class FailingWriter:
+        name = "mock"
+        model = "mock-writer"
+
+        def write(self, payload):
+            raise RuntimeError("Writer failed")
+
+    _enable_mock_narration(monkeypatch)
+    run_id, _payload = _create_completed_run(client)
+    created = client.post(f"/api/pipeline-runs/{run_id}/narration/draft", json={"confirm_paid_draft": False})
+    original = created.json()["narration_draft"]
+    monkeypatch.setattr(narration_service, "get_narration_writer_provider", lambda: FailingWriter())
+
+    regenerated = client.post(f"/api/pipeline-runs/{run_id}/narration/draft/regenerate", json={"confirm_paid_draft": False})
+    assert regenerated.status_code == 200
+    draft = regenerated.json()["narration_draft"]
+    assert draft["status"] == "ready"
+    assert draft["has_valid_content"] is True
+    assert draft["failure_reason"] == "Writer failed"
+    assert draft["generation_revision"] == original["generation_revision"] + 1
+    assert draft["full_spoken_text"] == original["full_spoken_text"]
+
+
+def test_narration_recompose_reuses_existing_audio_without_new_tts(client, monkeypatch):
+    from app.models import NarrationRender
+    from app.services import narration_service
+
+    _enable_mock_narration(monkeypatch)
+    run_id, _payload = _create_completed_run(client)
+    client.post(f"/api/pipeline-runs/{run_id}/narration/draft", json={"confirm_paid_draft": False})
+    client.post(
+        f"/api/pipeline-runs/{run_id}/story-adherence/human-review",
+        json={"decision": "approve", "notes": "Approved for narration."},
+    )
+    rendered = client.post(
+        f"/api/pipeline-runs/{run_id}/narration/render",
+        json={"confirm_paid_narration": True},
+    ).json()
+    render_id = rendered["latest_narration_render"]["id"]
+    rendered_asset_id = rendered["latest_narration_render"]["rendered_video_asset_id"]
+    original_caption_asset_id = rendered["latest_narration_render"]["caption_asset_id"]
+    speech_calls = {"count": 0}
+
+    class ShouldNotBeCalledSpeechProvider:
+        name = "mock"
+        model = "mock-speech"
+
+        def synthesize(self, *, text, voice, destination):
+            speech_calls["count"] += 1
+            raise AssertionError("Recompose should not call TTS when audio already exists.")
+
+    def inline_recompose(render_id):
+        with SessionLocal() as db:
+            narration_service.process_narration_render(db, render_id, mode="recompose", task_id="inline-recompose")
+
+    monkeypatch.setattr(narration_service, "get_speech_provider", lambda: ShouldNotBeCalledSpeechProvider())
+    monkeypatch.setattr(narration_service, "enqueue_narration_recompose_task", inline_recompose)
+
+    recomposed = client.post(f"/api/pipeline-runs/{run_id}/narration/renders/{render_id}/recompose")
+    assert recomposed.status_code == 200
+    payload = recomposed.json()
+    assert payload["latest_narration_render"]["rendered_video_asset_id"] != rendered_asset_id
+    assert payload["latest_narration_render"]["caption_asset_id"] != original_caption_asset_id
+    assert payload["latest_narration_render"]["audio_asset_id"] == rendered["latest_narration_render"]["audio_asset_id"]
+    assert speech_calls["count"] == 0
+    with SessionLocal() as db:
+        render = db.get(NarrationRender, render_id)
+        assert render is not None
+        assert render.status == "pending_review"
+
+
+def test_narration_compose_uses_h264_aac_and_preserves_source_duration(tmp_path, monkeypatch):
+    from app.services import narration_service
+
+    captured = {}
+
+    def fake_run(command, check, stdout, stderr, capture_output=False, text=False):
+        captured["command"] = command
+        destination = Path(command[-1])
+        destination.write_bytes(b"video")
+        class Result:
+            stdout = ""
+        return Result()
+
+    monkeypatch.setattr(narration_service.subprocess, "run", fake_run)
+    narration_service._compose_video(
+        tmp_path / "source.mp4",
+        tmp_path / "audio.mp3",
+        tmp_path / "captions.ass",
+        tmp_path / "out.mp4",
+        atempo=1.0,
+        lead_in_seconds=0.4,
+        source_duration_seconds=10.0,
+    )
+
+    command = captured["command"]
+    assert "-shortest" not in command
+    assert "libx264" in command
+    assert "aac" in command
+    assert "yuv420p" in command
+    assert "+faststart" in command
+    assert any("adelay=400:all=1" in item for item in command)
+    assert any("apad=pad_dur=10.00" in item for item in command)
+    assert any("atrim=duration=10.00" in item for item in command)
+
+
+def test_narration_output_validation_requires_full_duration_and_caption_alignment():
+    from app.services import narration_service
+
+    with_caption_overrun = {
+        "format_duration_seconds": 10.0,
+        "streams": [
+            {"codec_type": "video", "width": 720, "height": 1280, "codec_name": "h264"},
+            {"codec_type": "audio", "codec_name": "aac"},
+        ],
+    }
+    try:
+        narration_service._validate_render_output(
+            with_caption_overrun,
+            source_duration_seconds=10.0,
+            expected_width=720,
+            expected_height=1280,
+            caption_cues=[{"start_seconds": 0.4, "end_seconds": 9.6}],
+            narration_end_seconds=7.82,
+        )
+        assert False, "Expected caption alignment validation to fail."
+    except RuntimeError as exc:
+        assert "materially exceed" in str(exc)
+
+    narration_service._validate_render_output(
+        {
+            "format_duration_seconds": 10.0,
+            "streams": [
+                {"codec_type": "video", "width": 720, "height": 1280, "codec_name": "h264"},
+                {"codec_type": "audio", "codec_name": "aac"},
+            ],
+        },
+        source_duration_seconds=10.0,
+        expected_width=720,
+        expected_height=1280,
+        caption_cues=[{"start_seconds": 0.4, "end_seconds": 7.82}],
+        narration_end_seconds=7.82,
+    )
+
+
+def test_narration_draft_normalizes_writer_timestamps_that_end_at_source_duration(client, monkeypatch):
+    from app.services import narration_service
+
+    class AdvisoryTimingWriter:
+        name = "mock"
+        model = "timing-writer"
+
+        def write(self, payload):
+            return {
+                "segments": [
+                    {
+                        "start_seconds": 0.0,
+                        "end_seconds": 4.0,
+                        "spoken_text": "Bug first breaks the machine.",
+                        "caption_text": "Bug first breaks the machine.",
+                    },
+                    {
+                        "start_seconds": 4.0,
+                        "end_seconds": 10.0,
+                        "spoken_text": "The AI spots the fault and fixes it.",
+                        "caption_text": "The AI spots the fault and fixes it.",
+                    },
+                ],
+                "full_spoken_text": "Bug first breaks the machine. The AI spots the fault and fixes it.",
+                "estimated_word_count": 12,
+                "usage": {"input_tokens": 11, "output_tokens": 13, "total_tokens": 24},
+                "cost_estimate": 0.12,
+                "provider_request_id": "req-equal",
+            }
+
+    response = AdvisoryTimingWriter().write({})
+    segments, _text, _count = narration_service._normalize_segments(response, source_duration_seconds=10.0)
+    assert segments[0]["start_seconds"] == 0.4
+    assert segments[-1]["end_seconds"] == 9.6
+    assert segments[-1]["end_seconds"] < 10.0
+
+
+def test_narration_draft_normalizes_writer_timestamps_beyond_source_duration_deterministically(client, monkeypatch):
+    from app.services import narration_service
+
+    class BeyondTimingWriter:
+        name = "mock"
+        model = "timing-writer"
+
+        def write(self, payload):
+            return {
+                "segments": [
+                    {
+                        "start_seconds": 0.0,
+                        "end_seconds": 7.5,
+                        "spoken_text": "A broken robot arm jams the coding line.",
+                        "caption_text": "A broken robot arm jams the coding line.",
+                    },
+                    {
+                        "start_seconds": 7.5,
+                        "end_seconds": 12.5,
+                        "spoken_text": "The AI swaps one bad gear and the robot works again.",
+                        "caption_text": "The AI swaps one bad gear and the robot works again.",
+                    },
+                ],
+                "full_spoken_text": "A broken robot arm jams the coding line. The AI swaps one bad gear and the robot works again.",
+                "estimated_word_count": 18,
+                "usage": {"input_tokens": 9, "output_tokens": 15, "total_tokens": 24},
+                "cost_estimate": 0.08,
+                "provider_request_id": "req-beyond",
+            }
+
+    response = BeyondTimingWriter().write({})
+    first_segments, _text, _count = narration_service._normalize_segments(response, source_duration_seconds=10.0)
+    second_segments, _text, _count = narration_service._normalize_segments(response, source_duration_seconds=10.0)
+    assert first_segments == second_segments
+    assert first_segments[0]["start_seconds"] == 0.4
+    assert first_segments[1]["end_seconds"] == 9.6
+    assert first_segments[1]["end_seconds"] < 10.0
+
+
+def test_narration_draft_rejects_over_word_limit_after_normalization(client, monkeypatch):
+    from app.services import narration_service
+
+    class LongWriter:
+        name = "mock"
+        model = "long-writer"
+
+        def write(self, payload):
+            text = (
+                "One developer keeps checking every broken panel while the AI helper points to the bad wire, "
+                "explains the bug, and confirms the machine is fully fixed at the end."
+            )
+            return {
+                "segments": [
+                    {
+                        "start_seconds": 0.0,
+                        "end_seconds": 3.0,
+                        "spoken_text": text,
+                        "caption_text": text,
+                    }
+                ],
+                "full_spoken_text": text,
+                "estimated_word_count": len(text.split()),
+                "usage": {"input_tokens": 20, "output_tokens": 30, "total_tokens": 50},
+                "cost_estimate": 0.14,
+                "provider_request_id": "req-long",
+            }
+
+    _enable_mock_narration(monkeypatch)
+    run_id, _payload = _create_completed_run(client)
+    monkeypatch.setattr(narration_service, "get_narration_writer_provider", lambda: LongWriter())
+
+    response = client.post(f"/api/pipeline-runs/{run_id}/narration/draft", json={"confirm_paid_draft": False})
+    assert response.status_code == 200
+    draft = response.json()["narration_draft"]
+    assert draft["status"] == "failed"
+    assert draft["failure_reason"] == "Narration draft exceeds the 20-word limit."
+    assert "validation_error" in draft["usage_metadata_json"]
+
+
+def test_narration_draft_uses_full_spoken_text_word_count_for_thirty_three_word_failure(client, monkeypatch):
+    from app.services import narration_service
+
+    class WrongCountWriter:
+        name = "mock"
+        model = "wrong-count-writer"
+
+        def write(self, payload):
+            text = (
+                "A broken gear jams the build process, causing repeated failures. "
+                "The AI highlights the faulty gear; replacing it fixes the machine smoothly. "
+                "Now the machine runs flawlessly with the new gear in place."
+            )
+            return {
+                "segments": [
+                    {
+                        "start_seconds": 0.0,
+                        "end_seconds": 3.0,
+                        "spoken_text": text,
+                        "caption_text": text,
+                    }
+                ],
+                "full_spoken_text": text,
+                "estimated_word_count": 20,
+                "usage": {"input_tokens": 10, "output_tokens": 20, "total_tokens": 30},
+                "cost_estimate": 0.13,
+                "provider_request_id": "req-wrong-count",
+            }
+
+    _enable_mock_narration(monkeypatch)
+    run_id, _payload = _create_completed_run(client)
+    monkeypatch.setattr(narration_service, "get_narration_writer_provider", lambda: WrongCountWriter())
+
+    response = client.post(f"/api/pipeline-runs/{run_id}/narration/draft", json={"confirm_paid_draft": False})
+    assert response.status_code == 200
+    draft = response.json()["narration_draft"]
+    assert narration_service.calculate_spoken_word_count(WrongCountWriter().write({})["full_spoken_text"]) == 33
+    assert draft["estimated_word_count"] == 0
+    assert draft["failure_reason"] == "Narration draft exceeds the 20-word limit."
+    assert draft["usage_metadata_json"]["validation_error"] == "Narration draft exceeds the 20-word limit."
+
+
+def test_narration_draft_persists_calculated_word_count(client, monkeypatch):
+    _enable_mock_narration(monkeypatch)
+    run_id, _payload = _create_completed_run(client)
+    response = client.post(f"/api/pipeline-runs/{run_id}/narration/draft", json={"confirm_paid_draft": False})
+    assert response.status_code == 200
+    draft = response.json()["narration_draft"]
+    assert draft["estimated_word_count"] > 0
+    assert draft["estimated_word_count"] == len(draft["full_spoken_text"].replace(".", "").split())
+
+
+def test_narration_draft_defaults_caption_text_to_spoken_text_for_writer_output(client, monkeypatch):
+    from app.services import narration_service
+
+    class MissingCaptionWriter:
+        name = "mock"
+        model = "missing-caption-writer"
+
+        def write(self, payload):
+            return {
+                "segments": [
+                    {
+                        "start_seconds": 0.0,
+                        "end_seconds": 4.0,
+                        "spoken_text": "Repeated failures stop the build.",
+                        "caption_text": "",
+                    },
+                    {
+                        "start_seconds": 4.0,
+                        "end_seconds": 10.0,
+                        "spoken_text": "The AI spots the broken gear and the fix lands.",
+                        "caption_text": "",
+                    },
+                ],
+                "full_spoken_text": "Repeated failures stop the build. The AI spots the broken gear and the fix lands.",
+                "estimated_word_count": 7,
+                "usage": {"input_tokens": 9, "output_tokens": 12, "total_tokens": 21},
+                "cost_estimate": 0.06,
+                "provider_request_id": "req-missing-caption",
+            }
+
+    _enable_mock_narration(monkeypatch)
+    run_id, _payload = _create_completed_run(client)
+    monkeypatch.setattr(narration_service, "get_narration_writer_provider", lambda: MissingCaptionWriter())
+    response = client.post(f"/api/pipeline-runs/{run_id}/narration/draft", json={"confirm_paid_draft": False})
+    assert response.status_code == 200
+    draft = response.json()["narration_draft"]
+    for segment in draft["script_json"]["segments"]:
+        assert segment["caption_text"] == segment["spoken_text"]
+
+
+def test_narration_patch_rejects_materially_shortened_captions(client, monkeypatch):
+    _enable_mock_narration(monkeypatch)
+    run_id, _payload = _create_completed_run(client)
+    created = client.post(f"/api/pipeline-runs/{run_id}/narration/draft", json={"confirm_paid_draft": False}).json()
+    segments = created["narration_draft"]["script_json"]["segments"]
+    segments[0]["caption_text"] = "Short caption."
+    response = client.patch(
+        f"/api/pipeline-runs/{run_id}/narration/draft",
+        json={
+            "segments": segments,
+            "full_spoken_text": created["narration_draft"]["full_spoken_text"],
+        },
+    )
+    assert response.status_code == 400
+    assert "caption text must remain identical or extremely close" in response.json()["detail"]
+
+
+def test_narration_draft_retains_usage_metadata_when_post_provider_validation_fails(client, monkeypatch):
+    from app.services import narration_service
+
+    class InvalidTimingWriter:
+        name = "mock"
+        model = "invalid-writer"
+
+        def write(self, payload):
+            return {
+                "segments": [
+                    {
+                        "start_seconds": 0.0,
+                        "end_seconds": 10.0,
+                        "spoken_text": "The machine is broken first.",
+                        "caption_text": "The machine is broken first.",
+                    },
+                    {
+                        "start_seconds": 10.0,
+                        "end_seconds": 12.0,
+                        "spoken_text": "",
+                        "caption_text": "The AI fixes it.",
+                    },
+                ],
+                "full_spoken_text": "The machine is broken first. The AI fixes it.",
+                "estimated_word_count": 9,
+                "usage": {"input_tokens": 21, "output_tokens": 14, "total_tokens": 35},
+                "cost_estimate": 0.11,
+                "provider_request_id": "req-invalid",
+            }
+
+    _enable_mock_narration(monkeypatch)
+    run_id, _payload = _create_completed_run(client)
+    monkeypatch.setattr(narration_service, "get_narration_writer_provider", lambda: InvalidTimingWriter())
+
+    response = client.post(f"/api/pipeline-runs/{run_id}/narration/draft", json={"confirm_paid_draft": False})
+    assert response.status_code == 200
+    draft = response.json()["narration_draft"]
+    assert draft["status"] == "failed"
+    assert draft["paid_call_completed_at"] is not None
+    assert draft["usage_metadata_json"]["total_tokens"] == 35
+    assert draft["usage_metadata_json"]["validation_error"] == "Narration spoken text may not be empty."
+    assert draft["usage_metadata_json"]["attempt_output"]["provider_request_id"] == "req-invalid"
+    assert draft["estimated_writer_cost"] == 0.11
+
+
+def test_narration_regeneration_preserves_prior_attempt_history(client, monkeypatch):
+    from app.services import narration_service
+
+    class FirstFailingWriter:
+        name = "mock"
+        model = "first-failing-writer"
+
+        def write(self, payload):
+            return {
+                "segments": [
+                    {
+                        "start_seconds": 0.0,
+                        "end_seconds": 10.0,
+                        "spoken_text": "",
+                        "caption_text": "The bug stays visible.",
+                    }
+                ],
+                "full_spoken_text": "",
+                "estimated_word_count": 0,
+                "usage": {"input_tokens": 5, "output_tokens": 6, "total_tokens": 11},
+                "cost_estimate": 0.07,
+                "provider_request_id": "req-first-fail",
+            }
+
+    class SecondSuccessfulWriter:
+        name = "mock"
+        model = "second-success-writer"
+
+        def write(self, payload):
+            return {
+                "segments": [
+                    {
+                        "start_seconds": 0.0,
+                        "end_seconds": 3.0,
+                        "spoken_text": "The bug stops the machine.",
+                        "caption_text": "The bug stops the machine.",
+                    },
+                    {
+                        "start_seconds": 3.0,
+                        "end_seconds": 6.0,
+                        "spoken_text": "The AI finds the bad wire.",
+                        "caption_text": "The AI finds the bad wire.",
+                    },
+                    {
+                        "start_seconds": 6.0,
+                        "end_seconds": 10.0,
+                        "spoken_text": "One fix restores the working machine.",
+                        "caption_text": "One fix restores the working machine.",
+                    },
+                ],
+                "full_spoken_text": "The bug stops the machine. The AI finds the bad wire. One fix restores the working machine.",
+                "estimated_word_count": 16,
+                "usage": {"input_tokens": 8, "output_tokens": 12, "total_tokens": 20},
+                "cost_estimate": 0.09,
+                "provider_request_id": "req-second-success",
+            }
+
+    _enable_mock_narration(monkeypatch)
+    run_id, _payload = _create_completed_run(client)
+    monkeypatch.setattr(narration_service, "get_narration_writer_provider", lambda: FirstFailingWriter())
+
+    failed = client.post(f"/api/pipeline-runs/{run_id}/narration/draft", json={"confirm_paid_draft": False})
+    assert failed.status_code == 200
+    failed_draft = failed.json()["narration_draft"]
+    assert failed_draft["status"] == "failed"
+    assert len(failed_draft["attempts_json"]) == 1
+    assert failed_draft["attempts_json"][0]["provider_request_id"] == "req-first-fail"
+    assert failed_draft["attempts_json"][0]["validation_result"] == "failed_validation"
+
+    monkeypatch.setattr(narration_service, "get_narration_writer_provider", lambda: SecondSuccessfulWriter())
+    regenerated = client.post(f"/api/pipeline-runs/{run_id}/narration/draft/regenerate", json={"confirm_paid_draft": False})
+    assert regenerated.status_code == 200
+    draft = regenerated.json()["narration_draft"]
+    assert draft["status"] == "ready"
+    assert draft["generation_revision"] == 2
+    assert len(draft["attempts_json"]) == 2
+    assert draft["attempts_json"][0]["provider_request_id"] == "req-first-fail"
+    assert draft["attempts_json"][0]["validation_result"] == "failed_validation"
+    assert draft["attempts_json"][1]["provider_request_id"] == "req-second-success"
+    assert draft["attempts_json"][1]["validation_result"] == "ready"
+    assert draft["attempts_json"][1]["attempt_output"]["full_spoken_text"] == draft["full_spoken_text"]
+    assert draft["attempts_json"][1]["attempt_output"]["segments"]
+    assert draft["failure_reason"] is None
+    assert draft["failure_stage"] is None
+
+
+def test_narration_success_with_unavailable_cost_uses_null_and_status(client, monkeypatch):
+    from app.services import narration_service
+
+    class UnpricedWriter:
+        name = "mock"
+        model = "unpriced-writer"
+
+        def write(self, payload):
+            return {
+                "segments": [
+                    {
+                        "start_seconds": 0.0,
+                        "end_seconds": 3.0,
+                        "spoken_text": "Repeated failures stop the build.",
+                        "caption_text": "Repeated failures stop the build.",
+                    },
+                    {
+                        "start_seconds": 3.0,
+                        "end_seconds": 10.0,
+                        "spoken_text": "The AI spots the broken gear and the machine runs again.",
+                        "caption_text": "The AI spots the broken gear and the machine runs again.",
+                    },
+                ],
+                "full_spoken_text": "Repeated failures stop the build. The AI spots the broken gear and the machine runs again.",
+                "estimated_word_count": 8,
+                "usage": {"input_tokens": 13, "output_tokens": 11, "total_tokens": 24},
+                "cost_estimate": None,
+                "provider_request_id": "req-unpriced",
+            }
+
+    _enable_mock_narration(monkeypatch)
+    run_id, _payload = _create_completed_run(client)
+    monkeypatch.setattr(narration_service, "get_narration_writer_provider", lambda: UnpricedWriter())
+    response = client.post(f"/api/pipeline-runs/{run_id}/narration/draft", json={"confirm_paid_draft": False})
+    assert response.status_code == 200
+    draft = response.json()["narration_draft"]
+    assert draft["estimated_writer_cost"] is None
+    assert draft["usage_metadata_json"]["cost_estimation_status"] == "unavailable"
+    assert draft["attempts_json"][0]["estimated_cost"] is None
+
+
+def test_openai_speech_provider_uses_response_format_mp3(monkeypatch, tmp_path):
+    from app.providers.speech import openai_provider
+
+    captured = {}
+
+    class DummyResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def stream_to_file(self, destination):
+            Path(destination).write_bytes(b"mp3")
+
+    class DummySpeech:
+        def __init__(self):
+            self.with_streaming_response = self
+
+        def create(self, **kwargs):
+            captured.update(kwargs)
+            return DummyResponse()
+
+    class DummyClient:
+        def __init__(self, api_key=None, timeout=None):
+            self.audio = type("Audio", (), {"speech": DummySpeech()})()
+
+    monkeypatch.setattr(openai_provider, "OpenAI", DummyClient)
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("NARRATION_TIMEOUT_SECONDS", "90")
+    get_settings.cache_clear()
+
+    provider = openai_provider.OpenAISpeechProvider()
+    destination = tmp_path / "speech.mp3"
+    result = provider.synthesize(text="hello world", voice="alloy", destination=destination)
+
+    assert "response_format" in captured
+    assert captured["response_format"] == "mp3"
+    assert "format" not in captured
+    assert result["mime_type"] == "audio/mpeg"
+    assert destination.suffix == ".mp3"
+
+
+def _create_failed_speech_render(client, monkeypatch, *, enqueue_immediately=True):
+    from app.models import GenerationCost
+    from app.services import narration_service
+
+    class ConfigFailingSpeechProvider:
+        name = "openai"
+        model = "gpt-4o-mini-tts"
+
+        def synthesize(self, *, text, voice, destination):
+            raise TypeError("Speech.create() got an unexpected keyword argument 'format'")
+
+    def inline_enqueue(render_id):
+        with SessionLocal() as db:
+            narration_service.process_narration_render(db, render_id, mode="full", task_id="inline-fail")
+
+    _enable_mock_narration(monkeypatch)
+    run_id, _payload = _create_completed_run(client)
+    client.post(f"/api/pipeline-runs/{run_id}/narration/draft", json={"confirm_paid_draft": False})
+    client.post(
+        f"/api/pipeline-runs/{run_id}/story-adherence/human-review",
+        json={"decision": "approve", "notes": "Approved for narration."},
+    )
+    monkeypatch.setattr(narration_service, "get_speech_provider", lambda: ConfigFailingSpeechProvider())
+    enqueue_calls = {"count": 0}
+
+    def tracked_enqueue(render_id):
+        enqueue_calls["count"] += 1
+        if enqueue_immediately:
+            inline_enqueue(render_id)
+
+    monkeypatch.setattr(narration_service, "enqueue_narration_render_task", tracked_enqueue)
+
+    response = client.post(
+        f"/api/pipeline-runs/{run_id}/narration/render",
+        json={"confirm_paid_narration": True},
+    )
+    assert response.status_code == 200
+    with SessionLocal() as db:
+        assert db.query(GenerationCost).filter(GenerationCost.pipeline_run_id == run_id, GenerationCost.stage == "narration_speech").count() == 0
+    return run_id, response.json(), enqueue_calls
+
+
+def test_narration_render_client_configuration_failure_is_not_uncertain_and_has_no_speech_cost(client, monkeypatch):
+    run_id, payload, _enqueue_calls = _create_failed_speech_render(client, monkeypatch)
+    render = payload["latest_narration_render"]
+    assert render["status"] == "failed"
+    assert render["failure_stage"] == "speech"
+    assert render["failure_kind"] == "client_configuration"
+    assert render["provider_request_dispatched"] is False
+    assert render["paid_call_outcome_uncertain"] is False
+    assert render["audio_asset_id"] is None
+    assert render["estimated_speech_cost"] is None
+    assert len(render["speech_attempts_json"]) == 1
+    attempt = render["speech_attempts_json"][0]
+    assert attempt["attempt_revision"] == 1
+    assert attempt["provider_request_dispatched"] is False
+    assert attempt["failure_kind"] == "client_configuration"
+    assert attempt["attempt_result"] == "failed"
+
+
+def test_narration_speech_retry_requires_paid_confirmation(client, monkeypatch):
+    run_id, payload, _enqueue_calls = _create_failed_speech_render(client, monkeypatch)
+    render_id = payload["latest_narration_render"]["id"]
+    response = client.post(
+        f"/api/pipeline-runs/{run_id}/narration/renders/{render_id}/retry-speech",
+        json={"confirm_paid_narration": False},
+    )
+    assert response.status_code == 409
+    assert "confirm_paid_narration=true" in response.json()["detail"]
+
+
+def test_narration_speech_retry_appends_attempt_revision_two(client, monkeypatch):
+    from app.services import narration_service
+
+    run_id, payload, _enqueue_calls = _create_failed_speech_render(client, monkeypatch)
+    render_id = payload["latest_narration_render"]["id"]
+
+    class RetryFailingSpeechProvider:
+        name = "openai"
+        model = "gpt-4o-mini-tts"
+
+        def synthesize(self, *, text, voice, destination):
+            raise TypeError("Speech.create() got an unexpected keyword argument 'format'")
+
+    def inline_enqueue(render_id):
+        with SessionLocal() as db:
+            narration_service.process_narration_render(db, render_id, mode="full", task_id="inline-retry-fail")
+
+    monkeypatch.setattr(narration_service, "get_speech_provider", lambda: RetryFailingSpeechProvider())
+    monkeypatch.setattr(narration_service, "enqueue_narration_render_task", inline_enqueue)
+
+    response = client.post(
+        f"/api/pipeline-runs/{run_id}/narration/renders/{render_id}/retry-speech",
+        json={"confirm_paid_narration": True},
+    )
+    assert response.status_code == 200
+    render = response.json()["latest_narration_render"]
+    assert len(render["speech_attempts_json"]) == 2
+    assert render["speech_attempts_json"][0]["attempt_revision"] == 1
+    assert render["speech_attempts_json"][1]["attempt_revision"] == 2
+    assert render["speech_attempts_json"][0]["provider_attempt_id"] != render["speech_attempts_json"][1]["provider_attempt_id"]
+
+
+def test_narration_speech_retry_only_queues_once_when_already_queued(client, monkeypatch):
+    from app.services import narration_service
+
+    run_id, payload, _enqueue_calls = _create_failed_speech_render(client, monkeypatch)
+    render_id = payload["latest_narration_render"]["id"]
+    enqueue_calls = {"count": 0}
+
+    def tracked_enqueue(render_id):
+        enqueue_calls["count"] += 1
+
+    monkeypatch.setattr(narration_service, "enqueue_narration_render_task", tracked_enqueue)
+
+    first = client.post(
+        f"/api/pipeline-runs/{run_id}/narration/renders/{render_id}/retry-speech",
+        json={"confirm_paid_narration": True},
+    )
+    second = client.post(
+        f"/api/pipeline-runs/{run_id}/narration/renders/{render_id}/retry-speech",
+        json={"confirm_paid_narration": True},
+    )
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert enqueue_calls["count"] == 1
+    assert second.json()["latest_narration_render"]["status"] == "queued"
+
+
+def test_narration_speech_retry_blocked_when_audio_exists(client, monkeypatch):
+    _enable_mock_narration(monkeypatch)
+    run_id, _payload = _create_completed_run(client)
+    client.post(f"/api/pipeline-runs/{run_id}/narration/draft", json={"confirm_paid_draft": False})
+    client.post(
+        f"/api/pipeline-runs/{run_id}/story-adherence/human-review",
+        json={"decision": "approve", "notes": "Approved for narration."},
+    )
+    rendered = client.post(
+        f"/api/pipeline-runs/{run_id}/narration/render",
+        json={"confirm_paid_narration": True},
+    ).json()
+    render_id = rendered["latest_narration_render"]["id"]
+    response = client.post(
+        f"/api/pipeline-runs/{run_id}/narration/renders/{render_id}/retry-speech",
+        json={"confirm_paid_narration": True},
+    )
+    assert response.status_code == 400
+    assert "Recompose the existing render instead" in response.json()["detail"]
+
+
+def test_narration_speech_retry_uncertain_requires_extra_confirmation(client, monkeypatch):
+    run_id, payload, _enqueue_calls = _create_failed_speech_render(client, monkeypatch)
+    render_id = payload["latest_narration_render"]["id"]
+    from app.models import NarrationRender
+
+    with SessionLocal() as db:
+        render = db.get(NarrationRender, render_id)
+        render.paid_call_outcome_uncertain = True
+        db.commit()
+
+    response = client.post(
+        f"/api/pipeline-runs/{run_id}/narration/renders/{render_id}/retry-speech",
+        json={"confirm_paid_narration": True},
+    )
+    assert response.status_code == 409
+    assert "confirm_possible_duplicate_charge=true" in response.json()["detail"]

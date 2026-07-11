@@ -30,10 +30,28 @@ class Settings(BaseSettings):
 
     openai_api_key: str = Field(default="", alias="OPENAI_API_KEY")
     runway_api_key: str = Field(default="", alias="RUNWAY_API_KEY")
+    semantic_critic_enabled: bool = Field(default=False, alias="SEMANTIC_CRITIC_ENABLED")
+    semantic_critic_provider: Literal["openai"] = Field(default="openai", alias="SEMANTIC_CRITIC_PROVIDER")
+    semantic_critic_model: str = Field(default="gpt-4.1-mini", alias="SEMANTIC_CRITIC_MODEL")
+    semantic_critic_version: str = Field(default="v1", alias="SEMANTIC_CRITIC_VERSION")
+    semantic_critic_timeout_seconds: int = Field(default=60, alias="SEMANTIC_CRITIC_TIMEOUT_SECONDS")
+    narration_enabled: bool = Field(default=False, alias="NARRATION_ENABLED")
+    narration_writer_provider: Literal["mock", "openai"] = Field(default="mock", alias="NARRATION_WRITER_PROVIDER")
+    narration_writer_model: str = Field(default="gpt-4.1-mini", alias="NARRATION_WRITER_MODEL")
+    narration_writer_prompt_version: str = Field(default="v1", alias="NARRATION_WRITER_PROMPT_VERSION")
+    narration_speech_provider: Literal["mock", "openai"] = Field(default="mock", alias="NARRATION_SPEECH_PROVIDER")
+    narration_speech_model: str = Field(default="gpt-4o-mini-tts", alias="NARRATION_SPEECH_MODEL")
+    narration_voice: str = Field(default="alloy", alias="NARRATION_VOICE")
+    narration_version: str = Field(default="v1", alias="NARRATION_VERSION")
+    narration_caption_version: str = Field(default="v1", alias="NARRATION_CAPTION_VERSION")
+    narration_render_version: str = Field(default="v1", alias="NARRATION_RENDER_VERSION")
+    narration_timeout_seconds: int = Field(default=90, alias="NARRATION_TIMEOUT_SECONDS")
+    narration_max_words: int = Field(default=20, alias="NARRATION_MAX_WORDS")
+    narration_max_atempo_adjustment_percent: int = Field(default=10, alias="NARRATION_MAX_ATEMPO_ADJUSTMENT_PERCENT")
 
     video_provider: Literal["mock", "runway"] = Field(default="mock", alias="VIDEO_PROVIDER")
     storage_provider: Literal["local", "r2"] = Field(default="local", alias="STORAGE_PROVIDER")
-    local_storage_path: str = "./storage"
+    local_storage_path: str = Field(default="./storage", alias="LOCAL_STORAGE_PATH")
 
     default_poll_interval_seconds: int = 15
     default_max_poll_attempts: int = 20
@@ -57,6 +75,8 @@ class Settings(BaseSettings):
             "auth": [],
             "storage": [],
             "video": [],
+            "semantic_critic": [],
+            "narration": [],
         }
         if self.auth_enabled:
             required["auth"] = ["APP_ACCESS_PASSWORD"]
@@ -70,6 +90,12 @@ class Settings(BaseSettings):
             ]
         if self.video_provider == "runway":
             required["video"] = ["RUNWAY_API_KEY"]
+        if self.semantic_critic_enabled and self.semantic_critic_provider == "openai":
+            required["semantic_critic"] = ["OPENAI_API_KEY"]
+        if self.narration_enabled and (
+            self.narration_writer_provider == "openai" or self.narration_speech_provider == "openai"
+        ):
+            required["narration"] = ["OPENAI_API_KEY"]
 
         values = {
             "DATABASE_URL": self.database_url,
@@ -83,6 +109,7 @@ class Settings(BaseSettings):
             "R2_BUCKET_NAME": self.r2_bucket_name,
             "R2_PUBLIC_BASE_URL": self.r2_public_base_url,
             "RUNWAY_API_KEY": self.runway_api_key,
+            "OPENAI_API_KEY": self.openai_api_key,
         }
 
         missing: dict[str, list[str]] = {}
@@ -104,6 +131,14 @@ class Settings(BaseSettings):
             errors.append(f"Missing required storage settings for {mode_label}: {', '.join(missing['storage'])}")
         if missing.get("video"):
             errors.append(f"Missing required video provider settings for {mode_label}: {', '.join(missing['video'])}")
+        if missing.get("semantic_critic"):
+            errors.append(
+                f"Missing required semantic critic settings for {mode_label}: {', '.join(missing['semantic_critic'])}"
+            )
+        if missing.get("narration"):
+            errors.append(
+                f"Missing required narration settings for {mode_label}: {', '.join(missing['narration'])}"
+            )
         return errors
 
     def validate_configuration(self) -> None:

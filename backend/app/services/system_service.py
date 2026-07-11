@@ -8,7 +8,12 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.config import Settings
 from app.db.session import engine
-from app.services.providers import get_storage_provider, get_video_provider
+from app.services.providers import (
+    get_narration_writer_provider,
+    get_speech_provider,
+    get_storage_provider,
+    get_video_provider,
+)
 
 
 def _status_payload(status: str, detail: str, **extra) -> dict:
@@ -24,6 +29,7 @@ def collect_health_details(settings: Settings) -> dict:
         "redis": check_redis_readiness(settings),
         "storage": check_storage_readiness(settings),
         "video_provider": check_video_provider_readiness(settings),
+        "narration": check_narration_readiness(settings),
         "configuration": _status_payload(
             "ok" if not config_errors else "error",
             "Configuration validated" if not config_errors else " ".join(config_errors),
@@ -84,3 +90,23 @@ def check_video_provider_readiness(settings: Settings) -> dict:
         return _status_payload("ok", detail, provider=provider.name, sdk_version=sdk_version)
     except Exception as exc:
         return _status_payload("error", f"Video provider unavailable: {exc}")
+
+
+def check_narration_readiness(settings: Settings) -> dict:
+    if not settings.narration_enabled:
+        return _status_payload("ok", "Narration disabled")
+    try:
+        writer = get_narration_writer_provider()
+        speech = get_speech_provider()
+        if writer is None or speech is None:
+            return _status_payload("error", "Narration provider unavailable")
+        return _status_payload(
+            "ok",
+            "Narration providers configured",
+            writer_provider=writer.name,
+            writer_model=getattr(writer, "model", None),
+            speech_provider=speech.name,
+            speech_model=getattr(speech, "model", None),
+        )
+    except Exception as exc:
+        return _status_payload("error", f"Narration provider unavailable: {exc}")

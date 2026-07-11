@@ -18,3 +18,38 @@ def get_video_provider():
 def get_storage_provider():
     settings = get_settings()
     return R2StorageProvider() if settings.storage_provider == "r2" else LocalStorageProvider()
+
+
+def get_semantic_critic_provider():
+    settings = get_settings()
+    if not settings.semantic_critic_enabled:
+        return None
+    from app.providers.semantic_critic.openai_provider import OpenAISemanticCriticProvider
+
+    return OpenAISemanticCriticProvider()
+
+
+def get_narration_writer_provider():
+    settings = get_settings()
+    if not settings.narration_enabled:
+        return None
+    if settings.narration_writer_provider == "openai":
+        from app.providers.narration_writer.openai_provider import OpenAINarrationWriterProvider
+
+        return OpenAINarrationWriterProvider()
+    from app.providers.narration_writer.mock_provider import MockNarrationWriterProvider
+
+    return MockNarrationWriterProvider()
+
+
+def get_speech_provider():
+    settings = get_settings()
+    if not settings.narration_enabled:
+        return None
+    if settings.narration_speech_provider == "openai":
+        from app.providers.speech.openai_provider import OpenAISpeechProvider
+
+        return OpenAISpeechProvider()
+    from app.providers.speech.mock_provider import MockSpeechProvider
+
+    return MockSpeechProvider()
