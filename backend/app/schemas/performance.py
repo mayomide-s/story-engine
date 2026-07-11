@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from decimal import Decimal
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -184,6 +184,50 @@ class PerformanceSnapshotResponse(BaseModel):
     created_at: datetime
 
 
+ComparisonMetricName = Literal[
+    "views",
+    "engagement_rate",
+    "like_rate",
+    "comment_rate",
+    "share_rate",
+    "save_rate",
+    "completion_rate",
+    "follower_conversion_rate",
+    "average_watch_time_ratio",
+]
+
+ComparisonMetricStatus = Literal["unavailable", "only_available", "leader", "tie"]
+ComparisonAgeStatus = Literal["valid", "captured_before_posting", "unavailable"]
+ComparisonAgeBucket = Literal["under_24h", "1_3d", "3_7d", "7_30d", "30d_plus"]
+
+
+class PerformanceComparisonMetricValues(BaseModel):
+    views: float | None = None
+    engagement_rate: float | None = None
+    like_rate: float | None = None
+    comment_rate: float | None = None
+    share_rate: float | None = None
+    save_rate: float | None = None
+    completion_rate: float | None = None
+    follower_conversion_rate: float | None = None
+    average_watch_time_ratio: float | None = None
+
+
+class PerformanceMetricLeadershipSummary(BaseModel):
+    status: ComparisonMetricStatus
+    comparable_post_count: int
+    leader_post_ids: list[str] = Field(default_factory=list)
+
+
+class PerformanceComparisonSummary(BaseModel):
+    latest_snapshot_ordering: list[str] = Field(default_factory=list)
+    mixed_age_warning: bool = False
+    mixed_age_warning_text: str | None = None
+    has_invalid_capture_age: bool = False
+    invalid_capture_age_warning_text: str | None = None
+    metrics: dict[ComparisonMetricName, PerformanceMetricLeadershipSummary] = Field(default_factory=dict)
+
+
 class PlatformPostResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -203,6 +247,13 @@ class PlatformPostResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     final_asset: dict[str, Any] | None = None
+    attributed_asset_duration_seconds: float | None = None
+    latest_snapshot: PerformanceSnapshotResponse | None = None
+    latest_snapshot_age_seconds: int | None = None
+    latest_snapshot_age_label: str | None = None
+    latest_snapshot_age_bucket: ComparisonAgeBucket | None = None
+    latest_snapshot_age_status: ComparisonAgeStatus = "unavailable"
+    comparison_metrics: PerformanceComparisonMetricValues = Field(default_factory=PerformanceComparisonMetricValues)
     snapshots: list[PerformanceSnapshotResponse] = Field(default_factory=list)
 
 
@@ -210,4 +261,5 @@ class RunPerformanceResponse(BaseModel):
     run_id: str
     topic: str
     current_final_asset_selection: dict[str, Any] | None = None
+    comparison: PerformanceComparisonSummary = Field(default_factory=PerformanceComparisonSummary)
     platform_posts: list[PlatformPostResponse] = Field(default_factory=list)

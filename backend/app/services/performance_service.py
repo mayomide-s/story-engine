@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from typing import Any
 
 from sqlalchemy.exc import IntegrityError
@@ -24,6 +24,22 @@ from app.services.pipeline_service import add_event, serialize_model
 
 class PerformanceConflictError(RuntimeError):
     """Raised when a performance action conflicts with the current run or stored data."""
+
+
+COMPARISON_METRIC_NAMES = [
+    "views",
+    "engagement_rate",
+    "like_rate",
+    "comment_rate",
+    "share_rate",
+    "save_rate",
+    "completion_rate",
+    "follower_conversion_rate",
+    "average_watch_time_ratio",
+]
+ROUNDING_QUANTUM = Decimal("0.0001")
+MIXED_AGE_WARNING_TEXT = "These posts were measured at different ages after posting, so raw comparisons may not reflect equivalent windows."
+INVALID_CAPTURE_AGE_WARNING_TEXT = "One or more snapshots were captured before the recorded posting time. Check the timestamps before relying on the comparison."
 
 
 def _now_utc() -> datetime:
@@ -108,6 +124,141 @@ def _serialize_snapshot(snapshot: PerformanceSnapshot) -> dict[str, Any]:
     return payload
 
 
+def _to_decimal(value: Any) -> Decimal | None:
+    if value is None:
+        return None
+    if isinstance(value, Decimal):
+        return value
+    if isinstance(value, int):
+        return Decimal(value)
+    try:
+        return Decimal(str(value))
+    except Exception:
+        return None
+
+
+def _round_decimal(value: Decimal | None) -> Decimal | None:
+    if value is None:
+        return None
+    return value.quantize(ROUNDING_QUANTUM, rounding=ROUND_HALF_UP)
+
+
+def _rounded_ratio(numerator: Any, denominator: Any) -> Decimal | None:
+    numerator_decimal = _to_decimal(numerator)
+    denominator_decimal = _to_decimal(denominator)
+    if numerator_decimal is None or denominator_decimal is None or denominator_decimal <= 0:
+        return None
+    return _round_decimal(numerator_decimal / denominator_decimal)
+
+
+def _resolve_attributed_asset_duration_seconds(post_payload: dict[str, Any]) -> Decimal | None:
+    final_asset = post_payload.get("final_asset")
+    if isinstance(final_asset, dict):
+        duration = _to_decimal(final_asset.get("duration_seconds"))
+        if duration is not None and duration > 0:
+            return duration
+    metadata = post_payload.get("final_asset_metadata_json")
+    if isinstance(metadata, dict):
+        duration = _to_decimal(metadata.get("duration_seconds"))
+        if duration is not None and duration > 0:
+            return duration
+    return None
+
+
+def _format_age_label(age_seconds: int) -> str:
+    if age_seconds < 3600:
+        minutes = max(1, age_seconds // 60)
+        return f"{minutes}m after posting"
+    if age_seconds < 86400:
+        hours = age_seconds // 3600
+        return f"{hours}h after posting"
+    days = age_seconds // 86400
+    hours = (age_seconds % 86400) // 3600
+    if hours:
+        return f"{days}d {hours}h after posting"
+    return f"{days}d after posting"
+
+
+def _age_bucket(age_seconds: int) -> str:
+    if age_seconds < 86400:
+        return "under_24h"
+    if age_seconds < 259200:
+        return "1_3d"
+    if age_seconds < 604800:
+        return "3_7d"
+    if age_seconds < 2592000:
+        return "7_30d"
+    return "30d_plus"
+
+
+def _build_comparison_metrics(snapshot_payload: dict[str, Any] | None, duration_seconds: Decimal | None) -> dict[str, Decimal | None]:
+    if snapshot_payload is None:
+        return {name: None for name in COMPARISON_METRIC_NAMES}
+
+    views = _to_decimal(snapshot_payload.get("views"))
+    likes = _to_decimal(snapshot_payload.get("likes"))
+    comments = _to_decimal(snapshot_payload.get("comments"))
+    shares = _to_decimal(snapshot_payload.get("shares"))
+    saves = _to_decimal(snapshot_payload.get("saves"))
+    followers_gained = _to_decimal(snapshot_payload.get("followers_gained"))
+    watch_time = _to_decimal(snapshot_payload.get("average_watch_time_seconds"))
+    completion_rate = _round_decimal(_to_decimal(snapshot_payload.get("completion_rate")))
+
+    engagement_rate = None
+    if all(component is not None for component in (likes, comments, shares, saves)) and views is not None and views > 0:
+        engagement_rate = _round_decimal((likes + comments + shares + saves) / views)
+
+    return {
+        "views": _round_decimal(views),
+        "engagement_rate": engagement_rate,
+        "like_rate": _rounded_ratio(likes, views),
+        "comment_rate": _rounded_ratio(comments, views),
+        "share_rate": _rounded_ratio(shares, views),
+        "save_rate": _rounded_ratio(saves, views),
+        "completion_rate": completion_rate,
+        "follower_conversion_rate": _rounded_ratio(followers_gained, views),
+        "average_watch_time_ratio": _rounded_ratio(watch_time, duration_seconds),
+    }
+
+
+def _build_age_payload(posted_at: datetime | None, snapshot_payload: dict[str, Any] | None) -> dict[str, Any]:
+    if posted_at is None or snapshot_payload is None:
+        return {
+            "latest_snapshot_age_seconds": None,
+            "latest_snapshot_age_label": None,
+            "latest_snapshot_age_bucket": None,
+            "latest_snapshot_age_status": "unavailable",
+        }
+    captured_at = snapshot_payload.get("captured_at")
+    if not isinstance(captured_at, datetime):
+        return {
+            "latest_snapshot_age_seconds": None,
+            "latest_snapshot_age_label": None,
+            "latest_snapshot_age_bucket": None,
+            "latest_snapshot_age_status": "unavailable",
+        }
+    age_seconds = int((captured_at - posted_at).total_seconds())
+    if age_seconds < 0:
+        return {
+            "latest_snapshot_age_seconds": None,
+            "latest_snapshot_age_label": "Captured before posting",
+            "latest_snapshot_age_bucket": None,
+            "latest_snapshot_age_status": "captured_before_posting",
+        }
+    return {
+        "latest_snapshot_age_seconds": age_seconds,
+        "latest_snapshot_age_label": _format_age_label(age_seconds),
+        "latest_snapshot_age_bucket": _age_bucket(age_seconds),
+        "latest_snapshot_age_status": "valid",
+    }
+
+
+def _latest_snapshot_payload(snapshot_payloads: list[dict[str, Any]]) -> dict[str, Any] | None:
+    if not snapshot_payloads:
+        return None
+    return snapshot_payloads[0]
+
+
 def _serialize_platform_post(db: Session, post: PlatformPost) -> dict[str, Any]:
     payload = serialize_model(post) or {}
     payload["final_asset"] = serialize_model(db.get(Asset, post.final_asset_id))
@@ -115,16 +266,78 @@ def _serialize_platform_post(db: Session, post: PlatformPost) -> dict[str, Any]:
     payload["posted_at"] = _coerce_stored_datetime(post.posted_at)
     payload["created_at"] = _coerce_stored_datetime(post.created_at)
     payload["updated_at"] = _coerce_stored_datetime(post.updated_at)
-    payload["snapshots"] = [
+    payload["snapshots"] = snapshot_payloads = [
         _serialize_snapshot(snapshot)
         for snapshot in (
             db.query(PerformanceSnapshot)
             .filter(PerformanceSnapshot.platform_post_id == post.id)
-            .order_by(PerformanceSnapshot.captured_at.desc(), PerformanceSnapshot.created_at.desc())
+            .order_by(PerformanceSnapshot.captured_at.desc(), PerformanceSnapshot.created_at.desc(), PerformanceSnapshot.id.desc())
             .all()
         )
     ]
+    latest_snapshot = _latest_snapshot_payload(snapshot_payloads)
+    attributed_duration = _resolve_attributed_asset_duration_seconds(payload)
+    payload["attributed_asset_duration_seconds"] = attributed_duration
+    payload["latest_snapshot"] = latest_snapshot
+    payload.update(_build_age_payload(payload["posted_at"], latest_snapshot))
+    payload["comparison_metrics"] = _build_comparison_metrics(latest_snapshot, attributed_duration)
     return payload
+
+
+def _build_comparison_summary(post_payloads: list[dict[str, Any]]) -> dict[str, Any]:
+    valid_age_seconds = [
+        int(post["latest_snapshot_age_seconds"])
+        for post in post_payloads
+        if post.get("latest_snapshot_age_status") == "valid" and post.get("latest_snapshot_age_seconds") is not None
+    ]
+    valid_age_buckets = {
+        str(post["latest_snapshot_age_bucket"])
+        for post in post_payloads
+        if post.get("latest_snapshot_age_status") == "valid" and post.get("latest_snapshot_age_bucket")
+    }
+    has_invalid_capture_age = any(post.get("latest_snapshot_age_status") == "captured_before_posting" for post in post_payloads)
+    mixed_age_warning = False
+    if len(valid_age_seconds) >= 2:
+        mixed_age_warning = len(valid_age_buckets) > 1 or (max(valid_age_seconds) - min(valid_age_seconds)) > 86400
+
+    metrics_summary: dict[str, Any] = {}
+    for metric_name in COMPARISON_METRIC_NAMES:
+        comparable = [
+            (post["id"], post.get("comparison_metrics", {}).get(metric_name))
+            for post in post_payloads
+            if post.get("comparison_metrics", {}).get(metric_name) is not None
+        ]
+        comparable_post_count = len(comparable)
+        if comparable_post_count == 0:
+            metrics_summary[metric_name] = {
+                "status": "unavailable",
+                "comparable_post_count": 0,
+                "leader_post_ids": [],
+            }
+            continue
+        if comparable_post_count == 1:
+            metrics_summary[metric_name] = {
+                "status": "only_available",
+                "comparable_post_count": 1,
+                "leader_post_ids": [comparable[0][0]],
+            }
+            continue
+        max_value = max(value for _post_id, value in comparable)
+        leader_post_ids = [post_id for post_id, value in comparable if value == max_value]
+        metrics_summary[metric_name] = {
+            "status": "tie" if len(leader_post_ids) > 1 else "leader",
+            "comparable_post_count": comparable_post_count,
+            "leader_post_ids": leader_post_ids,
+        }
+
+    return {
+        "latest_snapshot_ordering": ["captured_at_desc", "created_at_desc", "id_desc"],
+        "mixed_age_warning": mixed_age_warning,
+        "mixed_age_warning_text": MIXED_AGE_WARNING_TEXT if mixed_age_warning else None,
+        "has_invalid_capture_age": has_invalid_capture_age,
+        "invalid_capture_age_warning_text": INVALID_CAPTURE_AGE_WARNING_TEXT if has_invalid_capture_age else None,
+        "metrics": metrics_summary,
+    }
 
 
 def get_run_performance_data(db: Session, run_id: str) -> dict[str, Any]:
@@ -140,7 +353,8 @@ def get_run_performance_data(db: Session, run_id: str) -> dict[str, Any]:
         run_id=run.id,
         topic=run.topic,
         current_final_asset_selection=current_selection,
-        platform_posts=[_serialize_platform_post(db, post) for post in posts],
+        comparison=_build_comparison_summary(serialized_posts := [_serialize_platform_post(db, post) for post in posts]),
+        platform_posts=serialized_posts,
     )
     return payload.model_dump(mode="json")
 
