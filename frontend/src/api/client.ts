@@ -198,6 +198,49 @@ export type AssetExportPack = {
   };
 };
 
+export type PerformanceSnapshot = {
+  id: string;
+  platform_post_id: string;
+  captured_at: string;
+  views?: number | null;
+  likes?: number | null;
+  comments?: number | null;
+  shares?: number | null;
+  saves?: number | null;
+  average_watch_time_seconds?: number | null;
+  completion_rate?: number | null;
+  followers_gained?: number | null;
+  notes?: string | null;
+  created_at: string;
+};
+
+export type PlatformPost = {
+  id: string;
+  pipeline_run_id: string;
+  manual_post_package_id: string;
+  final_asset_id: string;
+  final_asset_source: "source_video" | "narration_render";
+  platform: "tiktok" | "instagram" | "youtube" | "other";
+  post_url: string;
+  posted_at: string;
+  custom_platform_name?: string | null;
+  final_narration_render_id?: string | null;
+  final_asset_selection_revision?: number | null;
+  final_asset_metadata_json?: Record<string, unknown> | null;
+  notes?: string | null;
+  created_at: string;
+  updated_at: string;
+  final_asset?: Record<string, unknown> | null;
+  snapshots: PerformanceSnapshot[];
+};
+
+export type RunPerformance = {
+  run_id: string;
+  topic: string;
+  current_final_asset_selection: FinalAssetSelection | null;
+  platform_posts: PlatformPost[];
+};
+
 export type HealthCheck = {
   status: string;
 };
@@ -264,7 +307,21 @@ async function request<T>(path: string, options?: RequestInit, baseUrl = API_BAS
     try {
       const payload = await response.json();
       if (payload?.detail) {
-        detail = String(payload.detail);
+        if (typeof payload.detail === "string") {
+          detail = payload.detail;
+        } else if (Array.isArray(payload.detail)) {
+          detail = payload.detail
+            .map((item: unknown) => {
+              if (typeof item === "string") return item;
+              if (item && typeof item === "object" && "msg" in item) {
+                return String(item.msg);
+              }
+              return JSON.stringify(item);
+            })
+            .join("; ");
+        } else {
+          detail = JSON.stringify(payload.detail);
+        }
       }
     } catch {
       // ignore non-json error bodies
@@ -435,6 +492,22 @@ export const api = {
   updateAssetManualPosting: (runId: string, payload: Record<string, unknown>) =>
     request<AssetExportPack>(`/asset-library/${runId}/manual-posting`, {
       method: "PATCH",
+      body: JSON.stringify(payload)
+    }),
+  getRunPerformance: (runId: string) => request<RunPerformance>(`/pipeline-runs/${runId}/performance`),
+  createPlatformPost: (runId: string, payload: Record<string, unknown>) =>
+    request<PlatformPost>(`/pipeline-runs/${runId}/performance/posts`, {
+      method: "POST",
+      body: JSON.stringify(payload)
+    }),
+  updatePlatformPost: (runId: string, postId: string, payload: Record<string, unknown>) =>
+    request<PlatformPost>(`/pipeline-runs/${runId}/performance/posts/${postId}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload)
+    }),
+  addPerformanceSnapshot: (runId: string, postId: string, payload: Record<string, unknown>) =>
+    request<PerformanceSnapshot>(`/pipeline-runs/${runId}/performance/posts/${postId}/snapshots`, {
+      method: "POST",
       body: JSON.stringify(payload)
     }),
 };
