@@ -685,3 +685,250 @@ def test_get_run_performance_does_not_mutate_rows(client):
         assert db.query(PipelineEvent).filter(PipelineEvent.pipeline_run_id == run_id).count() == event_count
         assert package.updated_at == package_updated_at
         assert post.updated_at == post_updated_at
+
+
+def test_manual_winner_defaults_are_exposed_without_selection(client):
+    run_id, _payload = _create_completed_run(client)
+
+    performance = client.get(f"/api/pipeline-runs/{run_id}/performance")
+    run_detail = client.get(f"/api/pipeline-runs/{run_id}")
+    library_detail = client.get(f"/api/asset-library/{run_id}")
+
+    assert performance.status_code == 200
+    assert run_detail.status_code == 200
+    assert library_detail.status_code == 200
+    assert performance.json()["winner_selection"] == {
+        "platform_post_id": None,
+        "selected_at": None,
+        "selection_revision": 0,
+        "post": None,
+    }
+    assert run_detail.json()["winner_selection"] == performance.json()["winner_selection"]
+    assert library_detail.json()["winner_selection"] == performance.json()["winner_selection"]
+
+
+def test_select_replace_and_clear_manual_winner(client):
+    run_id, _payload = _create_completed_run(client)
+    first_post = client.post(
+        f"/api/pipeline-runs/{run_id}/performance/posts",
+        json={"platform": "tiktok", "post_url": "https://www.tiktok.com/@storyengine/video/winner-a", "posted_at": "2026-07-11T10:00:00+00:00"},
+    )
+    second_post = client.post(
+        f"/api/pipeline-runs/{run_id}/performance/posts",
+        json={"platform": "instagram", "post_url": "https://instagram.com/reel/winner-b", "posted_at": "2026-07-11T11:00:00+00:00"},
+    )
+    first_id = first_post.json()["id"]
+    second_id = second_post.json()["id"]
+
+    selected = client.put(
+        f"/api/pipeline-runs/{run_id}/performance/winner",
+        json={"platform_post_id": first_id},
+    )
+    assert selected.status_code == 200
+    winner = selected.json()["winner_selection"]
+    assert winner["platform_post_id"] == first_id
+    assert winner["selection_revision"] == 1
+    assert winner["post"]["id"] == first_id
+    assert winner["post"]["platform"] == "tiktok"
+    first_selected_at = winner["selected_at"]
+    assert first_selected_at is not None
+
+    replaced = client.put(
+        f"/api/pipeline-runs/{run_id}/performance/winner",
+        json={"platform_post_id": second_id},
+    )
+    assert replaced.status_code == 200
+    replaced_winner = replaced.json()["winner_selection"]
+    assert replaced_winner["platform_post_id"] == second_id
+    assert replaced_winner["selection_revision"] == 2
+    assert replaced_winner["post"]["id"] == second_id
+    assert replaced_winner["selected_at"] != first_selected_at
+
+    cleared = client.delete(f"/api/pipeline-runs/{run_id}/performance/winner")
+    assert cleared.status_code == 200
+    assert cleared.json()["winner_selection"] == {
+        "platform_post_id": None,
+        "selected_at": None,
+        "selection_revision": 3,
+        "post": None,
+    }
+
+    with SessionLocal() as db:
+        package = db.get(ManualPostPackage, cleared.json()["platform_posts"][0]["manual_post_package_id"])
+        assert package.winner_platform_post_id is None
+        assert package.winner_selected_at is None
+        assert package.winner_selection_revision == 3
+        winner_events = [
+            event.event_type
+            for event in db.query(PipelineEvent)
+            .filter(PipelineEvent.pipeline_run_id == run_id)
+            .order_by(PipelineEvent.created_at.asc())
+            .all()
+            if event.event_type.startswith("performance.winner_")
+        ]
+        assert winner_events == [
+            "performance.winner_selected",
+            "performance.winner_changed",
+            "performance.winner_cleared",
+        ]
+
+
+def test_manual_winner_selection_and_clear_are_idempotent(client):
+    run_id, _payload = _create_completed_run(client)
+    created = client.post(
+        f"/api/pipeline-runs/{run_id}/performance/posts",
+        json={"platform": "youtube", "post_url": "https://youtube.com/shorts/winner-idempotent", "posted_at": "2026-07-11T10:00:00+00:00"},
+    )
+    post_id = created.json()["id"]
+
+    first = client.put(
+        f"/api/pipeline-runs/{run_id}/performance/winner",
+        json={"platform_post_id": post_id},
+    )
+    second = client.put(
+        f"/api/pipeline-runs/{run_id}/performance/winner",
+        json={"platform_post_id": post_id},
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert second.json()["winner_selection"] == first.json()["winner_selection"]
+
+    cleared = client.delete(f"/api/pipeline-runs/{run_id}/performance/winner")
+    cleared_again = client.delete(f"/api/pipeline-runs/{run_id}/performance/winner")
+    assert cleared.status_code == 200
+    assert cleared_again.status_code == 200
+    assert cleared_again.json()["winner_selection"] == cleared.json()["winner_selection"]
+
+    with SessionLocal() as db:
+        winner_events = [
+            event.event_type
+            for event in db.query(PipelineEvent)
+            .filter(PipelineEvent.pipeline_run_id == run_id)
+            .all()
+            if event.event_type.startswith("performance.winner_")
+        ]
+        assert winner_events.count("performance.winner_selected") == 1
+        assert winner_events.count("performance.winner_cleared") == 1
+        assert "performance.winner_changed" not in winner_events
+
+
+def test_manual_winner_rejects_missing_and_cross_run_posts(client):
+    run_id, _payload = _create_completed_run(client)
+    other_run_id, _ = _create_completed_run(client)
+    other_post = client.post(
+        f"/api/pipeline-runs/{other_run_id}/performance/posts",
+        json={"platform": "other", "custom_platform_name": "Cross", "post_url": "https://example.com/cross-winner", "posted_at": "2026-07-11T10:00:00+00:00"},
+    )
+    other_post_id = other_post.json()["id"]
+
+    missing = client.put(
+        f"/api/pipeline-runs/{run_id}/performance/winner",
+        json={"platform_post_id": "00000000-0000-0000-0000-000000000000"},
+    )
+    cross_run = client.put(
+        f"/api/pipeline-runs/{run_id}/performance/winner",
+        json={"platform_post_id": other_post_id},
+    )
+
+    assert missing.status_code == 404
+    assert cross_run.status_code == 404
+
+
+def test_manual_winner_rejects_malformed_uuid(client):
+    run_id, _payload = _create_completed_run(client)
+
+    response = client.put(
+        f"/api/pipeline-runs/{run_id}/performance/winner",
+        json={"platform_post_id": "not-a-uuid"},
+    )
+
+    assert response.status_code == 422
+
+
+def test_manual_winner_rejects_incomplete_run_and_missing_package(client):
+    created = client.post("/api/pipeline-runs", json={"topic": "Winner Incomplete", "auto_mode": False})
+    run_id = created.json()["pipeline_run"]["id"]
+
+    incomplete = client.put(
+        f"/api/pipeline-runs/{run_id}/performance/winner",
+        json={"platform_post_id": "00000000-0000-0000-0000-000000000000"},
+    )
+    assert incomplete.status_code == 409
+
+    completed_run_id, _payload = _create_completed_run(client)
+    with SessionLocal() as db:
+        from app.models import PipelineRun
+
+        run = db.get(PipelineRun, completed_run_id)
+        run.manual_post_package_id = None
+        db.add(run)
+        db.commit()
+
+    no_package = client.delete(f"/api/pipeline-runs/{completed_run_id}/performance/winner")
+    assert no_package.status_code == 409
+
+
+def test_manual_winner_does_not_change_comparison_attribution_or_final_asset_selection(client):
+    run_id, _payload = _create_completed_run(client)
+    first_post = client.post(
+        f"/api/pipeline-runs/{run_id}/performance/posts",
+        json={"platform": "tiktok", "post_url": "https://www.tiktok.com/@storyengine/video/winner-compare-a", "posted_at": "2026-07-11T10:00:00+00:00"},
+    )
+    second_post = client.post(
+        f"/api/pipeline-runs/{run_id}/performance/posts",
+        json={"platform": "instagram", "post_url": "https://instagram.com/reel/winner-compare-b", "posted_at": "2026-07-11T11:00:00+00:00"},
+    )
+    first_id = first_post.json()["id"]
+    second_id = second_post.json()["id"]
+    client.post(
+        f"/api/pipeline-runs/{run_id}/performance/posts/{first_id}/snapshots",
+        json={"captured_at": "2026-07-11T12:00:00+00:00", "views": 100, "likes": 10, "comments": 5, "shares": 2, "saves": 3},
+    )
+    client.post(
+        f"/api/pipeline-runs/{run_id}/performance/posts/{second_id}/snapshots",
+        json={"captured_at": "2026-07-11T13:00:00+00:00", "views": 200, "likes": 20, "comments": 10, "shares": 4, "saves": 6},
+    )
+
+    before = client.get(f"/api/pipeline-runs/{run_id}/performance").json()
+    before_comparison = before["comparison"]
+    before_posts = {post["id"]: post for post in before["platform_posts"]}
+    before_final_selection = before["current_final_asset_selection"]
+
+    selected = client.put(
+        f"/api/pipeline-runs/{run_id}/performance/winner",
+        json={"platform_post_id": first_id},
+    )
+    assert selected.status_code == 200
+    after = selected.json()
+    after_posts = {post["id"]: post for post in after["platform_posts"]}
+
+    assert after["comparison"] == before_comparison
+    assert after["current_final_asset_selection"] == before_final_selection
+    assert after_posts[first_id]["final_asset_id"] == before_posts[first_id]["final_asset_id"]
+    assert after_posts[first_id]["comparison_metrics"] == before_posts[first_id]["comparison_metrics"]
+    assert after_posts[second_id]["comparison_metrics"] == before_posts[second_id]["comparison_metrics"]
+
+
+def test_manual_winner_surfaces_in_run_detail_and_asset_library_detail(client):
+    run_id, _payload = _create_completed_run(client)
+    created = client.post(
+        f"/api/pipeline-runs/{run_id}/performance/posts",
+        json={"platform": "other", "custom_platform_name": "Acceptance Network", "post_url": "https://example.com/winner-summary", "posted_at": "2026-07-11T10:00:00+00:00"},
+    )
+    post_id = created.json()["id"]
+
+    selected = client.put(
+        f"/api/pipeline-runs/{run_id}/performance/winner",
+        json={"platform_post_id": post_id},
+    )
+    assert selected.status_code == 200
+    expected = selected.json()["winner_selection"]
+
+    run_detail = client.get(f"/api/pipeline-runs/{run_id}")
+    library_detail = client.get(f"/api/asset-library/{run_id}")
+
+    assert run_detail.status_code == 200
+    assert library_detail.status_code == 200
+    assert run_detail.json()["winner_selection"] == expected
+    assert library_detail.json()["winner_selection"] == expected
