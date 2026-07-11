@@ -272,6 +272,15 @@ class ManualPostPackage(Base):
     final_asset_selection_revision: Mapped[int] = mapped_column(Integer, default=1)
     final_asset_selected_at: Mapped[datetime | None] = mapped_column(DateTime)
     final_asset_metadata_json: Mapped[dict | None] = mapped_column(JSON)
+    winner_platform_post_id: Mapped[str | None] = mapped_column(
+        ForeignKey(
+            "platform_posts.id",
+            name="fk_manual_post_packages_winner_platform_post_id_platform_posts",
+            ondelete="RESTRICT",
+        )
+    )
+    winner_selected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    winner_selection_revision: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     tiktok_post_url: Mapped[str | None] = mapped_column(Text)
     instagram_post_url: Mapped[str | None] = mapped_column(Text)
     youtube_post_url: Mapped[str | None] = mapped_column(Text)

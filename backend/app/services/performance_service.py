@@ -18,8 +18,10 @@ from app.models import (
     PlatformPost,
 )
 from app.schemas.performance import PlatformPostCreatePayload, PlatformPostUpdatePayload, RunPerformanceResponse
+from app.schemas.performance import PerformanceWinnerSelectionPayload
 from app.services.final_asset_service import get_final_asset_selection_payload, get_selected_final_asset
 from app.services.pipeline_service import add_event, serialize_model
+from app.services.performance_winner_service import build_winner_selection_payload
 
 
 class PerformanceConflictError(RuntimeError):
@@ -353,10 +355,79 @@ def get_run_performance_data(db: Session, run_id: str) -> dict[str, Any]:
         run_id=run.id,
         topic=run.topic,
         current_final_asset_selection=current_selection,
+        winner_selection=build_winner_selection_payload(db, run, package),
         comparison=_build_comparison_summary(serialized_posts := [_serialize_platform_post(db, post) for post in posts]),
         platform_posts=serialized_posts,
     )
     return payload.model_dump(mode="json")
+
+
+def select_winner_platform_post(db: Session, run_id: str, payload: PerformanceWinnerSelectionPayload) -> dict[str, Any]:
+    run, package = _require_completed_run(db, run_id)
+    post_id = str(payload.platform_post_id)
+    post = db.get(PlatformPost, post_id)
+    if post is None or post.pipeline_run_id != run.id:
+        raise ValueError("Platform post not found")
+    if post.manual_post_package_id != package.id:
+        raise ValueError("Platform post not found")
+    if package.winner_platform_post_id == post.id:
+        return get_run_performance_data(db, run_id)
+
+    previous_post_id = package.winner_platform_post_id
+    now = _now_utc()
+    package.winner_platform_post_id = post.id
+    package.winner_selected_at = now
+    package.winner_selection_revision = int(package.winner_selection_revision or 0) + 1
+    db.add(package)
+    db.flush()
+
+    add_event(
+        db,
+        run.id,
+        "performance.winner_selected" if previous_post_id is None else "performance.winner_changed",
+        "Manual performance winner selected" if previous_post_id is None else "Manual performance winner changed",
+        stage=run.current_stage.value if hasattr(run.current_stage, "value") else str(run.current_stage),
+        metadata={
+            "run_id": run.id,
+            "previous_post_id": previous_post_id,
+            "new_post_id": post.id,
+            "winner_selection_revision": package.winner_selection_revision,
+            "selected_at": now.isoformat(),
+        },
+    )
+    db.commit()
+    return get_run_performance_data(db, run_id)
+
+
+def clear_winner_platform_post(db: Session, run_id: str) -> dict[str, Any]:
+    run, package = _require_completed_run(db, run_id)
+    if not package.winner_platform_post_id:
+        return get_run_performance_data(db, run_id)
+
+    previous_post_id = package.winner_platform_post_id
+    now = _now_utc()
+    package.winner_platform_post_id = None
+    package.winner_selected_at = None
+    package.winner_selection_revision = int(package.winner_selection_revision or 0) + 1
+    db.add(package)
+    db.flush()
+
+    add_event(
+        db,
+        run.id,
+        "performance.winner_cleared",
+        "Manual performance winner cleared",
+        stage=run.current_stage.value if hasattr(run.current_stage, "value") else str(run.current_stage),
+        metadata={
+            "run_id": run.id,
+            "previous_post_id": previous_post_id,
+            "new_post_id": None,
+            "winner_selection_revision": package.winner_selection_revision,
+            "cleared_at": now.isoformat(),
+        },
+    )
+    db.commit()
+    return get_run_performance_data(db, run_id)
 
 
 def create_platform_post(db: Session, run_id: str, payload: PlatformPostCreatePayload) -> dict[str, Any]:

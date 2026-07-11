@@ -4,6 +4,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any, Literal
 from urllib.parse import urlparse
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -184,6 +185,23 @@ class PerformanceSnapshotResponse(BaseModel):
     created_at: datetime
 
 
+class WinnerPostSummary(BaseModel):
+    id: str
+    platform: str
+    custom_platform_name: str | None = None
+    post_url: str
+    posted_at: datetime
+    final_asset_id: str
+    final_asset_source: str
+
+
+class WinnerSelectionSummary(BaseModel):
+    platform_post_id: str | None = None
+    selected_at: datetime | None = None
+    selection_revision: int = 0
+    post: WinnerPostSummary | None = None
+
+
 ComparisonMetricName = Literal[
     "views",
     "engagement_rate",
@@ -261,5 +279,10 @@ class RunPerformanceResponse(BaseModel):
     run_id: str
     topic: str
     current_final_asset_selection: dict[str, Any] | None = None
+    winner_selection: WinnerSelectionSummary = Field(default_factory=WinnerSelectionSummary)
     comparison: PerformanceComparisonSummary = Field(default_factory=PerformanceComparisonSummary)
     platform_posts: list[PlatformPostResponse] = Field(default_factory=list)
+
+
+class PerformanceWinnerSelectionPayload(BaseModel):
+    platform_post_id: UUID

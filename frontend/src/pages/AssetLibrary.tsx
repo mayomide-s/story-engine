@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { api, AssetLibraryDetail, AssetLibraryItem } from "../api/client";
+import { PerformanceWinnerSummary } from "../components/PerformanceWinnerSummary";
 import { ExportPackPanel } from "../components/ExportPackPanel";
 import { normalizeQualityChecklist } from "../qualityChecklist";
 import { formatProvider, formatRunStatus, formatVideoStatus } from "../utils/display";
@@ -111,6 +112,7 @@ export function AssetLibraryPage() {
   const selectedItem = useMemo(() => items.find((item) => item.run_id === selectedRunId) ?? null, [items, selectedRunId]);
   const manualPackage = detail?.manual_post_package as Record<string, unknown> | null;
   const finalSelection = detail?.final_asset_selection ?? null;
+  const winnerSelection = detail?.winner_selection ?? null;
   const platformVariants = (manualPackage?.platform_variants_json as Record<string, unknown> | undefined) ?? {};
   const instagramVariant = platformVariants.instagram as Record<string, unknown> | undefined;
   const tiktokVariant = platformVariants.tiktok as Record<string, unknown> | undefined;
@@ -279,6 +281,12 @@ export function AssetLibraryPage() {
                 <p>The original silent source video is currently selected as the final asset.</p>
               </div>
             )}
+            <PerformanceWinnerSummary
+              winnerSelection={winnerSelection}
+              performanceHref={selectedItem ? `/performance/${selectedItem.run_id}` : undefined}
+              heading="Manual winner"
+              compact
+            />
             {detail.idea ? (
               <div className="copy-block">
                 <div className="content-meta">

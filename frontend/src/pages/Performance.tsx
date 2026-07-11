@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
 import { api, PerformanceComparisonMetricName, PlatformPost, RunPerformance } from "../api/client";
+import { PerformanceWinnerSummary } from "../components/PerformanceWinnerSummary";
 
 const PLATFORM_OPTIONS = [
   { value: "tiktok", label: "TikTok" },
@@ -138,6 +139,8 @@ export function PerformancePage() {
   const [snapshotFormErrors, setSnapshotFormErrors] = useState<Record<string, string>>({});
   const [snapshotForms, setSnapshotForms] = useState<Record<string, SnapshotFormState>>({});
   const [editForms, setEditForms] = useState<Record<string, typeof postForm>>({});
+  const [winnerError, setWinnerError] = useState("");
+  const [winnerMutation, setWinnerMutation] = useState<{ action: "select" | "replace" | "clear"; postId?: string } | null>(null);
   const [isCompactComparison, setIsCompactComparison] = useState(() =>
     typeof window !== "undefined" ? window.innerWidth < 768 : false,
   );
@@ -195,6 +198,7 @@ export function PerformancePage() {
   }, []);
 
   const currentFinalSelection = data?.current_final_asset_selection ?? null;
+  const winnerSelection = data?.winner_selection ?? null;
   const canTrackPerformance = Boolean(data?.run_id);
   const comparison = data?.comparison ?? null;
 
@@ -359,6 +363,44 @@ export function PerformancePage() {
     }
   }
 
+  async function handleSelectWinner(post: PlatformPost) {
+    if (!runId) return;
+    const currentWinnerPostId = winnerSelection?.platform_post_id ?? null;
+    const isReplacing = Boolean(currentWinnerPostId && currentWinnerPostId !== post.id);
+    if (isReplacing) {
+      const confirmed = window.confirm("Replace the current manual winner with this post? Metric leaders will remain unchanged.");
+      if (!confirmed) return;
+    }
+
+    setWinnerMutation({ action: isReplacing ? "replace" : "select", postId: post.id });
+    setWinnerError("");
+    try {
+      const response = await api.selectPerformanceWinner(runId, post.id);
+      setData(response);
+    } catch (requestError) {
+      setWinnerError(requestError instanceof Error ? requestError.message : "Failed to update the manual winner.");
+    } finally {
+      setWinnerMutation(null);
+    }
+  }
+
+  async function handleClearWinner() {
+    if (!runId || !winnerSelection?.platform_post_id) return;
+    const confirmed = window.confirm("Clear the current manual winner? Comparison data and snapshots will remain unchanged.");
+    if (!confirmed) return;
+
+    setWinnerMutation({ action: "clear", postId: winnerSelection.platform_post_id });
+    setWinnerError("");
+    try {
+      const response = await api.clearPerformanceWinner(runId);
+      setData(response);
+    } catch (requestError) {
+      setWinnerError(requestError instanceof Error ? requestError.message : "Failed to clear the manual winner.");
+    } finally {
+      setWinnerMutation(null);
+    }
+  }
+
   return (
     <div className="page stack">
       <section className="panel">
@@ -391,6 +433,24 @@ export function PerformancePage() {
           <h3>Comparison Snapshot</h3>
           <span>{sortedPosts.length} post{sortedPosts.length === 1 ? "" : "s"}</span>
         </div>
+        <PerformanceWinnerSummary
+          winnerSelection={winnerSelection}
+          performanceHref={runId ? `/performance/${runId}` : undefined}
+          heading="Manual winner"
+        />
+        {winnerSelection?.post ? (
+          <div className="button-row">
+            <button
+              type="button"
+              className="secondary"
+              onClick={handleClearWinner}
+              disabled={winnerMutation !== null}
+            >
+              {winnerMutation?.action === "clear" ? "Clearing..." : "Clear winner"}
+            </button>
+          </div>
+        ) : null}
+        {winnerError ? <p className="error-text">{winnerError}</p> : null}
         <p className="subtle">These comparisons describe the recorded results. They do not prove that a specific topic, format, or creative choice caused the difference.</p>
         {comparison?.mixed_age_warning ? (
           <div className="notice-card">
@@ -413,12 +473,33 @@ export function PerformancePage() {
               <div key={`comparison-${post.id}`} className="panel inset stack">
                 <div className="panel-header">
                   <strong>{formatPlatformLabel(post)}</strong>
-                  <span>{formatTimestamp(post.latest_snapshot?.captured_at ?? null)}</span>
+                  <div className="button-row">
+                    {winnerSelection?.platform_post_id === post.id ? <span className="status-pill success">Manual winner</span> : null}
+                    <span>{formatTimestamp(post.latest_snapshot?.captured_at ?? null)}</span>
+                  </div>
                 </div>
                 <div className="key-grid">
                   <div><span>Age at capture</span><strong>{formatAgeLabel(post)}</strong></div>
                   <div><span>Attributed duration</span><strong>{post.attributed_asset_duration_seconds ?? "â€”"}</strong></div>
                 </div>
+                {winnerSelection?.platform_post_id !== post.id ? (
+                  <div className="button-row">
+                    <button
+                      type="button"
+                      className="secondary"
+                      onClick={() => handleSelectWinner(post)}
+                      disabled={winnerMutation !== null}
+                    >
+                      {winnerMutation?.postId === post.id
+                        ? winnerMutation.action === "replace"
+                          ? "Changing..."
+                          : "Selecting..."
+                        : winnerSelection?.platform_post_id
+                          ? "Change winner"
+                          : "Mark as winner"}
+                    </button>
+                  </div>
+                ) : null}
                 <div className="stack compact">
                   {COMPARISON_COLUMNS.map((column) => {
                     const indicator = getMetricIndicator(post.id, column.key);
@@ -442,6 +523,7 @@ export function PerformancePage() {
                   <th>Post</th>
                   <th>Latest capture</th>
                   <th>Age at capture</th>
+                  <th>Manual winner</th>
                   {COMPARISON_COLUMNS.map((column) => (
                     <th key={column.key}>{column.label}</th>
                   ))}
@@ -453,6 +535,26 @@ export function PerformancePage() {
                     <td>{formatPlatformLabel(post)}</td>
                     <td>{formatTimestamp(post.latest_snapshot?.captured_at ?? null)}</td>
                     <td>{formatAgeLabel(post)}</td>
+                    <td>
+                      {winnerSelection?.platform_post_id === post.id ? (
+                        <span className="status-pill success">Manual winner</span>
+                      ) : (
+                        <button
+                          type="button"
+                          className="secondary"
+                          onClick={() => handleSelectWinner(post)}
+                          disabled={winnerMutation !== null}
+                        >
+                          {winnerMutation?.postId === post.id
+                            ? winnerMutation.action === "replace"
+                              ? "Changing..."
+                              : "Selecting..."
+                            : winnerSelection?.platform_post_id
+                              ? "Change winner"
+                              : "Mark as winner"}
+                        </button>
+                      )}
+                    </td>
                     {COMPARISON_COLUMNS.map((column) => {
                       const indicator = getMetricIndicator(post.id, column.key);
                       return (
@@ -558,6 +660,23 @@ export function PerformancePage() {
                     <p className="subtle">{formatTimestamp(post.posted_at)}</p>
                   </div>
                   <div className="button-row">
+                    {winnerSelection?.platform_post_id === post.id ? <span className="status-pill success">Manual winner</span> : null}
+                    {winnerSelection?.platform_post_id !== post.id ? (
+                      <button
+                        className="secondary"
+                        type="button"
+                        onClick={() => handleSelectWinner(post)}
+                        disabled={winnerMutation !== null}
+                      >
+                        {winnerMutation?.postId === post.id
+                          ? winnerMutation.action === "replace"
+                            ? "Changing..."
+                            : "Selecting..."
+                          : winnerSelection?.platform_post_id
+                            ? "Change winner"
+                            : "Mark as winner"}
+                      </button>
+                    ) : null}
                     <a className="inline-link" href={post.post_url} target="_blank" rel="noreferrer">Open Post</a>
                     <button className="secondary" type="button" onClick={() => setEditingPostId(isEditing ? null : post.id)}>
                       {isEditing ? "Close Edit" : "Edit"}
