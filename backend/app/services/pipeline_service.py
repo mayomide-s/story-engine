@@ -37,6 +37,7 @@ from app.schemas.pipeline_runs import (
     StoryboardPatch,
 )
 from app.services.final_asset_service import ensure_manual_package_final_asset_defaults, get_final_asset_selection_payload, get_source_video_asset
+from app.services.performance_learning_service import build_performance_learnings_summary
 from app.services.performance_winner_service import build_winner_selection_payload
 from app.services.providers import get_llm_provider, get_storage_provider, get_video_provider
 from app.services.narration_service import build_narration_payloads
@@ -2199,6 +2200,7 @@ def get_pipeline_run_detail(db: Session, run_id: str) -> dict[str, Any]:
         "narration_renders": narration_payloads["narration_renders"],
         "final_asset_selection": get_final_asset_selection_payload(db, run, manual_package),
         "winner_selection": build_winner_selection_payload(db, run, manual_package),
+        "performance_learnings_summary": build_performance_learnings_summary(db, run.id),
         "review_sections": review_sections,
         "review_preflight": preflight,
     }

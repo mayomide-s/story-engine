@@ -1,6 +1,13 @@
+import os
+import tempfile
+
+from sqlalchemy import create_engine, inspect
+
 from app.config import get_settings
+from app.db.base import Base
 from app.db.session import SessionLocal
-from app.models import Asset, ManualPostPackage, PipelineEvent, PlatformPost
+from app.models import Asset, ManualPostPackage, PipelineEvent, PipelineRun, PlatformPost
+from app.models.entities import PerformanceLearning
 
 
 def _create_completed_run(client):
@@ -932,3 +939,431 @@ def test_manual_winner_surfaces_in_run_detail_and_asset_library_detail(client):
     assert library_detail.status_code == 200
     assert run_detail.json()["winner_selection"] == expected
     assert library_detail.json()["winner_selection"] == expected
+
+
+def _create_learning_platform_post(client, run_id: str, *, platform: str = "tiktok", url_suffix: str = "learning", custom_platform_name: str | None = None):
+    payload = {
+        "platform": platform,
+        "post_url": f"https://example.com/{url_suffix}",
+        "posted_at": "2026-07-11T10:00:00+00:00",
+    }
+    if platform == "other":
+        payload["custom_platform_name"] = custom_platform_name or "Acceptance Network"
+    response = client.post(f"/api/pipeline-runs/{run_id}/performance/posts", json=payload)
+    assert response.status_code == 201
+    return response.json()
+
+
+def _create_learning(client, run_id: str, **overrides):
+    payload = {
+        "learning_type": "observation",
+        "observation": "Useful observation",
+        "evidence": "Observed across manual snapshots.",
+        "next_action": "Test a tighter hook.",
+        "platform_post_id": None,
+    }
+    payload.update(overrides)
+    return client.post(f"/api/pipeline-runs/{run_id}/performance/learnings", json=payload)
+
+
+def test_performance_learning_schema_defaults_and_direct_create_all():
+    temp_db = tempfile.NamedTemporaryFile(delete=False, suffix=".db")
+    temp_db.close()
+    try:
+        engine = create_engine(f"sqlite:///{temp_db.name}")
+        Base.metadata.create_all(bind=engine)
+        inspector = inspect(engine)
+        columns = {column["name"]: column for column in inspector.get_columns("performance_learnings")}
+        assert columns["pipeline_run_id"]["nullable"] is False
+        assert columns["platform_post_id"]["nullable"] is True
+        assert columns["observation"]["nullable"] is False
+        assert columns["is_archived"]["default"] in {"0", "false", "FALSE", "False", None}
+        index_names = {index["name"] for index in inspector.get_indexes("performance_learnings")}
+        assert "ix_performance_learnings_pipeline_run_id" in index_names
+        assert "ix_performance_learnings_platform_post_id" in index_names
+        assert "ix_performance_learnings_learning_type" in index_names
+        assert "ix_performance_learnings_run_archived_updated" in index_names
+    finally:
+        engine.dispose()
+        os.unlink(temp_db.name)
+
+
+def test_performance_learnings_create_all_categories_and_normalize_text(client):
+    run_id, _payload = _create_completed_run(client)
+    winner_post = _create_learning_platform_post(client, run_id, url_suffix="winner-learning")
+    select = client.put(
+        f"/api/pipeline-runs/{run_id}/performance/winner",
+        json={"platform_post_id": winner_post["id"]},
+    )
+    assert select.status_code == 200
+
+    created_ids = []
+    for learning_type in ("worked", "did_not_work", "next_test", "observation"):
+        response = _create_learning(
+            client,
+            run_id,
+            learning_type=learning_type,
+            observation=f"  {learning_type} learning  ",
+            evidence="   ",
+            next_action="  Follow up next.  ",
+            platform_post_id=winner_post["id"] if learning_type == "worked" else None,
+        )
+        assert response.status_code == 201
+        body = response.json()
+        created = next(learning for learning in body["learnings"] if learning["observation"] == f"{learning_type} learning")
+        created_ids.append(created["id"])
+        assert created["learning_type"] == learning_type
+        assert created["observation"] == f"{learning_type} learning"
+        assert created["evidence"] is None
+        assert created["next_action"] == "Follow up next."
+        if learning_type == "worked":
+            assert created["platform_post_id"] == winner_post["id"]
+            assert created["associated_post"]["id"] == winner_post["id"]
+        else:
+            assert created["platform_post_id"] is None
+            assert created["associated_post"] is None
+        assert created["is_archived"] is False
+        assert created["archived_at"] is None
+
+    performance = client.get(f"/api/pipeline-runs/{run_id}/performance")
+    assert performance.status_code == 200
+    assert len(performance.json()["learnings"]) == 4
+
+    with SessionLocal() as db:
+        learnings = db.query(PerformanceLearning).filter(PerformanceLearning.pipeline_run_id == run_id).all()
+        assert len(learnings) == 4
+        event_types = [
+            event.event_type
+            for event in db.query(PipelineEvent).filter(PipelineEvent.pipeline_run_id == run_id).all()
+            if event.event_type.startswith("performance.learning_")
+        ]
+        assert event_types.count("performance.learning_created") == 4
+
+
+def test_performance_learning_winner_association_stays_on_original_post(client):
+    run_id, _payload = _create_completed_run(client)
+    first_post = _create_learning_platform_post(client, run_id, platform="tiktok", url_suffix="winner-a")
+    second_post = _create_learning_platform_post(client, run_id, platform="instagram", url_suffix="winner-b")
+
+    selected = client.put(
+        f"/api/pipeline-runs/{run_id}/performance/winner",
+        json={"platform_post_id": first_post["id"]},
+    )
+    assert selected.status_code == 200
+
+    created = _create_learning(
+        client,
+        run_id,
+        learning_type="worked",
+        observation="Winning post used a clean hook.",
+        platform_post_id=first_post["id"],
+    )
+    assert created.status_code == 201
+
+    changed = client.put(
+        f"/api/pipeline-runs/{run_id}/performance/winner",
+        json={"platform_post_id": second_post["id"]},
+    )
+    assert changed.status_code == 200
+
+    performance = client.get(f"/api/pipeline-runs/{run_id}/performance")
+    assert performance.status_code == 200
+    learning = performance.json()["learnings"][0]
+    assert learning["platform_post_id"] == first_post["id"]
+    assert learning["associated_post"]["id"] == first_post["id"]
+
+    with SessionLocal() as db:
+        learning_events = [
+            event.event_type
+            for event in db.query(PipelineEvent).filter(PipelineEvent.pipeline_run_id == run_id).all()
+            if event.event_type.startswith("performance.learning_")
+        ]
+        assert learning_events == ["performance.learning_created"]
+
+
+def test_performance_learning_patch_archive_and_idempotency(client):
+    run_id, _payload = _create_completed_run(client)
+    first_post = _create_learning_platform_post(client, run_id, platform="tiktok", url_suffix="patch-a")
+    second_post = _create_learning_platform_post(client, run_id, platform="other", url_suffix="patch-b", custom_platform_name="Research Feed")
+    created = _create_learning(
+        client,
+        run_id,
+        learning_type="worked",
+        observation="Initial observation",
+        evidence="Initial evidence",
+        next_action="Initial next step",
+        platform_post_id=first_post["id"],
+    )
+    assert created.status_code == 201
+    learning = created.json()["learnings"][0]
+    learning_id = learning["id"]
+    original_updated_at = learning["updated_at"]
+
+    no_op = client.patch(
+        f"/api/pipeline-runs/{run_id}/performance/learnings/{learning_id}",
+        json={},
+    )
+    assert no_op.status_code == 200
+    no_op_learning = next(item for item in no_op.json()["learnings"] if item["id"] == learning_id)
+    assert no_op_learning["updated_at"] == original_updated_at
+
+    updated = client.patch(
+        f"/api/pipeline-runs/{run_id}/performance/learnings/{learning_id}",
+        json={
+            "learning_type": "next_test",
+            "observation": "Updated observation",
+            "evidence": "",
+            "next_action": "Try a shorter first scene.",
+            "platform_post_id": second_post["id"],
+        },
+    )
+    assert updated.status_code == 200
+    updated_learning = next(item for item in updated.json()["learnings"] if item["id"] == learning_id)
+    assert updated_learning["learning_type"] == "next_test"
+    assert updated_learning["observation"] == "Updated observation"
+    assert updated_learning["evidence"] is None
+    assert updated_learning["next_action"] == "Try a shorter first scene."
+    assert updated_learning["platform_post_id"] == second_post["id"]
+    assert updated_learning["associated_post"]["id"] == second_post["id"]
+    assert updated_learning["updated_at"] != original_updated_at
+
+    archived = client.post(f"/api/pipeline-runs/{run_id}/performance/learnings/{learning_id}/archive")
+    assert archived.status_code == 200
+    archived_learning = next(item for item in archived.json()["learnings"] if item["id"] == learning_id)
+    assert archived_learning["is_archived"] is True
+    assert archived_learning["archived_at"] is not None
+
+    archived_again = client.post(f"/api/pipeline-runs/{run_id}/performance/learnings/{learning_id}/archive")
+    assert archived_again.status_code == 200
+    archived_again_learning = next(item for item in archived_again.json()["learnings"] if item["id"] == learning_id)
+    assert archived_again_learning["archived_at"] == archived_learning["archived_at"]
+    assert archived_again_learning["updated_at"] == archived_learning["updated_at"]
+
+    rejected_edit = client.patch(
+        f"/api/pipeline-runs/{run_id}/performance/learnings/{learning_id}",
+        json={"observation": "Should fail"},
+    )
+    assert rejected_edit.status_code == 409
+
+    with SessionLocal() as db:
+        learning_events = [
+            event
+            for event in db.query(PipelineEvent).filter(PipelineEvent.pipeline_run_id == run_id).all()
+            if event.event_type.startswith("performance.learning_")
+        ]
+        event_types = [event.event_type for event in learning_events]
+        assert event_types.count("performance.learning_created") == 1
+        assert event_types.count("performance.learning_updated") == 1
+        assert event_types.count("performance.learning_archived") == 1
+        update_event = next(event for event in learning_events if event.event_type == "performance.learning_updated")
+        assert update_event.metadata_json["changed_fields"] == [
+            "evidence",
+            "learning_type",
+            "next_action",
+            "observation",
+            "platform_post_id",
+        ]
+
+
+def test_performance_learning_validation_and_nested_resource_errors(client):
+    run_id, _payload = _create_completed_run(client)
+    other_run_id, _ = _create_completed_run(client)
+    other_post = _create_learning_platform_post(client, other_run_id, platform="tiktok", url_suffix="cross-learning")
+
+    blank_observation = _create_learning(client, run_id, observation="   ")
+    assert blank_observation.status_code == 422
+
+    invalid_category = _create_learning(client, run_id, learning_type="invalid")
+    assert invalid_category.status_code == 422
+
+    oversized_observation = _create_learning(client, run_id, observation="x" * 2001)
+    assert oversized_observation.status_code == 422
+
+    missing_post = _create_learning(client, run_id, platform_post_id="00000000-0000-0000-0000-000000000000")
+    assert missing_post.status_code == 404
+
+    cross_run_post = _create_learning(client, run_id, platform_post_id=other_post["id"])
+    assert cross_run_post.status_code == 404
+
+    created = _create_learning(client, run_id)
+    assert created.status_code == 201
+    learning_id = created.json()["learnings"][0]["id"]
+
+    missing_learning = client.patch(
+        f"/api/pipeline-runs/{run_id}/performance/learnings/00000000-0000-0000-0000-000000000000",
+        json={"observation": "missing"},
+    )
+    assert missing_learning.status_code == 404
+
+    cross_run_learning = client.patch(
+        f"/api/pipeline-runs/{other_run_id}/performance/learnings/{learning_id}",
+        json={"observation": "cross"},
+    )
+    assert cross_run_learning.status_code == 404
+
+    malformed_post_id = _create_learning(client, run_id, platform_post_id="not-a-uuid")
+    assert malformed_post_id.status_code == 422
+
+    malformed_patch = client.patch(
+        f"/api/pipeline-runs/{run_id}/performance/learnings/{learning_id}",
+        json={"platform_post_id": "not-a-uuid"},
+    )
+    assert malformed_patch.status_code == 422
+
+
+def test_performance_learning_rejects_incomplete_run_and_missing_package(client):
+    created = client.post("/api/pipeline-runs", json={"topic": "Incomplete Learning Run", "auto_mode": False})
+    incomplete_run_id = created.json()["pipeline_run"]["id"]
+
+    incomplete = _create_learning(client, incomplete_run_id)
+    assert incomplete.status_code == 409
+
+    completed_run_id, _payload = _create_completed_run(client)
+    with SessionLocal() as db:
+        run = db.get(PipelineRun, completed_run_id)
+        run.manual_post_package_id = None
+        db.add(run)
+        db.commit()
+
+    no_package = _create_learning(client, completed_run_id)
+    assert no_package.status_code == 409
+
+
+def test_performance_learning_surfaces_in_performance_run_detail_and_asset_library_summary(client):
+    run_id, _payload = _create_completed_run(client)
+    post = _create_learning_platform_post(client, run_id, platform="other", url_suffix="summary-post", custom_platform_name="Signal Feed")
+
+    first = _create_learning(
+        client,
+        run_id,
+        learning_type="worked",
+        observation="First active learning",
+        platform_post_id=post["id"],
+    )
+    second = _create_learning(client, run_id, learning_type="did_not_work", observation="Second active learning")
+    third = _create_learning(client, run_id, learning_type="next_test", observation="Third active learning")
+    fourth = _create_learning(client, run_id, learning_type="observation", observation="Fourth active learning")
+    assert first.status_code == second.status_code == third.status_code == fourth.status_code == 201
+
+    archived_id = next(item for item in fourth.json()["learnings"] if item["observation"] == "First active learning")["id"]
+    archive = client.post(f"/api/pipeline-runs/{run_id}/performance/learnings/{archived_id}/archive")
+    assert archive.status_code == 200
+
+    performance = client.get(f"/api/pipeline-runs/{run_id}/performance")
+    assert performance.status_code == 200
+    learnings = performance.json()["learnings"]
+    assert [item["is_archived"] for item in learnings] == [False, False, False, True]
+    assert learnings[-1]["observation"] == "First active learning"
+    assert learnings[-1]["associated_post"]["id"] == post["id"]
+    assert set(performance.json()["winner_selection"].keys()) == {"platform_post_id", "selected_at", "selection_revision", "post"}
+
+    run_detail = client.get(f"/api/pipeline-runs/{run_id}")
+    library_detail = client.get(f"/api/asset-library/{run_id}")
+    assert run_detail.status_code == 200
+    assert library_detail.status_code == 200
+
+    run_summary = run_detail.json()["performance_learnings_summary"]
+    library_summary = library_detail.json()["performance_learnings_summary"]
+    assert run_summary["active_count"] == 3
+    assert library_summary["active_count"] == 3
+    assert len(run_summary["items"]) == 3
+    assert len(library_summary["items"]) == 3
+    assert all(item["is_archived"] is False for item in run_summary["items"])
+    assert all(item["is_archived"] is False for item in library_summary["items"])
+
+
+def test_performance_learning_operations_do_not_change_snapshots_winner_or_final_asset_state(client):
+    run_id, _payload = _create_completed_run(client)
+    first_post = _create_learning_platform_post(client, run_id, platform="tiktok", url_suffix="integrity-a")
+    second_post = _create_learning_platform_post(client, run_id, platform="instagram", url_suffix="integrity-b")
+
+    client.post(
+        f"/api/pipeline-runs/{run_id}/performance/posts/{first_post['id']}/snapshots",
+        json={"captured_at": "2026-07-11T12:00:00+00:00", "views": 100, "likes": 10, "comments": 2, "shares": 1, "saves": 1},
+    )
+    client.post(
+        f"/api/pipeline-runs/{run_id}/performance/posts/{second_post['id']}/snapshots",
+        json={"captured_at": "2026-07-11T13:00:00+00:00", "views": 200, "likes": 20, "comments": 4, "shares": 2, "saves": 2},
+    )
+    winner = client.put(
+        f"/api/pipeline-runs/{run_id}/performance/winner",
+        json={"platform_post_id": second_post["id"]},
+    )
+    assert winner.status_code == 200
+    before = client.get(f"/api/pipeline-runs/{run_id}/performance").json()
+    before_run_detail = client.get(f"/api/pipeline-runs/{run_id}").json()
+    before_library = client.get(f"/api/asset-library/{run_id}").json()
+
+    with SessionLocal() as db:
+        snapshot_rows = db.query(PerformanceLearning).count()
+        winner_events_before = [
+            event.event_type
+            for event in db.query(PipelineEvent).filter(PipelineEvent.pipeline_run_id == run_id).all()
+            if event.event_type.startswith("performance.winner_")
+        ]
+        package = db.get(ManualPostPackage, first_post["manual_post_package_id"])
+        package_snapshot = (
+            package.winner_platform_post_id,
+            package.winner_selected_at,
+            package.winner_selection_revision,
+            package.final_asset_id,
+            package.final_asset_source,
+            package.final_asset_selection_revision,
+            package.final_asset_selected_at,
+            package.tiktok_post_url,
+            package.instagram_post_url,
+            package.youtube_post_url,
+        )
+
+    created = _create_learning(
+        client,
+        run_id,
+        learning_type="observation",
+        observation="Integrity learning",
+        platform_post_id=first_post["id"],
+    )
+    assert created.status_code == 201
+    learning_id = next(item for item in created.json()["learnings"] if item["observation"] == "Integrity learning")["id"]
+    patched = client.patch(
+        f"/api/pipeline-runs/{run_id}/performance/learnings/{learning_id}",
+        json={"next_action": "Document the first-frame difference."},
+    )
+    assert patched.status_code == 200
+    archived = client.post(f"/api/pipeline-runs/{run_id}/performance/learnings/{learning_id}/archive")
+    assert archived.status_code == 200
+
+    after = client.get(f"/api/pipeline-runs/{run_id}/performance").json()
+    after_run_detail = client.get(f"/api/pipeline-runs/{run_id}").json()
+    after_library = client.get(f"/api/asset-library/{run_id}").json()
+    before_posts = {post["id"]: post for post in before["platform_posts"]}
+    after_posts = {post["id"]: post for post in after["platform_posts"]}
+
+    assert before["comparison"] == after["comparison"]
+    assert before["winner_selection"] == after["winner_selection"]
+    assert before["current_final_asset_selection"] == after["current_final_asset_selection"]
+    assert before_posts[first_post["id"]]["comparison_metrics"] == after_posts[first_post["id"]]["comparison_metrics"]
+    assert before_posts[second_post["id"]]["comparison_metrics"] == after_posts[second_post["id"]]["comparison_metrics"]
+    assert before_run_detail["winner_selection"] == after_run_detail["winner_selection"]
+    assert before_library["winner_selection"] == after_library["winner_selection"]
+
+    with SessionLocal() as db:
+        winner_events_after = [
+            event.event_type
+            for event in db.query(PipelineEvent).filter(PipelineEvent.pipeline_run_id == run_id).all()
+            if event.event_type.startswith("performance.winner_")
+        ]
+        package = db.get(ManualPostPackage, first_post["manual_post_package_id"])
+        assert db.query(PerformanceLearning).count() == snapshot_rows + 1
+        assert winner_events_after == winner_events_before
+        assert (
+            package.winner_platform_post_id,
+            package.winner_selected_at,
+            package.winner_selection_revision,
+            package.final_asset_id,
+            package.final_asset_source,
+            package.final_asset_selection_revision,
+            package.final_asset_selected_at,
+            package.tiktok_post_url,
+            package.instagram_post_url,
+            package.youtube_post_url,
+        ) == package_snapshot

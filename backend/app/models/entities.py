@@ -19,6 +19,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -553,6 +554,54 @@ class PerformanceSnapshot(Base):
     followers_gained: Mapped[int | None] = mapped_column(BigInteger)
     notes: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+
+
+class PerformanceLearning(Base):
+    __tablename__ = "performance_learnings"
+    __table_args__ = (
+        CheckConstraint(
+            "learning_type IN ('worked', 'did_not_work', 'next_test', 'observation')",
+            name="ck_performance_learnings_learning_type",
+        ),
+        Index("ix_performance_learnings_pipeline_run_id", "pipeline_run_id"),
+        Index("ix_performance_learnings_platform_post_id", "platform_post_id"),
+        Index("ix_performance_learnings_learning_type", "learning_type"),
+        Index(
+            "ix_performance_learnings_run_archived_updated",
+            "pipeline_run_id",
+            "is_archived",
+            "updated_at",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    pipeline_run_id: Mapped[str] = mapped_column(
+        ForeignKey(
+            "pipeline_runs.id",
+            name="fk_performance_learnings_pipeline_run_id_pipeline_runs",
+            ondelete="RESTRICT",
+        ),
+        nullable=False,
+    )
+    platform_post_id: Mapped[str | None] = mapped_column(
+        ForeignKey(
+            "platform_posts.id",
+            name="fk_performance_learnings_platform_post_id_platform_posts",
+            ondelete="RESTRICT",
+        )
+    )
+    learning_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    observation: Mapped[str] = mapped_column(Text, nullable=False)
+    evidence: Mapped[str | None] = mapped_column(Text)
+    next_action: Mapped[str | None] = mapped_column(Text)
+    is_archived: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("0"))
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )
 
 
 class IdeaQueueItem(Base):
