@@ -23,6 +23,8 @@ Recommended Google configuration:
 Current Sprint 1A scope:
 
 - builds the Google authorization URL
+- requests `youtube.upload` plus `youtube.readonly`
+- uses `channels.list(mine=true)` after OAuth to resolve the actual YouTube channel identity
 - stores encrypted tokens after callback
 - creates draft publication jobs and frozen asset snapshots
 - does not upload videos yet

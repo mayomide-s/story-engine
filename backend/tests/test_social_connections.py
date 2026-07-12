@@ -9,7 +9,14 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.db.session import SessionLocal
 from app.models import OAuthState, SocialConnection
-from app.providers.youtube.oauth import YOUTUBE_OAUTH_SCOPES
+from app.providers.youtube import oauth as youtube_oauth
+from app.providers.youtube.oauth import (
+    MultipleYouTubeChannelsUnsupportedError,
+    YOUTUBE_OAUTH_SCOPES,
+    YOUTUBE_READONLY_SCOPE,
+    YOUTUBE_UPLOAD_SCOPE,
+    YouTubeChannelNotFoundError,
+)
 from app.services.oauth_state_service import OAuthStateError, consume_oauth_state, create_oauth_state
 from app.services.social_token_crypto import SocialTokenCryptoError, decrypt_secret, encrypt_secret
 
@@ -106,11 +113,137 @@ def test_authorize_youtube_connection_returns_expected_scope(client, monkeypatch
     payload = response.json()
     parsed = urlparse(payload["authorization_url"])
     query = parse_qs(parsed.query)
-    scope_value = query.get("scope", [""])[0]
-    for scope in YOUTUBE_OAUTH_SCOPES:
-        assert scope in scope_value
+    scopes = set(query.get("scope", [""])[0].split())
+    assert scopes == {YOUTUBE_UPLOAD_SCOPE, YOUTUBE_READONLY_SCOPE}
+    assert "openid" not in scopes
+    assert "profile" not in scopes
+    assert "https://www.googleapis.com/auth/youtube" not in scopes
+    assert "https://www.googleapis.com/auth/youtube.force-ssl" not in scopes
     assert query["redirect_uri"][0] == "http://localhost:8000/api/social-connections/youtube/callback"
     assert payload["platform"] == "youtube"
+
+
+def test_exchange_callback_code_resolves_exactly_one_youtube_channel(monkeypatch):
+    _configure_social_env(monkeypatch)
+
+    class FakeCredentials:
+        token = "access-token"
+        refresh_token = "refresh-token"
+        expiry = datetime.now(UTC) + timedelta(hours=1)
+        granted_scopes = list(YOUTUBE_OAUTH_SCOPES)
+
+    class FakeFlow:
+        credentials = FakeCredentials()
+
+        def fetch_token(self, code):
+            assert code == "valid-code"
+
+    class FakeChannelsList:
+        def execute(self):
+            return {
+                "items": [
+                    {
+                        "id": "UC1234567890ABCDEF",
+                        "snippet": {
+                            "title": "CodeToons Channel",
+                            "customUrl": "@codetoons",
+                        },
+                    }
+                ]
+            }
+
+    class FakeChannelsResource:
+        def list(self, *, part, mine):
+            assert part == "id,snippet"
+            assert mine is True
+            return FakeChannelsList()
+
+    class FakeYouTubeService:
+        def channels(self):
+            return FakeChannelsResource()
+
+    monkeypatch.setattr(youtube_oauth, "_build_flow", lambda settings: FakeFlow())
+    monkeypatch.setattr(youtube_oauth, "build", lambda *args, **kwargs: FakeYouTubeService())
+
+    payload = youtube_oauth.exchange_callback_code("valid-code")
+
+    assert payload.external_account_id == "UC1234567890ABCDEF"
+    assert payload.display_name == "CodeToons Channel"
+    assert payload.username == "@codetoons"
+    assert payload.provider_metadata["channel_identity_source"] == "youtube.channels.list.mine"
+
+
+def test_exchange_callback_code_fails_when_no_youtube_channel_is_returned(monkeypatch):
+    _configure_social_env(monkeypatch)
+
+    class FakeCredentials:
+        token = "access-token"
+        refresh_token = "refresh-token"
+        expiry = datetime.now(UTC) + timedelta(hours=1)
+        granted_scopes = list(YOUTUBE_OAUTH_SCOPES)
+
+    class FakeFlow:
+        credentials = FakeCredentials()
+
+        def fetch_token(self, code):
+            assert code == "valid-code"
+
+    class FakeChannelsList:
+        def execute(self):
+            return {"items": []}
+
+    class FakeChannelsResource:
+        def list(self, *, part, mine):
+            return FakeChannelsList()
+
+    class FakeYouTubeService:
+        def channels(self):
+            return FakeChannelsResource()
+
+    monkeypatch.setattr(youtube_oauth, "_build_flow", lambda settings: FakeFlow())
+    monkeypatch.setattr(youtube_oauth, "build", lambda *args, **kwargs: FakeYouTubeService())
+
+    with pytest.raises(YouTubeChannelNotFoundError):
+        youtube_oauth.exchange_callback_code("valid-code")
+
+
+def test_exchange_callback_code_fails_when_multiple_youtube_channels_are_returned(monkeypatch):
+    _configure_social_env(monkeypatch)
+
+    class FakeCredentials:
+        token = "access-token"
+        refresh_token = "refresh-token"
+        expiry = datetime.now(UTC) + timedelta(hours=1)
+        granted_scopes = list(YOUTUBE_OAUTH_SCOPES)
+
+    class FakeFlow:
+        credentials = FakeCredentials()
+
+        def fetch_token(self, code):
+            assert code == "valid-code"
+
+    class FakeChannelsList:
+        def execute(self):
+            return {
+                "items": [
+                    {"id": "UC111", "snippet": {"title": "Channel One"}},
+                    {"id": "UC222", "snippet": {"title": "Channel Two"}},
+                ]
+            }
+
+    class FakeChannelsResource:
+        def list(self, *, part, mine):
+            return FakeChannelsList()
+
+    class FakeYouTubeService:
+        def channels(self):
+            return FakeChannelsResource()
+
+    monkeypatch.setattr(youtube_oauth, "_build_flow", lambda settings: FakeFlow())
+    monkeypatch.setattr(youtube_oauth, "build", lambda *args, **kwargs: FakeYouTubeService())
+
+    with pytest.raises(MultipleYouTubeChannelsUnsupportedError):
+        youtube_oauth.exchange_callback_code("valid-code")
 
 
 def test_authorize_youtube_connection_missing_configuration_fails_safely(client):
@@ -128,14 +261,14 @@ def test_youtube_callback_encrypts_tokens_and_list_omits_ciphertext(client, monk
         return social_service.exchange_callback_code.__annotations__  # pragma: no cover
 
     class FakeTokenPayload:
-        external_account_id = "google-sub:channel-1234"
+        external_account_id = "UC1234567890ABCDEF"
         display_name = "CodeToons Channel"
-        username = "CodeToons"
+        username = "@codetoons"
         access_token = "plain-access-token"
         refresh_token = "plain-refresh-token"
         token_expiry = datetime.now(UTC) + timedelta(hours=1)
         granted_scopes = list(YOUTUBE_OAUTH_SCOPES)
-        provider_metadata = {"identity_resolution": "google_openid_subject"}
+        provider_metadata = {"channel_identity_source": "youtube.channels.list.mine"}
 
     monkeypatch.setattr(social_service, "exchange_callback_code", lambda code: FakeTokenPayload())
 
@@ -165,6 +298,7 @@ def test_youtube_callback_encrypts_tokens_and_list_omits_ciphertext(client, monk
     assert listed.status_code == 200
     item = listed.json()["items"][0]
     assert item["display_name"] == "CodeToons Channel"
+    assert item["username"] == "@codetoons"
     assert "encrypted_access_token" not in str(listed.json())
     assert item["token_health"] == "healthy"
 
@@ -174,9 +308,9 @@ def test_youtube_reconnect_preserves_existing_refresh_token_when_google_omits_it
     import app.services.social_connection_service as social_service
 
     class InitialPayload:
-        external_account_id = "google-sub:channel-1234"
+        external_account_id = "UCCHANNEL1234"
         display_name = "Channel One"
-        username = "ChannelOne"
+        username = "@channelone"
         access_token = "initial-access-token"
         refresh_token = "initial-refresh-token"
         token_expiry = datetime.now(UTC) + timedelta(hours=1)
@@ -199,9 +333,9 @@ def test_youtube_reconnect_preserves_existing_refresh_token_when_google_omits_it
         original_refresh = original.encrypted_refresh_token
 
     class ReconnectPayload:
-        external_account_id = "google-sub:channel-1234"
+        external_account_id = "UCCHANNEL1234"
         display_name = "Channel One Updated"
-        username = "ChannelOneUpdated"
+        username = "@channeloneupdated"
         access_token = "updated-access-token"
         refresh_token = None
         token_expiry = datetime.now(UTC) + timedelta(hours=2)
@@ -228,14 +362,70 @@ def test_youtube_reconnect_preserves_existing_refresh_token_when_google_omits_it
         assert updated.display_name == "Channel One Updated"
 
 
+def test_youtube_callback_rejects_zero_channels_without_creating_a_connection(client, monkeypatch):
+    _configure_social_env(monkeypatch)
+    import app.services.social_connection_service as social_service
+
+    with SessionLocal() as db:
+        initial_count = db.query(SocialConnection).count()
+
+    monkeypatch.setattr(
+        social_service,
+        "exchange_callback_code",
+        lambda code: (_ for _ in ()).throw(YouTubeChannelNotFoundError("no channel")),
+    )
+
+    authorize = client.post("/api/social-connections/youtube/authorize", json={})
+    state = parse_qs(urlparse(authorize.json()["authorization_url"]).query)["state"][0]
+    callback = client.get(
+        "/api/social-connections/youtube/callback",
+        params={"state": state, "code": "connect"},
+        follow_redirects=False,
+    )
+
+    assert callback.status_code == 302
+    query = parse_qs(urlparse(callback.headers["location"]).query)
+    assert query["error_code"][0] == "youtube_channel_not_found"
+    with SessionLocal() as db:
+        assert db.query(SocialConnection).count() == initial_count
+
+
+def test_youtube_callback_rejects_multiple_channels_without_creating_a_connection(client, monkeypatch):
+    _configure_social_env(monkeypatch)
+    import app.services.social_connection_service as social_service
+
+    with SessionLocal() as db:
+        initial_count = db.query(SocialConnection).count()
+
+    monkeypatch.setattr(
+        social_service,
+        "exchange_callback_code",
+        lambda code: (_ for _ in ()).throw(MultipleYouTubeChannelsUnsupportedError("multiple channels")),
+    )
+
+    authorize = client.post("/api/social-connections/youtube/authorize", json={})
+    state = parse_qs(urlparse(authorize.json()["authorization_url"]).query)["state"][0]
+    callback = client.get(
+        "/api/social-connections/youtube/callback",
+        params={"state": state, "code": "connect"},
+        follow_redirects=False,
+    )
+
+    assert callback.status_code == 302
+    query = parse_qs(urlparse(callback.headers["location"]).query)
+    assert query["error_code"][0] == "multiple_youtube_channels_unsupported"
+    with SessionLocal() as db:
+        assert db.query(SocialConnection).count() == initial_count
+
+
 def test_refresh_and_disconnect_social_connection(client, monkeypatch):
     _configure_social_env(monkeypatch)
     import app.services.social_connection_service as social_service
 
     class ConnectPayload:
-        external_account_id = "google-sub:channel-9876"
+        external_account_id = "UCREFRESH9876"
         display_name = "Refreshable Channel"
-        username = "Refreshable"
+        username = "@refreshable"
         access_token = "first-access-token"
         refresh_token = "first-refresh-token"
         token_expiry = datetime.now(UTC) + timedelta(hours=1)
@@ -253,9 +443,9 @@ def test_refresh_and_disconnect_social_connection(client, monkeypatch):
     connection_id = parse_qs(urlparse(callback.headers["location"]).query)["connection_id"][0]
 
     class RefreshPayload:
-        external_account_id = "google-sub:channel-9876"
+        external_account_id = "UCREFRESH9876"
         display_name = "Refreshable Channel"
-        username = "Refreshable"
+        username = "@refreshable"
         access_token = "refreshed-access-token"
         refresh_token = None
         token_expiry = datetime.now(UTC) + timedelta(hours=3)

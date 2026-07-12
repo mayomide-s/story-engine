@@ -199,8 +199,16 @@ def complete_youtube_callback(
 
     try:
         token_payload = exchange_callback_code(code)
-    except (YouTubeOAuthError, SocialTokenCryptoError, SocialConnectionConfigurationError):
-        db.rollback()
+    except YouTubeOAuthError as exc:
+        db.commit()
+        return _redirect_with_query(
+            settings.google_oauth_frontend_error_url,
+            platform=YOUTUBE_PLATFORM,
+            error_code=getattr(exc, "error_code", "oauth_exchange_failed"),
+            return_path=oauth_state.return_path,
+        )
+    except (SocialTokenCryptoError, SocialConnectionConfigurationError):
+        db.commit()
         return _redirect_with_query(
             settings.google_oauth_frontend_error_url,
             platform=YOUTUBE_PLATFORM,
