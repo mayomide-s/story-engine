@@ -4,6 +4,7 @@ import tempfile
 
 import pytest
 from fastapi.testclient import TestClient
+from fastapi.staticfiles import StaticFiles
 
 db_file = tempfile.NamedTemporaryFile(delete=False)
 os.environ["DATABASE_URL"] = f"sqlite:///{db_file.name}"
@@ -78,7 +79,17 @@ def isolate_provider_environment(monkeypatch):
     monkeypatch.setenv("SEMANTIC_CRITIC_ENABLED", "false")
     monkeypatch.setenv("LOCAL_STORAGE_PATH", temp_storage_dir)
 
+    assets_mount = next(
+        (route for route in app.routes if getattr(route, "path", None) == "/assets"),
+        None,
+    )
+    original_assets_app = getattr(assets_mount, "app", None)
+    if assets_mount is not None:
+        assets_mount.app = StaticFiles(directory=temp_storage_dir)
+
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()
+    if assets_mount is not None and original_assets_app is not None:
+        assets_mount.app = original_assets_app
     shutil.rmtree(temp_storage_dir, ignore_errors=True)

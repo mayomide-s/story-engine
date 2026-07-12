@@ -106,6 +106,17 @@ def test_backend_assets_route_serves_local_storage_file(client):
     assert response.text == "shared local asset"
 
 
+def test_backend_assets_route_uses_current_local_storage_path(client):
+    asset_root = Path(get_settings().local_storage_path)
+    asset_path = asset_root / "narration" / "isolated-route-check.txt"
+    asset_path.parent.mkdir(parents=True, exist_ok=True)
+    asset_path.write_text("isolated local asset", encoding="utf-8")
+
+    response = client.get("/assets/narration/isolated-route-check.txt")
+    assert response.status_code == 200
+    assert response.text == "isolated local asset"
+
+
 def test_config_validation_does_not_require_openai_when_semantic_critic_disabled():
     settings = Settings(
         _env_file=None,
