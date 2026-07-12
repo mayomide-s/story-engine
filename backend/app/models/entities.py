@@ -16,10 +16,10 @@ from sqlalchemy import (
     Integer,
     JSON,
     Numeric,
+    false,
     String,
     Text,
     UniqueConstraint,
-    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -594,7 +594,7 @@ class PerformanceLearning(Base):
     observation: Mapped[str] = mapped_column(Text, nullable=False)
     evidence: Mapped[str | None] = mapped_column(Text)
     next_action: Mapped[str | None] = mapped_column(Text)
-    is_archived: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("0"))
+    is_archived: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=false())
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
     updated_at: Mapped[datetime] = mapped_column(

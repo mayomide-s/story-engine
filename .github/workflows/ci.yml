@@ -36,6 +36,42 @@ jobs:
           STORAGE_PROVIDER: local
         run: pytest -q -s --tb=long
 
+  postgres-migrations:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run PostgreSQL migration compatibility tests
+        env:
+          TEST_POSTGRES_DATABASE_URL: postgresql+psycopg://postgres:postgres@127.0.0.1:5432/postgres
+        run: pytest tests/test_postgres_migration_compatibility.py -q -s
+
   frontend:
     runs-on: ubuntu-latest
     defaults:
@@ -55,4 +91,3 @@ jobs:
 
       - name: Build frontend
         run: npm run build
-
