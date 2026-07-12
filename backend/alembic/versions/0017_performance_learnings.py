@@ -27,7 +27,7 @@ def upgrade() -> None:
         sa.Column("observation", sa.Text(), nullable=False),
         sa.Column("evidence", sa.Text(), nullable=True),
         sa.Column("next_action", sa.Text(), nullable=True),
-        sa.Column("is_archived", sa.Boolean(), nullable=False, server_default=sa.text("0")),
+        sa.Column("is_archived", sa.Boolean(), nullable=False, server_default=sa.false()),
         sa.Column("archived_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
