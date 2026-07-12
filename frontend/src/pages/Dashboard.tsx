@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { api, AccountDefaults, HealthDetails, PipelineRunDetail, PipelineRunSummary } from "../api/client";
@@ -6,7 +6,7 @@ import { EventTimeline } from "../components/EventTimeline";
 import { RunList, RunProviderFilter, RunStatusFilter } from "../components/RunList";
 import { AUDIENCE_LEVELS, CONTENT_FORMATS, STYLE_PRESETS, TARGET_PLATFORMS } from "../constants";
 import { getArchivedRunsStorageKey, loadArchivedRunIds, saveArchivedRunIds } from "../utils/archivedRuns";
-import { clearDashboardPrefill, loadDashboardPrefill } from "../utils/batchPlanner";
+import { clearDashboardPrefill, readDashboardPrefillCapture } from "../utils/batchPlanner";
 import { formatProvider, formatRunStatus, formatStage } from "../utils/display";
 
 const videoProvider = import.meta.env.VITE_VIDEO_PROVIDER ?? "mock";
@@ -15,6 +15,26 @@ const GOLDEN_DEMO_VIDEO_KEY = "videos/30ea2e8e-780a-471b-b85e-80ff8d84fe51.mp4";
 const GOLDEN_DEMO_THUMBNAIL_KEY = "thumbnails/30ea2e8e-780a-471b-b85e-80ff8d84fe51.jpg";
 const OLD_AWAITING_REVIEW_DAYS = 7;
 const OLD_TEST_CORS_DAYS = 3;
+
+const BUILT_IN_DASHBOARD_DEFAULTS = {
+  topic: "CORS",
+  stylePreset: "clean_3d_cartoon",
+  targetPlatforms: ["instagram", "tiktok", "youtube"],
+  captionTone: "playful explainer",
+  durationPreferenceSeconds: 18,
+  audienceLevel: "beginner",
+  contentFormat: "coding metaphor",
+};
+
+type DashboardDefaultsControlledField =
+  | "stylePreset"
+  | "targetPlatforms"
+  | "captionTone"
+  | "durationPreferenceSeconds"
+  | "audienceLevel"
+  | "contentFormat";
+
+type DashboardEditedFields = Record<DashboardDefaultsControlledField, boolean>;
 
 function toFriendlyResumeError(error: unknown) {
   const message = error instanceof Error ? error.message : "Failed to resume run.";
@@ -73,13 +93,35 @@ function matchesTopicSearch(run: PipelineRunSummary, topicSearch: string) {
 }
 
 export function DashboardPage() {
-  const [topic, setTopic] = useState("CORS");
-  const [stylePreset, setStylePreset] = useState("clean_3d_cartoon");
-  const [targetPlatforms, setTargetPlatforms] = useState<string[]>(["instagram", "tiktok", "youtube"]);
-  const [captionTone, setCaptionTone] = useState("playful explainer");
-  const [durationPreferenceSeconds, setDurationPreferenceSeconds] = useState(18);
-  const [audienceLevel, setAudienceLevel] = useState("beginner");
-  const [contentFormat, setContentFormat] = useState("coding metaphor");
+  const [handoffCapture] = useState(() => readDashboardPrefillCapture());
+  const handoffPrefill = handoffCapture.prefill;
+  const handoffProtectedFields = useMemo(
+    () => ({
+      audienceLevel: Boolean(handoffPrefill?.audienceLevel),
+      contentFormat: Boolean(handoffPrefill?.contentFormat),
+    }),
+    [handoffPrefill],
+  );
+  const editedFieldsRef = useRef<DashboardEditedFields>({
+    stylePreset: false,
+    targetPlatforms: false,
+    captionTone: false,
+    durationPreferenceSeconds: false,
+    audienceLevel: false,
+    contentFormat: false,
+  });
+
+  const [topic, setTopic] = useState(handoffPrefill?.topic ?? BUILT_IN_DASHBOARD_DEFAULTS.topic);
+  const [stylePreset, setStylePreset] = useState(BUILT_IN_DASHBOARD_DEFAULTS.stylePreset);
+  const [targetPlatforms, setTargetPlatforms] = useState<string[]>(BUILT_IN_DASHBOARD_DEFAULTS.targetPlatforms);
+  const [captionTone, setCaptionTone] = useState(BUILT_IN_DASHBOARD_DEFAULTS.captionTone);
+  const [durationPreferenceSeconds, setDurationPreferenceSeconds] = useState(BUILT_IN_DASHBOARD_DEFAULTS.durationPreferenceSeconds);
+  const [audienceLevel, setAudienceLevel] = useState(
+    handoffPrefill?.audienceLevel ?? BUILT_IN_DASHBOARD_DEFAULTS.audienceLevel,
+  );
+  const [contentFormat, setContentFormat] = useState(
+    handoffPrefill?.contentFormat ?? BUILT_IN_DASHBOARD_DEFAULTS.contentFormat,
+  );
   const [runs, setRuns] = useState<PipelineRunSummary[]>([]);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [detail, setDetail] = useState<PipelineRunDetail | null>(null);
@@ -96,18 +138,68 @@ export function DashboardPage() {
   const [providerFilter, setProviderFilter] = useState<RunProviderFilter>("all");
   const [topicSearch, setTopicSearch] = useState("");
   const [showArchived, setShowArchived] = useState(false);
-  const [handoffNotice, setHandoffNotice] = useState<{ topic: string; sourceBatchName: string } | null>(null);
+  const [handoffNotice, setHandoffNotice] = useState<{ topic: string; sourceBatchName: string } | null>(
+    handoffPrefill?.sourceBatchName
+      ? {
+          topic: handoffPrefill.topic,
+          sourceBatchName: handoffPrefill.sourceBatchName,
+        }
+      : null,
+  );
 
-  function applyDefaults(config: AccountDefaults["account_config_json"]) {
-    setStylePreset(String(config.default_style_preset ?? "clean_3d_cartoon"));
-    setTargetPlatforms(Array.isArray(config.target_platforms) ? config.target_platforms : ["instagram"]);
-    setCaptionTone(String(config.default_caption_tone ?? "playful explainer"));
-    setDurationPreferenceSeconds(Number(config.default_duration_seconds ?? 18));
-    setAudienceLevel(String(config.default_audience_level ?? "beginner"));
-    setContentFormat(String(config.default_content_format ?? "coding metaphor"));
+  function markFieldEdited(field: DashboardDefaultsControlledField) {
+    editedFieldsRef.current[field] = true;
+  }
+
+  function applyDefaults(config: AccountDefaults["account_config_json"], options?: { respectHandoffAndEdits?: boolean }) {
+    const nextStylePreset = String(config.default_style_preset ?? BUILT_IN_DASHBOARD_DEFAULTS.stylePreset);
+    const nextTargetPlatforms = Array.isArray(config.target_platforms)
+      ? config.target_platforms
+      : BUILT_IN_DASHBOARD_DEFAULTS.targetPlatforms;
+    const nextCaptionTone = String(config.default_caption_tone ?? BUILT_IN_DASHBOARD_DEFAULTS.captionTone);
+    const nextDurationPreferenceSeconds = Number(
+      config.default_duration_seconds ?? BUILT_IN_DASHBOARD_DEFAULTS.durationPreferenceSeconds,
+    );
+    const nextAudienceLevel = String(config.default_audience_level ?? BUILT_IN_DASHBOARD_DEFAULTS.audienceLevel);
+    const nextContentFormat = String(config.default_content_format ?? BUILT_IN_DASHBOARD_DEFAULTS.contentFormat);
+
+    if (options?.respectHandoffAndEdits) {
+      const editedFields = editedFieldsRef.current;
+      if (!editedFields.stylePreset) {
+        setStylePreset(nextStylePreset);
+      }
+      if (!editedFields.targetPlatforms) {
+        setTargetPlatforms(nextTargetPlatforms);
+      }
+      if (!editedFields.captionTone) {
+        setCaptionTone(nextCaptionTone);
+      }
+      if (!editedFields.durationPreferenceSeconds) {
+        setDurationPreferenceSeconds(nextDurationPreferenceSeconds);
+      }
+      if (!handoffProtectedFields.audienceLevel && !editedFields.audienceLevel) {
+        setAudienceLevel(nextAudienceLevel);
+      }
+      if (!handoffProtectedFields.contentFormat && !editedFields.contentFormat) {
+        setContentFormat(nextContentFormat);
+      }
+      return;
+    }
+
+    setStylePreset(nextStylePreset);
+    setTargetPlatforms(nextTargetPlatforms);
+    setCaptionTone(nextCaptionTone);
+    setDurationPreferenceSeconds(nextDurationPreferenceSeconds);
+    if (!handoffPrefill?.audienceLevel) {
+      setAudienceLevel(nextAudienceLevel);
+    }
+    if (!handoffPrefill?.contentFormat) {
+      setContentFormat(nextContentFormat);
+    }
   }
 
   function togglePlatform(platform: string) {
+    markFieldEdited("targetPlatforms");
     setTargetPlatforms((current) => {
       if (current.includes(platform)) {
         const next = current.filter((item) => item !== platform);
@@ -176,33 +268,19 @@ export function DashboardPage() {
   }, []);
 
   useEffect(() => {
+    if (!handoffCapture.shouldClearStorage) {
+      return;
+    }
+    clearDashboardPrefill();
+  }, [handoffCapture]);
+
+  useEffect(() => {
     api.getAccountDefaults().then((data) => {
       setDefaults(data);
-      applyDefaults(data.account_config_json);
+      applyDefaults(data.account_config_json, { respectHandoffAndEdits: true });
     }).catch((err) => setError(err.message));
     api.getHealthDetails().then(setHealthDetails).catch(() => undefined);
     loadRuns().catch((err) => setError(err.message));
-  }, []);
-
-  useEffect(() => {
-    const prefill = loadDashboardPrefill();
-    if (!prefill) {
-      return;
-    }
-    setTopic(prefill.topic);
-    if (prefill.audienceLevel) {
-      setAudienceLevel(prefill.audienceLevel);
-    }
-    if (prefill.contentFormat) {
-      setContentFormat(prefill.contentFormat);
-    }
-    if (prefill.sourceBatchName) {
-      setHandoffNotice({
-        topic: prefill.topic,
-        sourceBatchName: prefill.sourceBatchName,
-      });
-    }
-    clearDashboardPrefill();
   }, []);
 
   useEffect(() => {
@@ -511,7 +589,13 @@ export function DashboardPage() {
           </label>
           <label className="field">
             <span>Style Preset</span>
-            <select value={stylePreset} onChange={(event) => setStylePreset(event.target.value)}>
+            <select
+              value={stylePreset}
+              onChange={(event) => {
+                markFieldEdited("stylePreset");
+                setStylePreset(event.target.value);
+              }}
+            >
               {STYLE_PRESETS.map((preset) => (
                 <option key={preset} value={preset}>
                   {preset}
@@ -521,7 +605,13 @@ export function DashboardPage() {
           </label>
           <label className="field">
             <span>Caption Tone</span>
-            <input value={captionTone} onChange={(event) => setCaptionTone(event.target.value)} />
+            <input
+              value={captionTone}
+              onChange={(event) => {
+                markFieldEdited("captionTone");
+                setCaptionTone(event.target.value);
+              }}
+            />
           </label>
           <label className="field">
             <span>Duration Preference</span>
@@ -530,18 +620,33 @@ export function DashboardPage() {
               min={5}
               max={30}
               value={durationPreferenceSeconds}
-              onChange={(event) => setDurationPreferenceSeconds(Number(event.target.value))}
+              onChange={(event) => {
+                markFieldEdited("durationPreferenceSeconds");
+                setDurationPreferenceSeconds(Number(event.target.value));
+              }}
             />
           </label>
           <label className="field">
             <span>Audience Level</span>
-            <select value={audienceLevel} onChange={(event) => setAudienceLevel(event.target.value)}>
+            <select
+              value={audienceLevel}
+              onChange={(event) => {
+                markFieldEdited("audienceLevel");
+                setAudienceLevel(event.target.value);
+              }}
+            >
               {AUDIENCE_LEVELS.map((item) => <option key={item} value={item}>{item}</option>)}
             </select>
           </label>
           <label className="field">
             <span>Content Format</span>
-            <select value={contentFormat} onChange={(event) => setContentFormat(event.target.value)}>
+            <select
+              value={contentFormat}
+              onChange={(event) => {
+                markFieldEdited("contentFormat");
+                setContentFormat(event.target.value);
+              }}
+            >
               {CONTENT_FORMATS.map((item) => <option key={item} value={item}>{item}</option>)}
             </select>
           </label>

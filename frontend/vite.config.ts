@@ -19,4 +19,9 @@ export default defineConfig({
     port: 5173,
     allowedHosts: [...new Set([...defaultAllowedHosts, ...extraAllowedHosts])],
   },
+  test: {
+    environment: "jsdom",
+    setupFiles: "./src/test/setup.ts",
+    restoreMocks: true,
+  },
 });

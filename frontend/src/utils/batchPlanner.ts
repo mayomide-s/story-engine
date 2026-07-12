@@ -53,6 +53,11 @@ export type DashboardPrefill = {
   sourceBatchName?: string;
 };
 
+export type DashboardPrefillCapture = {
+  prefill: DashboardPrefill | null;
+  shouldClearStorage: boolean;
+};
+
 export const BATCH_PLANNER_STORAGE_KEY = "story-engine-batch-planner";
 export const DASHBOARD_PREFILL_STORAGE_KEY = "story-engine-dashboard-prefill";
 
@@ -131,16 +136,61 @@ export function saveDashboardPrefill(prefill: DashboardPrefill) {
   window.localStorage.setItem(DASHBOARD_PREFILL_STORAGE_KEY, JSON.stringify(prefill));
 }
 
-export function loadDashboardPrefill() {
-  if (typeof window === "undefined") {
-    return null as DashboardPrefill | null;
+function normalizeOptionalString(value: unknown) {
+  if (typeof value !== "string") {
+    return null;
   }
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
+
+function parseDashboardPrefill(raw: string): DashboardPrefill | null {
+  let parsed: unknown;
   try {
-    const raw = window.localStorage.getItem(DASHBOARD_PREFILL_STORAGE_KEY);
-    return raw ? (JSON.parse(raw) as DashboardPrefill) : null;
+    parsed = JSON.parse(raw);
   } catch {
-    return null as DashboardPrefill | null;
+    return null;
   }
+
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return null;
+  }
+
+  const topic = normalizeOptionalString((parsed as Record<string, unknown>).topic);
+  if (!topic) {
+    return null;
+  }
+
+  const audienceLevel = normalizeOptionalString((parsed as Record<string, unknown>).audienceLevel);
+  const contentFormat = normalizeOptionalString((parsed as Record<string, unknown>).contentFormat);
+  const sourceBatchName = normalizeOptionalString((parsed as Record<string, unknown>).sourceBatchName);
+
+  return {
+    topic,
+    ...(audienceLevel ? { audienceLevel } : {}),
+    ...(contentFormat ? { contentFormat } : {}),
+    ...(sourceBatchName ? { sourceBatchName } : {}),
+  };
+}
+
+export function readDashboardPrefillCapture() {
+  if (typeof window === "undefined") {
+    return { prefill: null, shouldClearStorage: false } as DashboardPrefillCapture;
+  }
+
+  const raw = window.localStorage.getItem(DASHBOARD_PREFILL_STORAGE_KEY);
+  if (raw === null) {
+    return { prefill: null, shouldClearStorage: false } as DashboardPrefillCapture;
+  }
+
+  return {
+    prefill: parseDashboardPrefill(raw),
+    shouldClearStorage: true,
+  } as DashboardPrefillCapture;
+}
+
+export function loadDashboardPrefill() {
+  return readDashboardPrefillCapture().prefill;
 }
 
 export function clearDashboardPrefill() {
