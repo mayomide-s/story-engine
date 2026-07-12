@@ -1,4 +1,5 @@
 from functools import lru_cache
+from urllib.parse import urlparse
 from typing import Literal
 
 from pydantic import Field
@@ -14,6 +15,7 @@ class Settings(BaseSettings):
     auth_enabled: bool = Field(default=False, alias="AUTH_ENABLED")
     app_access_password: str = Field(default="", alias="APP_ACCESS_PASSWORD")
     app_session_secret: str = Field(default="", alias="APP_SESSION_SECRET")
+    social_token_encryption_key: str = Field(default="", alias="SOCIAL_TOKEN_ENCRYPTION_KEY")
     cors_allowed_origins: str = Field(
         default="http://localhost:5173,http://127.0.0.1:5173",
         alias="CORS_ALLOWED_ORIGINS",
@@ -48,6 +50,11 @@ class Settings(BaseSettings):
     narration_timeout_seconds: int = Field(default=90, alias="NARRATION_TIMEOUT_SECONDS")
     narration_max_words: int = Field(default=20, alias="NARRATION_MAX_WORDS")
     narration_max_atempo_adjustment_percent: int = Field(default=10, alias="NARRATION_MAX_ATEMPO_ADJUSTMENT_PERCENT")
+    google_oauth_client_id: str = Field(default="", alias="GOOGLE_OAUTH_CLIENT_ID")
+    google_oauth_client_secret: str = Field(default="", alias="GOOGLE_OAUTH_CLIENT_SECRET")
+    google_oauth_redirect_uri: str = Field(default="", alias="GOOGLE_OAUTH_REDIRECT_URI")
+    google_oauth_frontend_success_url: str = Field(default="", alias="GOOGLE_OAUTH_FRONTEND_SUCCESS_URL")
+    google_oauth_frontend_error_url: str = Field(default="", alias="GOOGLE_OAUTH_FRONTEND_ERROR_URL")
 
     video_provider: Literal["mock", "runway"] = Field(default="mock", alias="VIDEO_PROVIDER")
     storage_provider: Literal["local", "r2"] = Field(default="local", alias="STORAGE_PROVIDER")
@@ -68,6 +75,80 @@ class Settings(BaseSettings):
 
     def session_secret_value(self) -> str:
         return self.app_session_secret or self.app_access_password
+
+    def is_development_like_environment(self) -> bool:
+        return self.environment.lower() in {"development", "dev", "local", "test", "testing"}
+
+    def _is_local_http_allowed(self, parsed) -> bool:
+        return (
+            parsed.scheme == "http"
+            and parsed.hostname in {"localhost", "127.0.0.1"}
+            and self.is_development_like_environment()
+        )
+
+    def _validate_redirect_url(self, value: str, setting_name: str) -> str | None:
+        if not value:
+            return f"{setting_name} is required."
+        parsed = urlparse(value)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            return f"{setting_name} must be an absolute HTTP(S) URL."
+        if parsed.scheme == "https":
+            return None
+        if self._is_local_http_allowed(parsed):
+            return None
+        return f"{setting_name} must use HTTPS outside local development."
+
+    def social_publishing_missing_configuration(self) -> list[str]:
+        required = {
+            "SOCIAL_TOKEN_ENCRYPTION_KEY": self.social_token_encryption_key,
+            "GOOGLE_OAUTH_CLIENT_ID": self.google_oauth_client_id,
+            "GOOGLE_OAUTH_CLIENT_SECRET": self.google_oauth_client_secret,
+            "GOOGLE_OAUTH_REDIRECT_URI": self.google_oauth_redirect_uri,
+            "GOOGLE_OAUTH_FRONTEND_SUCCESS_URL": self.google_oauth_frontend_success_url,
+            "GOOGLE_OAUTH_FRONTEND_ERROR_URL": self.google_oauth_frontend_error_url,
+        }
+        return [name for name, value in required.items() if not value]
+
+    def social_publishing_configuration_errors(self) -> list[str]:
+        errors: list[str] = []
+        missing = self.social_publishing_missing_configuration()
+        if missing:
+            errors.append(f"Missing publishing settings: {', '.join(missing)}")
+        if self.google_oauth_redirect_uri:
+            redirect_error = self._validate_redirect_url(
+                self.google_oauth_redirect_uri,
+                "GOOGLE_OAUTH_REDIRECT_URI",
+            )
+            if redirect_error:
+                errors.append(redirect_error)
+        if self.google_oauth_frontend_success_url:
+            success_error = self._validate_redirect_url(
+                self.google_oauth_frontend_success_url,
+                "GOOGLE_OAUTH_FRONTEND_SUCCESS_URL",
+            )
+            if success_error:
+                errors.append(success_error)
+        if self.google_oauth_frontend_error_url:
+            error_error = self._validate_redirect_url(
+                self.google_oauth_frontend_error_url,
+                "GOOGLE_OAUTH_FRONTEND_ERROR_URL",
+            )
+            if error_error:
+                errors.append(error_error)
+        return errors
+
+    def social_publishing_ready(self) -> bool:
+        return not self.social_publishing_configuration_errors()
+
+    def social_publishing_status_summary(self) -> dict[str, object]:
+        return {
+            "configured": self.social_publishing_ready(),
+            "errors": self.social_publishing_configuration_errors(),
+            "google_oauth_redirect_uri_configured": bool(self.google_oauth_redirect_uri),
+            "google_oauth_frontend_success_url_configured": bool(self.google_oauth_frontend_success_url),
+            "google_oauth_frontend_error_url_configured": bool(self.google_oauth_frontend_error_url),
+            "social_token_encryption_configured": bool(self.social_token_encryption_key),
+        }
 
     def missing_configuration(self) -> dict[str, list[str]]:
         required = {

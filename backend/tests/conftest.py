@@ -1,4 +1,5 @@
-﻿import os
+import os
+import shutil
 import tempfile
 
 import pytest
@@ -23,6 +24,7 @@ def client():
         yield test_client
     get_settings.cache_clear()
 
+
 @pytest.fixture(autouse=True)
 def isolate_provider_environment(monkeypatch):
     """Keep CI/staging environment variables from leaking into unit tests."""
@@ -35,6 +37,12 @@ def isolate_provider_environment(monkeypatch):
         "AUTH_ENABLED",
         "APP_ACCESS_PASSWORD",
         "APP_SESSION_SECRET",
+        "SOCIAL_TOKEN_ENCRYPTION_KEY",
+        "GOOGLE_OAUTH_CLIENT_ID",
+        "GOOGLE_OAUTH_CLIENT_SECRET",
+        "GOOGLE_OAUTH_REDIRECT_URI",
+        "GOOGLE_OAUTH_FRONTEND_SUCCESS_URL",
+        "GOOGLE_OAUTH_FRONTEND_ERROR_URL",
         "RUNWAY_API_KEY",
         "OPENAI_API_KEY",
         "SEMANTIC_CRITIC_ENABLED",
@@ -65,9 +73,12 @@ def isolate_provider_environment(monkeypatch):
     for key in provider_env_keys:
         monkeypatch.delenv(key, raising=False)
 
+    temp_storage_dir = tempfile.mkdtemp(prefix="story_engine_test_storage_")
     monkeypatch.setenv("AUTH_ENABLED", "false")
     monkeypatch.setenv("SEMANTIC_CRITIC_ENABLED", "false")
+    monkeypatch.setenv("LOCAL_STORAGE_PATH", temp_storage_dir)
 
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()
+    shutil.rmtree(temp_storage_dir, ignore_errors=True)

@@ -119,6 +119,43 @@ class PerformancePlatform(str, enum.Enum):
     OTHER = "other"
 
 
+SOCIAL_CONNECTION_STATUSES = (
+    "active",
+    "expired",
+    "revoked",
+    "error",
+    "disconnected",
+)
+PUBLICATION_JOB_STATUSES = (
+    "draft",
+    "ready",
+    "approved",
+    "active",
+    "published",
+    "partially_published",
+    "failed",
+    "cancelled",
+)
+PUBLICATION_TARGET_STATES = (
+    "pending",
+    "validating",
+    "queued",
+    "uploading",
+    "processing",
+    "uploaded_private",
+    "published",
+    "retryable_failure",
+    "permanent_failure",
+    "outcome_uncertain",
+    "cancelled",
+)
+YOUTUBE_PUBLICATION_VISIBILITIES = (
+    "private",
+    "unlisted",
+    "public",
+)
+
+
 PERFORMANCE_PLATFORM_ENUM = Enum(
     PerformancePlatform,
     values_callable=lambda enum_cls: [item.value for item in enum_cls],
@@ -596,6 +633,153 @@ class PerformanceLearning(Base):
     next_action: Mapped[str | None] = mapped_column(Text)
     is_archived: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=false())
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )
+
+
+class SocialConnection(Base):
+    __tablename__ = "social_connections"
+    __table_args__ = (
+        UniqueConstraint(
+            "account_id",
+            "platform",
+            "external_account_id",
+            name="uq_social_connections_account_platform_external",
+        ),
+        CheckConstraint(
+            f"connection_status IN {SOCIAL_CONNECTION_STATUSES}",
+            name="ck_social_connections_connection_status",
+        ),
+        Index("ix_social_connections_account_platform", "account_id", "platform"),
+        Index("ix_social_connections_status", "connection_status"),
+        Index("ix_social_connections_platform_default", "platform", "is_default"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    account_id: Mapped[str] = mapped_column(ForeignKey("accounts.id", ondelete="RESTRICT"), nullable=False)
+    platform: Mapped[str] = mapped_column(String(50), nullable=False)
+    external_account_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    display_name: Mapped[str | None] = mapped_column(String(255))
+    username: Mapped[str | None] = mapped_column(String(255))
+    encrypted_access_token: Mapped[str | None] = mapped_column(Text)
+    encrypted_refresh_token: Mapped[str | None] = mapped_column(Text)
+    token_cipher_version: Mapped[str | None] = mapped_column(String(20))
+    token_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    granted_scopes_json: Mapped[list] = mapped_column(JSON, default=list)
+    connection_status: Mapped[str] = mapped_column(String(50), nullable=False, default="active")
+    provider_metadata_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=false())
+    last_refresh_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_error_code: Mapped[str | None] = mapped_column(String(100))
+    last_error_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    connected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    disconnected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )
+
+
+class OAuthState(Base):
+    __tablename__ = "oauth_states"
+    __table_args__ = (
+        UniqueConstraint("state_hash", name="uq_oauth_states_state_hash"),
+        Index("ix_oauth_states_expires_at", "expires_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    account_id: Mapped[str] = mapped_column(ForeignKey("accounts.id", ondelete="RESTRICT"), nullable=False)
+    platform: Mapped[str] = mapped_column(String(50), nullable=False)
+    state_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    return_path: Mapped[str | None] = mapped_column(String(1024))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+
+
+class PublicationJob(Base):
+    __tablename__ = "publication_jobs"
+    __table_args__ = (
+        CheckConstraint(
+            f"status IN {PUBLICATION_JOB_STATUSES}",
+            name="ck_publication_jobs_status",
+        ),
+        Index("ix_publication_jobs_pipeline_run_id", "pipeline_run_id"),
+        Index("ix_publication_jobs_status", "status"),
+        Index("ix_publication_jobs_created_at", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    pipeline_run_id: Mapped[str] = mapped_column(ForeignKey("pipeline_runs.id", ondelete="RESTRICT"), nullable=False)
+    manual_post_package_id: Mapped[str] = mapped_column(ForeignKey("manual_post_packages.id", ondelete="RESTRICT"), nullable=False)
+    final_asset_id: Mapped[str] = mapped_column(ForeignKey("assets.id", ondelete="RESTRICT"), nullable=False)
+    final_asset_selection_revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    final_asset_source: Mapped[str] = mapped_column(String(50), nullable=False)
+    final_asset_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    final_asset_metadata_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    status: Mapped[str] = mapped_column(String(50), nullable=False, default="draft")
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )
+
+
+class PublicationTarget(Base):
+    __tablename__ = "publication_targets"
+    __table_args__ = (
+        UniqueConstraint(
+            "publication_job_id",
+            "platform",
+            "social_connection_id",
+            name="uq_publication_targets_job_platform_connection",
+        ),
+        UniqueConstraint("idempotency_key", name="uq_publication_targets_idempotency_key"),
+        CheckConstraint(
+            f"state IN {PUBLICATION_TARGET_STATES}",
+            name="ck_publication_targets_state",
+        ),
+        CheckConstraint(
+            f"visibility IN {YOUTUBE_PUBLICATION_VISIBILITIES}",
+            name="ck_publication_targets_visibility",
+        ),
+        Index("ix_publication_targets_publication_job_id", "publication_job_id"),
+        Index("ix_publication_targets_state", "state"),
+        Index("ix_publication_targets_next_poll_at", "next_poll_at"),
+        Index("ix_publication_targets_provider_submission_id", "provider_submission_id"),
+        Index("ix_publication_targets_provider_media_id", "provider_media_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    publication_job_id: Mapped[str] = mapped_column(ForeignKey("publication_jobs.id", ondelete="RESTRICT"), nullable=False)
+    social_connection_id: Mapped[str] = mapped_column(ForeignKey("social_connections.id", ondelete="RESTRICT"), nullable=False)
+    platform: Mapped[str] = mapped_column(String(50), nullable=False)
+    visibility: Mapped[str] = mapped_column(String(20), nullable=False)
+    title: Mapped[str] = mapped_column(String(100), nullable=False)
+    caption: Mapped[str | None] = mapped_column(Text)
+    tags_json: Mapped[list] = mapped_column(JSON, default=list)
+    options_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    state: Mapped[str] = mapped_column(String(50), nullable=False, default="pending")
+    idempotency_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    provider_upload_uri_encrypted: Mapped[str | None] = mapped_column(Text)
+    provider_submission_id: Mapped[str | None] = mapped_column(String(255))
+    provider_media_id: Mapped[str | None] = mapped_column(String(255))
+    public_post_url: Mapped[str | None] = mapped_column(Text)
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    next_poll_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_error_code: Mapped[str | None] = mapped_column(String(100))
+    last_error_message: Mapped[str | None] = mapped_column(Text)
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
