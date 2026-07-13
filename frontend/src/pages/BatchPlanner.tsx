@@ -230,7 +230,7 @@ export function BatchPlannerPage() {
     });
     setBatches(nextBatches);
     saveBatches(nextBatches);
-    navigate("/");
+    navigate("/app");
   }
 
   function sendNextSelectedTopicToDashboard() {

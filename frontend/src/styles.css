@@ -907,6 +907,201 @@ pre {
   min-height: 40px;
 }
 
+.public-shell {
+  min-height: 100vh;
+  overflow-y: auto;
+  background:
+    radial-gradient(circle at top right, rgba(37, 99, 235, 0.12), transparent 24rem),
+    linear-gradient(180deg, #F8FBFF 0%, #F4F7FB 45%, #EDF2F9 100%);
+  color: #0F172A;
+}
+
+.public-header {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  backdrop-filter: blur(16px);
+  background: rgba(248, 251, 255, 0.9);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+}
+
+.public-header-inner,
+.public-main,
+.public-footer {
+  width: min(1120px, calc(100% - 2rem));
+  margin: 0 auto;
+}
+
+.public-header-inner {
+  padding: 1rem 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.public-brand {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.public-brand-link {
+  color: #0F172A;
+  font-size: 1.4rem;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.public-nav {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.public-nav a,
+.public-footer a,
+.public-copy a,
+.public-cta {
+  color: #1D4ED8;
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.public-nav a:hover,
+.public-footer a:hover,
+.public-copy a:hover,
+.public-cta:hover {
+  text-decoration: underline;
+}
+
+.public-nav a:focus-visible,
+.public-footer a:focus-visible,
+.public-copy a:focus-visible,
+.public-cta:focus-visible {
+  outline: 3px solid rgba(37, 99, 235, 0.3);
+  outline-offset: 3px;
+  border-radius: 8px;
+}
+
+.public-app-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 42px;
+  padding: 0.7rem 1rem;
+  border-radius: 999px;
+  background: #2563EB;
+  color: #FFFFFF !important;
+  text-decoration: none;
+  box-shadow: 0 10px 24px rgba(37, 99, 235, 0.18);
+}
+
+.public-main {
+  padding: 2rem 0 3rem;
+  display: grid;
+  gap: 1.25rem;
+}
+
+.public-hero {
+  display: grid;
+  gap: 0.8rem;
+  padding: 1.6rem;
+  background:
+    linear-gradient(135deg, rgba(37, 99, 235, 0.08), rgba(14, 165, 233, 0.12)),
+    #FFFFFF;
+}
+
+.public-hero h1 {
+  margin: 0;
+  font-size: clamp(2rem, 4vw, 3.35rem);
+  line-height: 1.05;
+  max-width: 13ch;
+}
+
+.public-intro {
+  max-width: 68ch;
+  margin: 0;
+  font-size: 1.02rem;
+  color: #334155;
+}
+
+.public-content {
+  display: grid;
+  gap: 1rem;
+}
+
+.public-panel h2 {
+  margin-top: 0;
+}
+
+.public-copy {
+  display: grid;
+  gap: 0.8rem;
+  max-width: 72ch;
+}
+
+.public-copy p,
+.public-footer p {
+  margin: 0;
+}
+
+.public-list,
+.public-steps {
+  margin: 0;
+  padding-left: 1.25rem;
+  display: grid;
+  gap: 0.55rem;
+  max-width: 72ch;
+}
+
+.public-link-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 0.85rem;
+}
+
+.public-cta {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 56px;
+  padding: 0.95rem 1rem;
+  border-radius: 14px;
+  border: 1px solid #DDE5F0;
+  background: #FFFFFF;
+  text-align: center;
+}
+
+.public-footer {
+  padding: 0 0 2.5rem;
+}
+
+.public-footer-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+  padding: 1.1rem 1.2rem;
+  border-radius: 18px;
+  border: 1px solid #DDE5F0;
+  background: rgba(255, 255, 255, 0.86);
+}
+
+.public-footer-block {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.public-footer-links {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.public-draft-notice {
+  max-width: 72ch;
+}
+
 @media (max-width: 1100px) {
   .dashboard-grid,
   .grid,
@@ -973,5 +1168,44 @@ pre {
 
   .run-list-filter-grid {
     grid-template-columns: 1fr;
+  }
+
+  .public-header-inner {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .public-nav {
+    justify-content: flex-start;
+  }
+
+  .public-footer-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  .public-header-inner,
+  .public-main,
+  .public-footer {
+    width: min(100% - 1.2rem, 1120px);
+  }
+
+  .public-main {
+    padding-top: 1.2rem;
+  }
+
+  .public-hero {
+    padding: 1.2rem;
+  }
+
+  .public-hero h1 {
+    max-width: none;
+    font-size: clamp(1.8rem, 9vw, 2.6rem);
+  }
+
+  .public-app-link,
+  .public-cta {
+    width: 100%;
   }
 }
