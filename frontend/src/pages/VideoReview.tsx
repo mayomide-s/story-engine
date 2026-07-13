@@ -6,6 +6,7 @@ import { ExportPackPanel } from "../components/ExportPackPanel";
 import { EventTimeline } from "../components/EventTimeline";
 import { PerformanceLearningsSummary } from "../components/PerformanceLearningsSummary";
 import { PerformanceWinnerSummary } from "../components/PerformanceWinnerSummary";
+import { YouTubePublicationPanel } from "../components/YouTubePublicationPanel";
 import { normalizeQualityChecklist } from "../qualityChecklist";
 import { formatProvider, formatRunStatus, formatVideoStatus } from "../utils/display";
 
@@ -472,6 +473,14 @@ export function VideoReviewPage() {
               performanceHref={selectedRunId ? `/performance/${selectedRunId}` : undefined}
               compact
             />
+            {selectedRunId ? (
+              <YouTubePublicationPanel
+                runId={selectedRunId}
+                runStatus={String(run?.status ?? "")}
+                finalAssetSelection={finalAssetSelection}
+                manualPostPackage={manualPackage}
+              />
+            ) : null}
 
             <div className="panel inset scroll-panel-box">
               <h3>Generated Assets</h3>

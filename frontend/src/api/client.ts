@@ -132,6 +132,128 @@ export type PerformanceLearningsSummary = {
   items: PerformanceLearning[];
 };
 
+export type SocialConnectionSummary = {
+  id: string;
+  platform: "youtube";
+  display_name?: string | null;
+  username?: string | null;
+  external_identity_hint: string;
+  connection_status: string;
+  granted_scopes: string[];
+  token_expires_at?: string | null;
+  token_health: string;
+  is_default: boolean;
+  connected_at?: string | null;
+  disconnected_at?: string | null;
+  last_error_code?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type SocialAuthorizeResponse = {
+  platform: "youtube";
+  authorization_url: string;
+  expires_at: string;
+};
+
+export type PublicationTargetState =
+  | "pending"
+  | "validating"
+  | "queued"
+  | "uploading"
+  | "processing"
+  | "uploaded_private"
+  | "published"
+  | "retryable_failure"
+  | "permanent_failure"
+  | "outcome_uncertain"
+  | "cancelled";
+
+export type PublicationJobStatus =
+  | "draft"
+  | "ready"
+  | "approved"
+  | "active"
+  | "published"
+  | "partially_published"
+  | "failed"
+  | "cancelled";
+
+export type PublicationTarget = {
+  id: string;
+  social_connection_id: string;
+  channel_display_name?: string | null;
+  channel_username?: string | null;
+  channel_external_account_id?: string | null;
+  platform: string;
+  visibility: "private" | "unlisted" | "public";
+  actual_visibility?: string | null;
+  title: string;
+  caption?: string | null;
+  tags: string[];
+  category_id: string;
+  self_declared_made_for_kids: boolean;
+  contains_synthetic_media: boolean;
+  options: Record<string, unknown>;
+  state: PublicationTargetState;
+  idempotency_key: string;
+  provider_video_id?: string | null;
+  provider_submission_id?: string | null;
+  provider_media_id?: string | null;
+  provider_upload_status?: string | null;
+  provider_processing_status?: string | null;
+  public_post_url?: string | null;
+  platform_post_id?: string | null;
+  attempt_count: number;
+  upload_bytes_total?: number | null;
+  upload_bytes_sent?: number | null;
+  upload_progress_percent?: number | null;
+  next_poll_at?: string | null;
+  processing_last_checked_at?: string | null;
+  outcome_confirmed_at?: string | null;
+  last_error_code?: string | null;
+  last_error_message?: string | null;
+  reconnect_required: boolean;
+  submitted_at?: string | null;
+  published_at?: string | null;
+  created_at: string;
+  updated_at: string;
+  platform_post_creation_eligible: boolean;
+  visibility_semantics: string;
+  available_actions: string[];
+};
+
+export type PublicationJob = {
+  id: string;
+  pipeline_run_id: string;
+  manual_post_package_id: string;
+  final_asset_id: string;
+  final_asset_selection_revision: number;
+  final_asset_source: string;
+  final_asset_sha256: string;
+  final_asset_metadata: Record<string, unknown>;
+  status: PublicationJobStatus;
+  approved_at?: string | null;
+  completed_at?: string | null;
+  created_at: string;
+  updated_at: string;
+  targets: PublicationTarget[];
+  selected_asset_is_frozen: boolean;
+  selected_asset_has_changed_since_draft: boolean;
+  available_actions: string[];
+};
+
+export type PublicationJobDraftPayload = {
+  connection_id?: string | null;
+  title: string;
+  caption?: string | null;
+  tags: string[];
+  category_id: string;
+  privacy: "private" | "unlisted" | "public";
+  self_declared_made_for_kids: boolean;
+  contains_synthetic_media: boolean;
+};
+
 export type StoryAdherenceHumanDecision = "approve" | "needs_review" | "regenerate";
 export type NarrationHumanDecision = "approve" | "needs_revision" | "reject";
 
@@ -654,6 +776,41 @@ export const api = {
     }),
   archivePerformanceLearning: (runId: string, learningId: string) =>
     request<RunPerformance>(`/pipeline-runs/${runId}/performance/learnings/${learningId}/archive`, {
+      method: "POST"
+    }),
+  listSocialConnections: () => request<{ items: SocialConnectionSummary[] }>("/social-connections"),
+  authorizeYouTubeConnection: (returnPath?: string) =>
+    request<SocialAuthorizeResponse>("/social-connections/youtube/authorize", {
+      method: "POST",
+      body: JSON.stringify({ return_path: returnPath ?? null })
+    }),
+  getLatestPublicationJobForRun: (runId: string) =>
+    request<PublicationJob>(`/pipeline-runs/${runId}/publication-jobs/latest`),
+  getPublicationJob: (jobId: string) =>
+    request<PublicationJob>(`/publication-jobs/${jobId}`),
+  createPublicationJob: (runId: string, payload: PublicationJobDraftPayload) =>
+    request<{ job: PublicationJob }>(`/pipeline-runs/${runId}/publication-jobs`, {
+      method: "POST",
+      body: JSON.stringify(payload)
+    }),
+  approvePublicationJob: (jobId: string) =>
+    request<{ job: PublicationJob }>(`/publication-jobs/${jobId}/approve`, {
+      method: "POST"
+    }),
+  dispatchPublicationJob: (jobId: string) =>
+    request<{ job: PublicationJob }>(`/publication-jobs/${jobId}/dispatch`, {
+      method: "POST"
+    }),
+  cancelPublicationJob: (jobId: string) =>
+    request<{ job: PublicationJob }>(`/publication-jobs/${jobId}/cancel`, {
+      method: "POST"
+    }),
+  retryPublicationTarget: (targetId: string) =>
+    request<{ job: PublicationJob }>(`/publication-targets/${targetId}/retry`, {
+      method: "POST"
+    }),
+  reconcilePublicationTarget: (targetId: string) =>
+    request<{ job: PublicationJob }>(`/publication-targets/${targetId}/reconcile`, {
       method: "POST"
     }),
 };

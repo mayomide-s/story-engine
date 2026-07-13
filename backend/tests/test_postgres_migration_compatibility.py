@@ -18,7 +18,7 @@ from app.models.entities import PerformanceLearning
 
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
-EXPECTED_HEAD = "0019_publishing_gateway_core"
+EXPECTED_HEAD = "0020_youtube_publication_execution"
 TEST_POSTGRES_DATABASE_URL = os.environ.get("TEST_POSTGRES_DATABASE_URL")
 
 

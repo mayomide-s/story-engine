@@ -109,7 +109,15 @@ def test_create_publication_job_draft_freezes_selected_asset_and_is_idempotent(c
         assert len(jobs) == 1
         targets = db.query(PublicationTarget).filter(PublicationTarget.publication_job_id == job["id"]).all()
         assert len(targets) == 1
-        assert db.query(PipelineEvent).filter(PipelineEvent.event_type == "publication.job_draft_created").count() == 1
+        assert (
+            db.query(PipelineEvent)
+            .filter(
+                PipelineEvent.pipeline_run_id == run_id,
+                PipelineEvent.event_type == "publication.job_draft_created",
+            )
+            .count()
+            == 1
+        )
 
 
 def test_publication_job_requires_completed_run_and_default_connection(client):
@@ -314,3 +322,37 @@ def test_publication_job_validation_limits(client):
         },
     )
     assert response.status_code == 422
+
+
+def test_publication_job_response_marks_reconnect_required_for_revoked_or_missing_scope_errors(client):
+    run_id, _payload = _create_completed_run(client)
+    connection_id = _create_active_youtube_connection()
+
+    created = client.post(
+        f"/api/pipeline-runs/{run_id}/publication-jobs",
+        json={
+            "connection_id": connection_id,
+            "title": "Reconnect check",
+            "caption": "Reconnect check",
+            "tags": ["youtube"],
+            "privacy": "private",
+            "self_declared_made_for_kids": False,
+            "contains_synthetic_media": False,
+        },
+    )
+    assert created.status_code == 201
+    job_id = created.json()["job"]["id"]
+    target_id = created.json()["job"]["targets"][0]["id"]
+
+    with SessionLocal() as db:
+        target = db.get(PublicationTarget, target_id)
+        assert target is not None
+        target.state = "retryable_failure"
+        target.last_error_code = "youtube_credentials_invalid"
+        target.last_error_message = "Reconnect required."
+        db.add(target)
+        db.commit()
+
+    response = client.get(f"/api/publication-jobs/{job_id}")
+    assert response.status_code == 200
+    assert response.json()["targets"][0]["reconnect_required"] is True

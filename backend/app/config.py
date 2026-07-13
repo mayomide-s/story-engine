@@ -55,6 +55,13 @@ class Settings(BaseSettings):
     google_oauth_redirect_uri: str = Field(default="", alias="GOOGLE_OAUTH_REDIRECT_URI")
     google_oauth_frontend_success_url: str = Field(default="", alias="GOOGLE_OAUTH_FRONTEND_SUCCESS_URL")
     google_oauth_frontend_error_url: str = Field(default="", alias="GOOGLE_OAUTH_FRONTEND_ERROR_URL")
+    youtube_default_category_id: str = Field(default="27", alias="YOUTUBE_DEFAULT_CATEGORY_ID")
+    youtube_upload_chunk_size_bytes: int = Field(default=8 * 1024 * 1024, alias="YOUTUBE_UPLOAD_CHUNK_SIZE_BYTES")
+    youtube_token_refresh_leeway_seconds: int = Field(default=300, alias="YOUTUBE_TOKEN_REFRESH_LEEWAY_SECONDS")
+    youtube_claim_timeout_seconds: int = Field(default=300, alias="YOUTUBE_CLAIM_TIMEOUT_SECONDS")
+    youtube_max_retry_attempts: int = Field(default=5, alias="YOUTUBE_MAX_RETRY_ATTEMPTS")
+    youtube_poll_interval_seconds: int = Field(default=30, alias="YOUTUBE_POLL_INTERVAL_SECONDS")
+    youtube_max_poll_attempts: int = Field(default=20, alias="YOUTUBE_MAX_POLL_ATTEMPTS")
 
     video_provider: Literal["mock", "runway"] = Field(default="mock", alias="VIDEO_PROVIDER")
     storage_provider: Literal["local", "r2"] = Field(default="local", alias="STORAGE_PROVIDER")

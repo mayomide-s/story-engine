@@ -86,6 +86,73 @@ def _serialize_connection_summary(connection: SocialConnection) -> dict:
     ).model_dump(mode="json")
 
 
+def _persist_refreshed_connection(
+    db: Session,
+    connection: SocialConnection,
+    token_payload,
+) -> SocialConnection:
+    access_ciphertext, cipher_version = encrypt_secret(token_payload.access_token, purpose="access token")
+    connection.encrypted_access_token = access_ciphertext
+    if token_payload.refresh_token:
+        refresh_ciphertext, _ = encrypt_secret(token_payload.refresh_token, purpose="refresh token")
+        connection.encrypted_refresh_token = refresh_ciphertext
+    connection.token_cipher_version = cipher_version
+    connection.token_expires_at = token_payload.token_expiry
+    connection.granted_scopes_json = list(token_payload.granted_scopes)
+    connection.display_name = token_payload.display_name or connection.display_name
+    connection.username = token_payload.username or connection.username
+    connection.provider_metadata_json = {
+        **dict(connection.provider_metadata_json or {}),
+        **dict(token_payload.provider_metadata),
+    }
+    connection.connection_status = "active"
+    connection.last_refresh_at = _utcnow()
+    connection.last_error_code = None
+    connection.last_error_at = None
+    connection.updated_at = _utcnow()
+    db.add(connection)
+    db.flush()
+    return connection
+
+
+def refresh_youtube_connection_tokens_if_needed(
+    db: Session,
+    connection: SocialConnection,
+    *,
+    force: bool = False,
+) -> SocialConnection:
+    _require_social_configuration()
+    if connection.platform != YOUTUBE_PLATFORM:
+        raise RuntimeError("Only YouTube connections are supported.")
+    if not connection.encrypted_refresh_token:
+        raise RuntimeError("This YouTube connection requires reconnect because no refresh token is stored.")
+
+    expires_at = _coerce_aware(connection.token_expires_at) if connection.token_expires_at else None
+    refresh_deadline = _utcnow() + timedelta(seconds=get_settings().youtube_token_refresh_leeway_seconds)
+    if not force and expires_at and expires_at > refresh_deadline and connection.connection_status == "active":
+        return connection
+
+    try:
+        refresh_token = decrypt_secret(connection.encrypted_refresh_token, purpose="refresh token")
+        token_payload = refresh_tokens(
+            refresh_token=refresh_token,
+            granted_scopes=list(connection.granted_scopes_json or YOUTUBE_OAUTH_SCOPES),
+            fallback_external_account_id=connection.external_account_id,
+            fallback_display_name=connection.display_name,
+            fallback_username=connection.username,
+        )
+    except (SocialTokenCryptoError, YouTubeOAuthError) as exc:
+        connection.connection_status = "revoked" if getattr(exc, "error_code", "") == "youtube_oauth_error" else "error"
+        connection.last_error_code = exc.__class__.__name__
+        connection.last_error_at = _utcnow()
+        connection.updated_at = _utcnow()
+        db.add(connection)
+        db.flush()
+        raise RuntimeError(str(exc)) from exc
+
+    return _persist_refreshed_connection(db, connection, token_payload)
+
+
 def _redirect_with_query(base_url: str, **params: str) -> str:
     parsed = urlparse(base_url)
     query = dict(parse_qsl(parsed.query, keep_blank_values=True))
@@ -283,44 +350,7 @@ def refresh_social_connection(db: Session, connection_id: str) -> dict:
     if not connection.encrypted_refresh_token:
         raise RuntimeError("This connection does not have a stored refresh token.")
 
-    try:
-        refresh_token = decrypt_secret(connection.encrypted_refresh_token, purpose="refresh token")
-        token_payload = refresh_tokens(
-            refresh_token=refresh_token,
-            granted_scopes=list(connection.granted_scopes_json or YOUTUBE_OAUTH_SCOPES),
-            fallback_external_account_id=connection.external_account_id,
-            fallback_display_name=connection.display_name,
-            fallback_username=connection.username,
-        )
-    except (SocialTokenCryptoError, YouTubeOAuthError) as exc:
-        connection.connection_status = "error"
-        connection.last_error_code = exc.__class__.__name__
-        connection.last_error_at = _utcnow()
-        connection.updated_at = _utcnow()
-        db.add(connection)
-        db.commit()
-        raise RuntimeError(str(exc)) from exc
-
-    access_ciphertext, cipher_version = encrypt_secret(token_payload.access_token, purpose="access token")
-    connection.encrypted_access_token = access_ciphertext
-    if token_payload.refresh_token:
-        refresh_ciphertext, _ = encrypt_secret(token_payload.refresh_token, purpose="refresh token")
-        connection.encrypted_refresh_token = refresh_ciphertext
-    connection.token_cipher_version = cipher_version
-    connection.token_expires_at = token_payload.token_expiry
-    connection.granted_scopes_json = list(token_payload.granted_scopes)
-    connection.display_name = token_payload.display_name or connection.display_name
-    connection.username = token_payload.username or connection.username
-    connection.provider_metadata_json = {
-        **dict(connection.provider_metadata_json or {}),
-        **dict(token_payload.provider_metadata),
-    }
-    connection.connection_status = "active"
-    connection.last_refresh_at = _utcnow()
-    connection.last_error_code = None
-    connection.last_error_at = None
-    connection.updated_at = _utcnow()
-    db.add(connection)
+    refresh_youtube_connection_tokens_if_needed(db, connection, force=True)
     db.commit()
     return _serialize_connection_summary(connection)
 
