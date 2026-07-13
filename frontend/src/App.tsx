@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
-import { NavLink, Route, Routes } from "react-router-dom";
+import { NavLink, Route, Routes, useLocation } from "react-router-dom";
 
 import { api, AccessStatus, clearStoredAccessToken, setStoredAccessToken } from "./api/client";
 import { EnvironmentStatusPanel } from "./components/EnvironmentStatusPanel";
@@ -12,11 +12,20 @@ import { IdeasPage } from "./pages/Ideas";
 import { SettingsPage } from "./pages/Settings";
 import { VideoReviewPage } from "./pages/VideoReview";
 import { PerformancePage } from "./pages/Performance";
+import {
+  PublicDataDeletionPage,
+  PublicHomePage,
+  PublicPrivacyPage,
+  PublicTermsPage,
+} from "./pages/PublicPages";
 
 const SIDEBAR_COLLAPSED_STORAGE_KEY = "story-engine-sidebar-collapsed";
 const ACCOUNT_DELETION_NOTICE_KEY = "story-engine-account-deletion-notice";
+const PUBLIC_ROUTES = new Set(["/", "/privacy", "/terms", "/data-deletion"]);
 
 export default function App() {
+  const location = useLocation();
+  const isPublicRoute = PUBLIC_ROUTES.has(location.pathname);
   const [accessStatus, setAccessStatus] = useState<AccessStatus | null>(null);
   const [password, setPassword] = useState("");
   const [isCheckingAccess, setIsCheckingAccess] = useState(true);
@@ -53,10 +62,17 @@ export default function App() {
   }
 
   useEffect(() => {
+    if (isPublicRoute) {
+      setIsCheckingAccess(false);
+      return;
+    }
     refreshAccessStatus().catch(() => undefined);
-  }, []);
+  }, [isPublicRoute]);
 
   useEffect(() => {
+    if (isPublicRoute) {
+      return;
+    }
     async function handleAccessExpired() {
       try {
         const status = await api.getAccessStatus();
@@ -92,7 +108,7 @@ export default function App() {
       window.removeEventListener("app-access-expired", handleAccessExpired);
       window.removeEventListener("story-engine-account-deleted", handleAccountDeleted);
     };
-  }, []);
+  }, [isPublicRoute]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -132,6 +148,17 @@ export default function App() {
           <p className="subtle">Waiting for backend status before loading the app.</p>
         </section>
       </main>
+    );
+  }
+
+  if (isPublicRoute) {
+    return (
+      <Routes>
+        <Route path="/" element={<PublicHomePage />} />
+        <Route path="/privacy" element={<PublicPrivacyPage />} />
+        <Route path="/terms" element={<PublicTermsPage />} />
+        <Route path="/data-deletion" element={<PublicDataDeletionPage />} />
+      </Routes>
     );
   }
 
@@ -222,7 +249,7 @@ export default function App() {
             <p className="subtle brand-tagline">Topic in. Animated video out.</p>
           </div>
           <nav className="nav">
-            <NavLink to="/" title="Dashboard">
+            <NavLink to="/app" title="Dashboard">
               <span className="nav-icon">D</span>
               <span className="nav-label">Dashboard</span>
             </NavLink>
@@ -274,7 +301,7 @@ export default function App() {
       </aside>
       <main className="content">
         <Routes>
-          <Route path="/" element={<DashboardPage />} />
+          <Route path="/app" element={<DashboardPage />} />
           <Route path="/queue" element={<IdeaQueuePage />} />
           <Route path="/assets" element={<AssetLibraryPage />} />
           <Route path="/app/batch-planner" element={<BatchPlannerPage />} />
