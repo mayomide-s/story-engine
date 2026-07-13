@@ -25,6 +25,9 @@ from app.services.providers import get_storage_provider
 
 YOUTUBE_PLATFORM = "youtube"
 ACTIVE_JOB_STATUSES = {"draft", "ready", "approved", "active"}
+ACTIVE_TARGET_STATES = {"pending", "validating", "queued", "uploading", "processing"}
+SUCCESS_TARGET_STATES = {"uploaded_private", "published"}
+FAILURE_TARGET_STATES = {"retryable_failure", "permanent_failure", "outcome_uncertain"}
 
 
 class PublicationConflictError(RuntimeError):
@@ -114,7 +117,9 @@ def _normalize_target_payload(payload: PublicationJobDraftRequest) -> dict[str, 
         "title": payload.title.strip(),
         "caption": payload.caption.strip() if payload.caption else None,
         "tags": list(payload.tags),
+        "category_id": payload.category_id,
         "options": {
+            "category_id": payload.category_id,
             "self_declared_made_for_kids": payload.self_declared_made_for_kids,
             "contains_synthetic_media": payload.contains_synthetic_media,
         },
@@ -155,32 +160,82 @@ def _visibility_semantics(visibility: str) -> tuple[bool, str]:
     )
 
 
-def _serialize_target(target: PublicationTarget) -> dict[str, Any]:
+def _target_available_actions(target: PublicationTarget) -> list[str]:
+    actions: list[str] = []
+    if target.state in {"pending", "queued"}:
+        actions.append("cancel")
+    if target.state in {"pending", "queued"}:
+        actions.append("dispatch")
+    if target.state == "retryable_failure":
+        actions.append("retry")
+    if target.provider_submission_id and target.state in {"processing", "retryable_failure", "outcome_uncertain", "uploading"}:
+        actions.append("reconcile")
+    return actions
+
+
+def _job_available_actions(job: PublicationJob, targets: list[PublicationTarget]) -> list[str]:
+    actions: list[str] = []
+    if job.status == "draft":
+        actions.extend(["approve", "cancel"])
+    elif job.status == "approved":
+        actions.append("dispatch")
+        if all(target.state in {"pending", "queued"} for target in targets):
+            actions.append("cancel")
+    elif job.status == "active" and any("reconcile" in _target_available_actions(target) for target in targets):
+        actions.append("reconcile")
+    return actions
+
+
+def _serialize_target(target: PublicationTarget, connection: SocialConnection | None = None) -> dict[str, Any]:
     eligible, semantics = _visibility_semantics(target.visibility)
+    options = dict(target.options_json or {})
+    total = target.upload_bytes_total
+    sent = target.upload_bytes_sent
+    progress_percent = None
+    if total and total > 0 and sent is not None:
+        progress_percent = max(0, min(100, int((sent / total) * 100)))
     return PublicationTargetResponse(
         id=target.id,
         social_connection_id=target.social_connection_id,
+        channel_display_name=connection.display_name if connection else None,
+        channel_username=connection.username if connection else None,
+        channel_external_account_id=connection.external_account_id if connection else None,
         platform=target.platform,
         visibility=target.visibility,
+        actual_visibility=target.actual_visibility,
         title=target.title,
         caption=target.caption,
         tags=list(target.tags_json or []),
-        options=dict(target.options_json or {}),
+        category_id=str(options.get("category_id") or ""),
+        self_declared_made_for_kids=bool(options.get("self_declared_made_for_kids")),
+        contains_synthetic_media=bool(options.get("contains_synthetic_media")),
+        options=options,
         state=target.state,
         idempotency_key=target.idempotency_key,
+        provider_video_id=target.provider_submission_id,
         provider_submission_id=target.provider_submission_id,
         provider_media_id=target.provider_media_id,
+        provider_upload_status=target.provider_upload_status,
+        provider_processing_status=target.provider_processing_status,
         public_post_url=target.public_post_url,
+        platform_post_id=target.platform_post_id,
         attempt_count=target.attempt_count,
+        upload_bytes_total=target.upload_bytes_total,
+        upload_bytes_sent=target.upload_bytes_sent,
+        upload_progress_percent=progress_percent,
         next_poll_at=target.next_poll_at,
+        processing_last_checked_at=target.processing_last_checked_at,
+        outcome_confirmed_at=target.outcome_confirmed_at,
         last_error_code=target.last_error_code,
         last_error_message=target.last_error_message,
+        reconnect_required=bool(target.last_error_code in {"youtube_invalid_credentials", "youtube_missing_scope", "youtube_oauth_error"}),
         submitted_at=target.submitted_at,
         published_at=target.published_at,
         created_at=target.created_at,
         updated_at=target.updated_at,
         platform_post_creation_eligible=eligible,
         visibility_semantics=semantics,
+        available_actions=_target_available_actions(target),
     ).model_dump(mode="json")
 
 
@@ -208,6 +263,17 @@ def get_publication_job(db: Session, job_id: str) -> dict[str, Any]:
         .order_by(PublicationTarget.created_at.asc(), PublicationTarget.id.asc())
         .all()
     )
+    connection_ids = {target.social_connection_id for target in targets}
+    connections = {
+        connection.id: connection
+        for connection in (
+            db.query(SocialConnection)
+            .filter(SocialConnection.id.in_(connection_ids))
+            .all()
+            if connection_ids
+            else []
+        )
+    }
     return PublicationJobResponse(
         id=job.id,
         pipeline_run_id=job.pipeline_run_id,
@@ -222,7 +288,7 @@ def get_publication_job(db: Session, job_id: str) -> dict[str, Any]:
         completed_at=job.completed_at,
         created_at=job.created_at,
         updated_at=job.updated_at,
-        targets=[_serialize_target(item) for item in targets],
+        targets=[_serialize_target(item, connections.get(item.social_connection_id)) for item in targets],
         selected_asset_is_frozen=True,
         selected_asset_has_changed_since_draft=bool(
             current_asset_id is not None
@@ -231,7 +297,20 @@ def get_publication_job(db: Session, job_id: str) -> dict[str, Any]:
                 or current_revision != job.final_asset_selection_revision
             )
         ),
+        available_actions=_job_available_actions(job, targets),
     ).model_dump(mode="json")
+
+
+def get_latest_publication_job_for_run(db: Session, run_id: str) -> dict[str, Any]:
+    job = (
+        db.query(PublicationJob)
+        .filter(PublicationJob.pipeline_run_id == run_id)
+        .order_by(PublicationJob.created_at.desc(), PublicationJob.id.desc())
+        .first()
+    )
+    if job is None:
+        raise ValueError("Publication job not found")
+    return get_publication_job(db, job.id)
 
 
 def create_publication_job_draft(
@@ -333,7 +412,7 @@ def approve_publication_job(db: Session, job_id: str) -> dict[str, Any]:
     job = db.get(PublicationJob, job_id)
     if job is None:
         raise ValueError("Publication job not found")
-    if job.status == "approved":
+    if job.status in {"approved", "active", "published", "partially_published"}:
         return get_publication_job(db, job.id)
     if job.status == "cancelled":
         raise PublicationConflictError("Cancelled publication jobs cannot be approved.")
@@ -377,6 +456,8 @@ def cancel_publication_job(db: Session, job_id: str) -> dict[str, Any]:
         .filter(PublicationTarget.publication_job_id == job.id)
         .all()
     )
+    if any(target.provider_submission_id or target.state not in {"pending", "queued"} for target in targets):
+        raise PublicationConflictError("Publication jobs cannot be cancelled after provider submission has started.")
     job.status = "cancelled"
     job.updated_at = _utcnow()
     for target in targets:

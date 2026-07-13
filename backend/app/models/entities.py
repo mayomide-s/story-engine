@@ -752,11 +752,25 @@ class PublicationTarget(Base):
             f"visibility IN {YOUTUBE_PUBLICATION_VISIBILITIES}",
             name="ck_publication_targets_visibility",
         ),
+        CheckConstraint(
+            f"actual_visibility IS NULL OR actual_visibility IN {YOUTUBE_PUBLICATION_VISIBILITIES}",
+            name="ck_publication_targets_actual_visibility",
+        ),
+        CheckConstraint(
+            "upload_bytes_total IS NULL OR upload_bytes_total >= 0",
+            name="ck_publication_targets_upload_bytes_total_non_negative",
+        ),
+        CheckConstraint(
+            "upload_bytes_sent IS NULL OR upload_bytes_sent >= 0",
+            name="ck_publication_targets_upload_bytes_sent_non_negative",
+        ),
+        UniqueConstraint("platform_post_id", name="uq_publication_targets_platform_post_id"),
         Index("ix_publication_targets_publication_job_id", "publication_job_id"),
         Index("ix_publication_targets_state", "state"),
         Index("ix_publication_targets_next_poll_at", "next_poll_at"),
         Index("ix_publication_targets_provider_submission_id", "provider_submission_id"),
         Index("ix_publication_targets_provider_media_id", "provider_media_id"),
+        Index("ix_publication_targets_platform_post_id", "platform_post_id"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -764,6 +778,7 @@ class PublicationTarget(Base):
     social_connection_id: Mapped[str] = mapped_column(ForeignKey("social_connections.id", ondelete="RESTRICT"), nullable=False)
     platform: Mapped[str] = mapped_column(String(50), nullable=False)
     visibility: Mapped[str] = mapped_column(String(20), nullable=False)
+    actual_visibility: Mapped[str | None] = mapped_column(String(20))
     title: Mapped[str] = mapped_column(String(100), nullable=False)
     caption: Mapped[str | None] = mapped_column(Text)
     tags_json: Mapped[list] = mapped_column(JSON, default=list)
@@ -773,11 +788,21 @@ class PublicationTarget(Base):
     provider_upload_uri_encrypted: Mapped[str | None] = mapped_column(Text)
     provider_submission_id: Mapped[str | None] = mapped_column(String(255))
     provider_media_id: Mapped[str | None] = mapped_column(String(255))
+    provider_upload_status: Mapped[str | None] = mapped_column(String(50))
+    provider_processing_status: Mapped[str | None] = mapped_column(String(50))
     public_post_url: Mapped[str | None] = mapped_column(Text)
+    platform_post_id: Mapped[str | None] = mapped_column(ForeignKey("platform_posts.id", ondelete="RESTRICT"))
     attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    upload_bytes_total: Mapped[int | None] = mapped_column(BigInteger)
+    upload_bytes_sent: Mapped[int | None] = mapped_column(BigInteger)
     next_poll_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    processing_last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    outcome_confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_error_code: Mapped[str | None] = mapped_column(String(100))
     last_error_message: Mapped[str | None] = mapped_column(Text)
+    worker_claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    worker_claim_token: Mapped[str | None] = mapped_column(String(64))
+    last_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))

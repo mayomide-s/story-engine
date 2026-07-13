@@ -109,7 +109,15 @@ def test_create_publication_job_draft_freezes_selected_asset_and_is_idempotent(c
         assert len(jobs) == 1
         targets = db.query(PublicationTarget).filter(PublicationTarget.publication_job_id == job["id"]).all()
         assert len(targets) == 1
-        assert db.query(PipelineEvent).filter(PipelineEvent.event_type == "publication.job_draft_created").count() == 1
+        assert (
+            db.query(PipelineEvent)
+            .filter(
+                PipelineEvent.pipeline_run_id == run_id,
+                PipelineEvent.event_type == "publication.job_draft_created",
+            )
+            .count()
+            == 1
+        )
 
 
 def test_publication_job_requires_completed_run_and_default_connection(client):

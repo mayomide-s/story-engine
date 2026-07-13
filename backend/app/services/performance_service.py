@@ -494,6 +494,89 @@ def create_platform_post(db: Session, run_id: str, payload: PlatformPostCreatePa
     return _serialize_platform_post(db, post)
 
 
+def create_platform_post_for_publication_target(
+    db: Session,
+    *,
+    run: PipelineRun,
+    package: ManualPostPackage,
+    final_asset_id: str,
+    final_asset_source: str,
+    final_asset_selection_revision: int,
+    final_asset_metadata_json: dict[str, Any] | None,
+    post_url: str,
+    posted_at: datetime,
+    notes: str | None,
+) -> PlatformPost:
+    existing = (
+        db.query(PlatformPost)
+        .filter(
+            PlatformPost.pipeline_run_id == run.id,
+            PlatformPost.platform == PerformancePlatform.YOUTUBE,
+            PlatformPost.post_url == post_url,
+        )
+        .first()
+    )
+    if existing is not None:
+        return existing
+
+    asset = db.get(Asset, final_asset_id)
+    if asset is None or asset.pipeline_run_id != run.id:
+        raise PerformanceConflictError("Frozen publication asset is missing or belongs to another run.")
+
+    post = PlatformPost(
+        pipeline_run_id=run.id,
+        manual_post_package_id=package.id,
+        final_asset_id=final_asset_id,
+        final_asset_source=final_asset_source,
+        final_narration_render_id=None,
+        final_asset_selection_revision=final_asset_selection_revision,
+        final_asset_metadata_json=final_asset_metadata_json or {},
+        platform=PerformancePlatform.YOUTUBE,
+        custom_platform_name=None,
+        post_url=post_url,
+        posted_at=_normalize_aware_datetime(posted_at),
+        notes=notes,
+        created_at=_now_utc(),
+        updated_at=_now_utc(),
+    )
+    try:
+        with db.begin_nested():
+            db.add(post)
+            db.flush()
+    except IntegrityError as exc:
+        duplicate = (
+            db.query(PlatformPost)
+            .filter(
+                PlatformPost.platform == PerformancePlatform.YOUTUBE,
+                PlatformPost.post_url == post_url,
+            )
+            .first()
+        )
+        if duplicate is not None:
+            return duplicate
+        raise PerformanceConflictError("A platform post with this platform and URL already exists.") from exc
+
+    summary_changes = _sync_manual_post_package_summary(package, post)
+    db.add(package)
+    add_event(
+        db,
+        run.id,
+        "performance.post_created",
+        "Platform post recorded",
+        stage=run.current_stage.value if hasattr(run.current_stage, "value") else str(run.current_stage),
+        metadata={
+            "platform_post_id": post.id,
+            "platform": post.platform.value,
+            "final_asset_id": post.final_asset_id,
+            "final_asset_source": post.final_asset_source,
+            "final_asset_selection_revision": post.final_asset_selection_revision,
+            "manual_post_package_updates": summary_changes,
+        },
+    )
+    db.flush()
+    return post
+
+
 def _get_platform_post_for_run(db: Session, run_id: str, post_id: str) -> tuple[PipelineRun, PlatformPost]:
     run = db.get(PipelineRun, run_id)
     if run is None:

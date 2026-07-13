@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import { api, AssetLibraryDetail, AssetLibraryItem } from "../api/client";
 import { PerformanceLearningsSummary } from "../components/PerformanceLearningsSummary";
 import { PerformanceWinnerSummary } from "../components/PerformanceWinnerSummary";
+import { YouTubePublicationPanel } from "../components/YouTubePublicationPanel";
 import { ExportPackPanel } from "../components/ExportPackPanel";
 import { normalizeQualityChecklist } from "../qualityChecklist";
 import { formatProvider, formatRunStatus, formatVideoStatus } from "../utils/display";
@@ -293,6 +294,12 @@ export function AssetLibraryPage() {
               summary={learningsSummary}
               performanceHref={selectedItem ? `/performance/${selectedItem.run_id}` : undefined}
               compact
+            />
+            <YouTubePublicationPanel
+              runId={selectedItem.run_id}
+              runStatus={String(detail.pipeline_run.status ?? "")}
+              finalAssetSelection={finalSelection}
+              manualPostPackage={manualPackage}
             />
             {detail.idea ? (
               <div className="copy-block">

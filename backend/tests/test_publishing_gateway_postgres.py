@@ -35,7 +35,7 @@ from app.services.social_token_crypto import decrypt_secret
 
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
-EXPECTED_HEAD = "0019_publishing_gateway_core"
+EXPECTED_HEAD = "0020_youtube_publication_execution"
 TEST_POSTGRES_DATABASE_URL = os.environ.get("TEST_POSTGRES_DATABASE_URL")
 
 
@@ -184,7 +184,7 @@ def test_postgres_publication_gateway_migration_upgrade_downgrade_reupgrade():
     admin_url = _get_admin_url()
     with _temporary_database(admin_url, "story_engine_pgpub") as (_database_name, database_url):
         _run_alembic(database_url, "upgrade", "0018_postgres_migration_compatibility")
-        _run_alembic(database_url, "upgrade", "0019_publishing_gateway_core")
+        _run_alembic(database_url, "upgrade", "0020_youtube_publication_execution")
 
         engine = create_engine(database_url, future=True)
         inspector = inspect(engine)
@@ -204,6 +204,9 @@ def test_postgres_publication_gateway_migration_upgrade_downgrade_reupgrade():
         assert "uq_publication_targets_idempotency_key" in {
             constraint["name"] for constraint in inspector.get_unique_constraints("publication_targets")
         }
+        assert "uq_publication_targets_platform_post_id" in {
+            constraint["name"] for constraint in inspector.get_unique_constraints("publication_targets")
+        }
         assert "ix_oauth_states_expires_at" in {index["name"] for index in inspector.get_indexes("oauth_states")}
         assert "ix_social_connections_account_platform" in {
             index["name"] for index in inspector.get_indexes("social_connections")
@@ -212,6 +215,9 @@ def test_postgres_publication_gateway_migration_upgrade_downgrade_reupgrade():
             index["name"] for index in inspector.get_indexes("publication_jobs")
         }
         assert "ix_publication_targets_next_poll_at" in {
+            index["name"] for index in inspector.get_indexes("publication_targets")
+        }
+        assert "ix_publication_targets_platform_post_id" in {
             index["name"] for index in inspector.get_indexes("publication_targets")
         }
         social_columns = {column["name"]: column for column in inspector.get_columns("social_connections")}
@@ -223,13 +229,16 @@ def test_postgres_publication_gateway_migration_upgrade_downgrade_reupgrade():
         target_columns = {column["name"]: column for column in inspector.get_columns("publication_targets")}
         assert target_columns["provider_upload_uri_encrypted"]["type"].__class__.__name__.lower() == "text"
         assert target_columns["next_poll_at"]["type"].timezone is True
+        assert "platform_post_id" in target_columns
+        assert "actual_visibility" in target_columns
+        assert "upload_bytes_sent" in target_columns
 
         _run_alembic(database_url, "downgrade", "0018_postgres_migration_compatibility")
         inspector = inspect(engine)
         assert "social_connections" not in inspector.get_table_names()
         assert "publication_jobs" not in inspector.get_table_names()
 
-        _run_alembic(database_url, "upgrade", "0019_publishing_gateway_core")
+        _run_alembic(database_url, "upgrade", "0020_youtube_publication_execution")
         with engine.connect() as connection:
             revision = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
         assert revision == EXPECTED_HEAD
@@ -271,6 +280,7 @@ def test_postgres_publication_gateway_create_all_supports_new_tables():
         target_columns = {column["name"]: column for column in inspector.get_columns("publication_targets")}
         assert "provider_upload_uri_encrypted" in target_columns
         assert "published_at" in target_columns
+        assert "platform_post_id" in target_columns
         engine.dispose()
 
 
@@ -297,7 +307,7 @@ def test_postgres_publication_gateway_service_integration(monkeypatch):
 
     admin_url = _get_admin_url()
     with _temporary_database(admin_url, "story_engine_pgpubsvc") as (_database_name, database_url):
-        _run_alembic(database_url, "upgrade", "0019_publishing_gateway_core")
+        _run_alembic(database_url, "upgrade", "0020_youtube_publication_execution")
         engine = _build_runtime_engine(database_url)
         storage_root = Path(tempfile.mkdtemp(prefix="story_engine_pgpub_storage_"))
         monkeypatch.setenv("DATABASE_URL", database_url)
