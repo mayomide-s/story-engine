@@ -87,12 +87,50 @@ def _version_column_length(engine) -> int | None:
     return version_column["type"].length
 
 
+def _insert_account_for_current_schema(engine) -> str:
+    account_columns = {column["name"] for column in inspect(engine).get_columns("accounts")}
+    if "account_status" in account_columns:
+        with Session(engine) as session:
+            account = Account(name=f"acct-{uuid.uuid4().hex[:8]}", niche="coding")
+            session.add(account)
+            session.flush()
+            session.commit()
+            return account.id
+
+    account_id = str(uuid.uuid4())
+    now = datetime.now(UTC)
+    values: dict[str, object] = {
+        "id": account_id,
+        "name": f"acct-{uuid.uuid4().hex[:8]}",
+        "niche": "coding",
+        "account_config_json": "{}",
+        "created_at": now,
+        "updated_at": now,
+    }
+    if "deletion_started_at" in account_columns:
+        values["deletion_started_at"] = None
+    if "deleted_at" in account_columns:
+        values["deleted_at"] = None
+
+    column_names = list(values.keys())
+    placeholders = [f":{column_name}" for column_name in column_names]
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                f"""
+                INSERT INTO accounts ({", ".join(column_names)})
+                VALUES ({", ".join(placeholders)})
+                """
+            ),
+            values,
+        )
+    return account_id
+
+
 def _create_run(engine, topic: str) -> str:
+    account_id = _insert_account_for_current_schema(engine)
     with Session(engine) as session:
-        account = Account(name=f"acct-{uuid.uuid4().hex[:8]}", niche="coding")
-        session.add(account)
-        session.flush()
-        run = PipelineRun(account_id=account.id, topic=topic, status=PipelineStatus.COMPLETED)
+        run = PipelineRun(account_id=account_id, topic=topic, status=PipelineStatus.COMPLETED)
         session.add(run)
         session.commit()
         return run.id
@@ -285,6 +323,32 @@ def test_postgres_existing_0017_upgrades_to_0018_without_rewriting_learning_data
         assert _postgres_default_expression(engine) == "false"
         account_columns = {column["name"] for column in inspect(engine).get_columns("accounts")}
         assert {"account_status", "deletion_started_at", "deleted_at"} <= account_columns
+        engine.dispose()
+
+
+@pytest.mark.skipif(not TEST_POSTGRES_DATABASE_URL, reason="TEST_POSTGRES_DATABASE_URL is not configured.")
+def test_postgres_pre_0023_seed_helper_supports_0017_account_schema():
+    admin_url = _get_admin_url()
+    with _temporary_database(admin_url, "story_engine_pg0017seed") as (_database_name, database_url):
+        _run_alembic(database_url, "upgrade", "0017_performance_learnings")
+        engine = create_engine(database_url, future=True)
+
+        account_columns = {column["name"] for column in inspect(engine).get_columns("accounts")}
+        assert "account_status" not in account_columns
+
+        run_id = _create_run(engine, "Pre-0023 account seed compatibility")
+        with engine.connect() as connection:
+            persisted_run = connection.execute(
+                text("SELECT id, account_id FROM pipeline_runs WHERE id = :run_id"),
+                {"run_id": run_id},
+            ).mappings().one()
+            persisted_account = connection.execute(
+                text("SELECT id FROM accounts WHERE id = :account_id"),
+                {"account_id": persisted_run["account_id"]},
+            ).mappings().one()
+
+        assert persisted_run["id"] == run_id
+        assert persisted_account["id"] == persisted_run["account_id"]
         engine.dispose()
 
 
