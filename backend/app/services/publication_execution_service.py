@@ -517,8 +517,8 @@ def process_youtube_publication_target(db: Session, target_id: str) -> dict[str,
                 session_uri = initiate_resumable_upload(
                     db,
                     connection,
-                    target,
-                    media_path,
+                    target=target,
+                    media_path=media_path,
                     mime_type=asset.mime_type or "video/mp4",
                 )
                 target.provider_upload_uri_encrypted = _encrypt_session_uri(session_uri)
@@ -536,8 +536,8 @@ def process_youtube_publication_target(db: Session, target_id: str) -> dict[str,
             progress = upload_media_chunks(
                 db,
                 connection,
-                session_uri,
-                media_path,
+                session_uri=session_uri,
+                media_path=media_path,
                 mime_type=asset.mime_type or "video/mp4",
                 chunk_size=get_settings().youtube_upload_chunk_size_bytes,
                 bytes_sent=target.upload_bytes_sent or 0,
@@ -701,7 +701,7 @@ def _poll_youtube_publication_target_claimed(
 
     try:
         connection = refresh_youtube_connection_tokens_if_needed(db, connection)
-        state = fetch_youtube_video_state(db, connection, target.provider_submission_id)
+        state = fetch_youtube_video_state(db, connection, video_id=target.provider_submission_id)
         now = _utcnow()
         target.processing_last_checked_at = now
         target.provider_upload_status = state.upload_status

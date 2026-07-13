@@ -228,11 +228,11 @@ def test_redelivered_upload_worker_with_video_id_skips_second_upload(client, mon
 
     def upload(*args, **kwargs):
         upload_calls["chunks"] += 1
-        media_path = args[3]
+        media_path = kwargs["media_path"]
         return YouTubeUploadProgress(
             bytes_sent=media_path.stat().st_size,
             total_bytes=media_path.stat().st_size,
-            session_uri=args[2],
+            session_uri=kwargs["session_uri"],
             video_id="unl123xyz98",
         )
 
@@ -308,10 +308,18 @@ def test_crash_after_session_persistence_reuses_resumable_session_without_reuplo
     monkeypatch.setattr("app.services.publication_execution_service._enqueue_start_target", lambda target_id, countdown=0: None)
     monkeypatch.setattr("app.services.publication_execution_service._enqueue_poll_target", lambda target_id, countdown=0: None)
     monkeypatch.setattr("app.services.publication_execution_service.refresh_youtube_connection_tokens_if_needed", lambda db, connection, force=False: connection)
-    monkeypatch.setattr("app.services.publication_execution_service.initiate_resumable_upload", lambda db, connection, target, media_path, mime_type: "https://upload.example/session/reused")
+    monkeypatch.setattr(
+        "app.services.publication_execution_service.initiate_resumable_upload",
+        lambda db, connection, target=None, media_path=None, mime_type=None: "https://upload.example/session/reused",
+    )
 
     def crashing_upload(*args, **kwargs):
-        upload_calls.append({"probe_existing_session": kwargs["probe_existing_session"], "session_uri": args[2]})
+        upload_calls.append(
+            {
+                "probe_existing_session": kwargs["probe_existing_session"],
+                "session_uri": kwargs["session_uri"],
+            }
+        )
         raise SystemExit("simulated worker crash")
 
     monkeypatch.setattr("app.services.publication_execution_service.upload_media_chunks", crashing_upload)
@@ -336,12 +344,17 @@ def test_crash_after_session_persistence_reuses_resumable_session_without_reuplo
         db.commit()
 
     def resumed_upload(*args, **kwargs):
-        upload_calls.append({"probe_existing_session": kwargs["probe_existing_session"], "session_uri": args[2]})
-        media_path = args[3]
+        upload_calls.append(
+            {
+                "probe_existing_session": kwargs["probe_existing_session"],
+                "session_uri": kwargs["session_uri"],
+            }
+        )
+        media_path = kwargs["media_path"]
         return YouTubeUploadProgress(
             bytes_sent=media_path.stat().st_size,
             total_bytes=media_path.stat().st_size,
-            session_uri=args[2],
+            session_uri=kwargs["session_uri"],
             video_id="resume12345",
         )
 
