@@ -1,10 +1,22 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
-import { api, AccountDefaults } from "../api/client";
+import {
+  api,
+  AccountDefaults,
+  AccountDeletionPreview,
+  AccessStatus,
+  RetentionReport,
+  clearStoredAccessToken,
+} from "../api/client";
 import { AUDIENCE_LEVELS, CONTENT_FORMATS, EMOJI_PREFERENCES, STYLE_PRESETS, TARGET_PLATFORMS } from "../constants";
+
+const ACCOUNT_DELETION_NOTICE_KEY = "story-engine-account-deletion-notice";
 
 export function SettingsPage() {
   const [defaults, setDefaults] = useState<AccountDefaults | null>(null);
+  const [accessStatus, setAccessStatus] = useState<AccessStatus | null>(null);
+  const [deletionPreview, setDeletionPreview] = useState<AccountDeletionPreview | null>(null);
+  const [retentionReport, setRetentionReport] = useState<RetentionReport | null>(null);
   const [stylePreset, setStylePreset] = useState("clean_3d_cartoon");
   const [targetPlatforms, setTargetPlatforms] = useState<string[]>(["instagram", "tiktok", "youtube"]);
   const [captionTone, setCaptionTone] = useState("playful explainer");
@@ -17,7 +29,12 @@ export function SettingsPage() {
   const [avoidPhrases, setAvoidPhrases] = useState("");
   const [emojiPreference, setEmojiPreference] = useState("minimal");
   const [error, setError] = useState("");
+  const [deletionError, setDeletionError] = useState("");
   const [isSaving, setIsSaving] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [confirmationPhrase, setConfirmationPhrase] = useState("");
+  const [deletionPassword, setDeletionPassword] = useState("");
+  const [acknowledgeProviderVideosRemainOnline, setAcknowledgeProviderVideosRemainOnline] = useState(false);
 
   function applyConfig(config: AccountDefaults["account_config_json"]) {
     setStylePreset(String(config.default_style_preset ?? "clean_3d_cartoon"));
@@ -43,9 +60,20 @@ export function SettingsPage() {
     });
   }
 
+  async function loadDeletionContext() {
+    const [status, preview, retention] = await Promise.all([
+      api.getAccessStatus(),
+      api.getAccountDeletionPreview(),
+      api.getRetentionReport(),
+    ]);
+    setAccessStatus(status);
+    setDeletionPreview(preview);
+    setRetentionReport(retention);
+  }
+
   useEffect(() => {
-    api.getAccountDefaults()
-      .then((data) => {
+    Promise.all([api.getAccountDefaults(), loadDeletionContext()])
+      .then(([data]) => {
         setDefaults(data);
         applyConfig(data.account_config_json);
       })
@@ -75,6 +103,50 @@ export function SettingsPage() {
       setError(requestError instanceof Error ? requestError.message : "Failed to save brand defaults.");
     } finally {
       setIsSaving(false);
+    }
+  }
+
+  const requiresPassword = Boolean(accessStatus?.auth_enabled && deletionPreview?.requires_password_confirmation);
+  const canSubmitDeletion = useMemo(() => {
+    if (!deletionPreview?.can_delete) {
+      return false;
+    }
+    if (confirmationPhrase.trim() !== deletionPreview.confirmation_phrase) {
+      return false;
+    }
+    if (!acknowledgeProviderVideosRemainOnline) {
+      return false;
+    }
+    if (requiresPassword && !deletionPassword.trim()) {
+      return false;
+    }
+    return true;
+  }, [acknowledgeProviderVideosRemainOnline, confirmationPhrase, deletionPassword, deletionPreview, requiresPassword]);
+
+  async function handleDeleteAccount() {
+    if (!deletionPreview) {
+      return;
+    }
+    try {
+      setDeletionError("");
+      setIsDeleting(true);
+      await api.validateAccountDeletion({
+        confirmation_phrase: confirmationPhrase,
+        acknowledge_provider_videos_remain_online: acknowledgeProviderVideosRemainOnline,
+        password: requiresPassword ? deletionPassword : null,
+      });
+      const result = await api.deleteAccount({
+        confirmation_phrase: confirmationPhrase,
+        acknowledge_provider_videos_remain_online: acknowledgeProviderVideosRemainOnline,
+        password: requiresPassword ? deletionPassword : null,
+      });
+      window.sessionStorage.setItem(ACCOUNT_DELETION_NOTICE_KEY, result.message);
+      clearStoredAccessToken();
+      window.dispatchEvent(new CustomEvent("story-engine-account-deleted", { detail: { message: result.message } }));
+    } catch (requestError) {
+      setDeletionError(requestError instanceof Error ? requestError.message : "Failed to delete the account.");
+    } finally {
+      setIsDeleting(false);
     }
   }
 
@@ -155,6 +227,134 @@ export function SettingsPage() {
             <span>Words/Phrases To Avoid</span>
             <textarea value={avoidPhrases} onChange={(event) => setAvoidPhrases(event.target.value)} rows={3} />
           </label>
+        </div>
+      </section>
+      <section className="panel stack">
+        <div>
+          <p className="eyebrow">Danger Zone</p>
+          <h3>Delete account</h3>
+          <p className="subtle">
+            Deleting the account permanently removes local Story Engine data, disconnects social accounts, logs you out,
+            and cannot be undone.
+          </p>
+        </div>
+        <div className="notice-card danger">
+          <strong>Uploaded provider videos stay online</strong>
+          <p>{deletionPreview?.provider_video_warning ?? "Uploaded provider videos remain online and must be removed on those platforms separately."}</p>
+        </div>
+        {retentionReport ? (
+          <div className="notice-card">
+            <strong>Retention policy</strong>
+            <p>
+              Story Engine currently uses a {retentionReport.default_retention_months}-month maximum retention window for data
+              that is no longer needed and exposes a dry-run retention report for review.
+            </p>
+          </div>
+        ) : null}
+        {deletionPreview ? (
+          <>
+            <div className="stack">
+              <strong>Connected accounts to disconnect</strong>
+              {deletionPreview.connected_accounts.length === 0 ? (
+                <p className="subtle">No connected social accounts were found.</p>
+              ) : (
+                <ul>
+                  {deletionPreview.connected_accounts.map((item) => (
+                    <li key={`${item.platform}-${item.display_name ?? item.username ?? "connection"}`}>
+                      {item.platform}
+                      {item.display_name ? ` - ${item.display_name}` : ""}
+                      {item.username ? ` (${item.username})` : ""}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+            <div className="stack">
+              <strong>Data that will be deleted</strong>
+              <ul>
+                {deletionPreview.deletion_categories.map((item) => (
+                  <li key={item.key}>
+                    {item.title} ({item.count}) - {item.description}
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <div className="stack">
+              <strong>Data that will be anonymised</strong>
+              <ul>
+                {deletionPreview.anonymised_categories.map((item) => (
+                  <li key={item.key}>
+                    {item.title} ({item.count}) - {item.description}
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <div className="stack">
+              <strong>Data that may be temporarily retained</strong>
+              <ul>
+                {deletionPreview.temporarily_retained_categories.map((item) => (
+                  <li key={item.key}>
+                    {item.title} ({item.count}) - {item.description}
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <label className="field">
+              <span>Type the confirmation phrase</span>
+              <input
+                aria-label="Delete account confirmation phrase"
+                value={confirmationPhrase}
+                onChange={(event) => setConfirmationPhrase(event.target.value)}
+                placeholder={deletionPreview.confirmation_phrase}
+              />
+            </label>
+            {requiresPassword ? (
+              <label className="field">
+                <span>Re-enter the app access password</span>
+                <input
+                  aria-label="Delete account password confirmation"
+                  type="password"
+                  value={deletionPassword}
+                  onChange={(event) => setDeletionPassword(event.target.value)}
+                  placeholder="Enter the current app access password"
+                />
+              </label>
+            ) : (
+              <p className="subtle">This environment does not support password re-entry, so deletion uses the current protected session plus the confirmation steps below.</p>
+            )}
+            <label className="toggle-chip">
+              <input
+                type="checkbox"
+                checked={acknowledgeProviderVideosRemainOnline}
+                onChange={(event) => setAcknowledgeProviderVideosRemainOnline(event.target.checked)}
+              />
+              <span>I understand that uploaded YouTube videos remain online and are not deleted automatically.</span>
+            </label>
+            <div className="notice-card danger">
+              <strong>Irreversible action</strong>
+              <p>This permanently deletes the Story Engine account and logs you out immediately.</p>
+            </div>
+          </>
+        ) : (
+          <p className="subtle">Loading deletion preview...</p>
+        )}
+        {deletionError ? <p className="error">{deletionError}</p> : null}
+        <div className="hero-actions">
+          <button
+            className="secondary"
+            type="button"
+            onClick={() => {
+              setConfirmationPhrase("");
+              setDeletionPassword("");
+              setAcknowledgeProviderVideosRemainOnline(false);
+              setDeletionError("");
+            }}
+          >
+            Clear Confirmation
+          </button>
+          <button type="button" disabled={!canSubmitDeletion || isDeleting} onClick={handleDeleteAccount}>
+            {isDeleting ? "Deleting account..." : "Delete account"}
+          </button>
         </div>
       </section>
     </div>

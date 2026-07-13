@@ -113,6 +113,22 @@ def test_readiness_engine_reports_blockers_for_missing_production_and_policy_dat
     assert "support-contact" in blocker_keys
 
 
+def test_readiness_includes_account_deletion_and_retention_controls(client):
+    readiness = client.get("/api/social-connections/youtube/compliance/readiness")
+    assert readiness.status_code == 200
+    requirements = {item["key"]: item for item in readiness.json()["requirements"]}
+
+    assert requirements["account-deletion-capability"]["status"] == "pass"
+    assert requirements["account-deletion-capability"]["evidence_source"] == "implemented_code"
+    assert requirements["retention-policy-configuration"]["status"] == "pass"
+    assert requirements["retention-policy-configuration"]["evidence_source"] == "implemented_code"
+
+    package = client.get("/api/social-connections/youtube/compliance/package")
+    assert package.status_code == 200
+    assert "account_deletion_flow" in str(package.json()["oauth_and_access"])
+    assert "deletion_and_revocation_controls" in str(package.json()["user_controls"])
+
+
 def test_human_confirmations_can_be_set_and_cleared(client):
     _complete_submission_profile(client)
 

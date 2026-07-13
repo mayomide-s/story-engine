@@ -35,7 +35,7 @@ from app.services.social_token_crypto import decrypt_secret
 
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
-EXPECTED_HEAD = "0022_youtube_compliance_submission_package"
+EXPECTED_HEAD = "0023_account_deletion_retention"
 TEST_POSTGRES_DATABASE_URL = os.environ.get("TEST_POSTGRES_DATABASE_URL")
 
 
@@ -184,7 +184,7 @@ def test_postgres_publication_gateway_migration_upgrade_downgrade_reupgrade():
     admin_url = _get_admin_url()
     with _temporary_database(admin_url, "story_engine_pgpub") as (_database_name, database_url):
         _run_alembic(database_url, "upgrade", "0018_postgres_migration_compatibility")
-        _run_alembic(database_url, "upgrade", "0022_youtube_compliance_submission_package")
+        _run_alembic(database_url, "upgrade", "0023_account_deletion_retention")
 
         engine = create_engine(database_url, future=True)
         inspector = inspect(engine)
@@ -237,6 +237,8 @@ def test_postgres_publication_gateway_migration_upgrade_downgrade_reupgrade():
         assert "compliance_status" in compliance_columns
         assert "status_updated_at" in compliance_columns
         assert "submission_date" in compliance_columns
+        account_columns = {column["name"] for column in inspector.get_columns("accounts")}
+        assert {"account_status", "deletion_started_at", "deleted_at"} <= account_columns
 
         _run_alembic(database_url, "downgrade", "0018_postgres_migration_compatibility")
         inspector = inspect(engine)
@@ -244,7 +246,7 @@ def test_postgres_publication_gateway_migration_upgrade_downgrade_reupgrade():
         assert "publication_jobs" not in inspector.get_table_names()
         assert "youtube_project_compliance" not in inspector.get_table_names()
 
-        _run_alembic(database_url, "upgrade", "0022_youtube_compliance_submission_package")
+        _run_alembic(database_url, "upgrade", "0023_account_deletion_retention")
         with engine.connect() as connection:
             revision = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
         assert revision == EXPECTED_HEAD
@@ -289,6 +291,8 @@ def test_postgres_publication_gateway_create_all_supports_new_tables():
         assert "published_at" in target_columns
         assert "platform_post_id" in target_columns
         assert "youtube_project_compliance" in inspector.get_table_names()
+        account_columns = {column["name"] for column in inspector.get_columns("accounts")}
+        assert {"account_status", "deletion_started_at", "deleted_at"} <= account_columns
         engine.dispose()
 
 
@@ -320,15 +324,15 @@ def test_sqlite_publication_gateway_downgrade_reupgrade_from_current_schema():
         with engine.begin() as connection:
             connection.exec_driver_sql("CREATE TABLE alembic_version (version_num VARCHAR(64) NOT NULL PRIMARY KEY)")
             connection.exec_driver_sql(
-                "INSERT INTO alembic_version (version_num) VALUES ('0022_youtube_compliance_submission_package')"
+                "INSERT INTO alembic_version (version_num) VALUES ('0023_account_deletion_retention')"
             )
 
-        _run_alembic(database_url, "downgrade", "0020_youtube_publication_execution")
+        _run_alembic(database_url, "downgrade", "0022_youtube_compliance_submission_package")
         with engine.connect() as connection:
             revision = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-        assert revision == "0020_youtube_publication_execution"
+        assert revision == "0022_youtube_compliance_submission_package"
 
-        _run_alembic(database_url, "upgrade", "0022_youtube_compliance_submission_package")
+        _run_alembic(database_url, "upgrade", "0023_account_deletion_retention")
         with engine.connect() as connection:
             revision = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
         assert revision == EXPECTED_HEAD
@@ -338,6 +342,8 @@ def test_sqlite_publication_gateway_downgrade_reupgrade_from_current_schema():
         assert "platform_post_id" in target_columns
         assert "actual_visibility" in target_columns
         assert "youtube_project_compliance" in inspector.get_table_names()
+        account_columns = {column["name"] for column in inspector.get_columns("accounts")}
+        assert {"account_status", "deletion_started_at", "deleted_at"} <= account_columns
         engine.dispose()
     finally:
         if os.path.exists(temp_db.name):
@@ -350,7 +356,7 @@ def test_postgres_publication_gateway_service_integration(monkeypatch):
 
     admin_url = _get_admin_url()
     with _temporary_database(admin_url, "story_engine_pgpubsvc") as (_database_name, database_url):
-        _run_alembic(database_url, "upgrade", "0022_youtube_compliance_submission_package")
+        _run_alembic(database_url, "upgrade", "0023_account_deletion_retention")
         engine = _build_runtime_engine(database_url)
         storage_root = Path(tempfile.mkdtemp(prefix="story_engine_pgpub_storage_"))
         monkeypatch.setenv("DATABASE_URL", database_url)
