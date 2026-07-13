@@ -8,7 +8,7 @@ import pytest
 
 from app.config import get_settings
 from app.db.session import SessionLocal
-from app.models import Asset, ManualPostPackage, PipelineEvent, PipelineRun, PublicationJob, PublicationTarget, SocialConnection
+from app.models import Asset, ManualPostPackage, PipelineEvent, PipelineRun, PublicationJob, PublicationTarget, SocialConnection, YouTubeProjectCompliance
 from app.services.pipeline_service import seed_default_account
 
 
@@ -60,6 +60,25 @@ def _create_active_youtube_connection():
         db.commit()
         db.refresh(connection)
         return connection.id
+
+
+def _set_youtube_compliance_status(status: str):
+    with SessionLocal() as db:
+        record = db.query(YouTubeProjectCompliance).filter(YouTubeProjectCompliance.platform == "youtube").first()
+        if record is None:
+            record = YouTubeProjectCompliance(
+                platform="youtube",
+                compliance_status=status,
+                status_updated_at=datetime.now(UTC),
+                created_at=datetime.now(UTC),
+                updated_at=datetime.now(UTC),
+            )
+        else:
+            record.compliance_status = status
+            record.status_updated_at = datetime.now(UTC)
+            record.updated_at = datetime.now(UTC)
+        db.add(record)
+        db.commit()
 
 
 def test_create_publication_job_draft_freezes_selected_asset_and_is_idempotent(client):
@@ -209,6 +228,7 @@ def test_publication_job_rejects_non_selected_or_unreadable_asset(client):
 def test_approve_and_cancel_publication_job_are_idempotent_and_do_not_create_platform_posts(client):
     run_id, _payload = _create_completed_run(client)
     connection_id = _create_active_youtube_connection()
+    _set_youtube_compliance_status("audit_approved")
 
     created = client.post(
         f"/api/pipeline-runs/{run_id}/publication-jobs",
@@ -277,6 +297,7 @@ def test_approve_and_cancel_publication_job_are_idempotent_and_do_not_create_pla
 def test_publication_job_detects_selected_asset_change_after_draft(client):
     run_id, payload = _create_completed_run(client)
     connection_id = _create_active_youtube_connection()
+    _set_youtube_compliance_status("audit_approved")
 
     created = client.post(
         f"/api/pipeline-runs/{run_id}/publication-jobs",
@@ -356,3 +377,111 @@ def test_publication_job_response_marks_reconnect_required_for_revoked_or_missin
     response = client.get(f"/api/publication-jobs/{job_id}")
     assert response.status_code == 200
     assert response.json()["targets"][0]["reconnect_required"] is True
+
+
+@pytest.mark.parametrize("status", ["private_only", "audit_pending", "audit_approved", "unknown"])
+def test_private_publication_job_remains_allowed_for_all_safe_compliance_states(client, monkeypatch, status: str):
+    run_id, _payload = _create_completed_run(client)
+    connection_id = _create_active_youtube_connection()
+    _set_youtube_compliance_status(status)
+
+    asset_hash_called = {"value": False}
+
+    import app.services.publication_service as publication_service
+
+    original_asset_hash = publication_service._asset_sha256
+
+    def spy_asset_hash(asset):
+        asset_hash_called["value"] = True
+        return original_asset_hash(asset)
+
+    monkeypatch.setattr(publication_service, "_asset_sha256", spy_asset_hash)
+
+    response = client.post(
+        f"/api/pipeline-runs/{run_id}/publication-jobs",
+        json={
+            "connection_id": connection_id,
+            "title": "Private is safe",
+            "caption": "Private upload",
+            "tags": ["youtube"],
+            "privacy": "private",
+            "self_declared_made_for_kids": False,
+            "contains_synthetic_media": True,
+        },
+    )
+
+    assert response.status_code == 201
+    assert response.json()["job"]["targets"][0]["visibility"] == "private"
+    assert asset_hash_called["value"] is True
+
+
+@pytest.mark.parametrize("status,privacy", [
+    ("unknown", "unlisted"),
+    ("private_only", "unlisted"),
+    ("audit_pending", "unlisted"),
+    ("unknown", "public"),
+    ("private_only", "public"),
+    ("audit_pending", "public"),
+])
+def test_unlisted_and_public_are_blocked_without_side_effects(client, monkeypatch, status: str, privacy: str):
+    run_id, _payload = _create_completed_run(client)
+    connection_id = _create_active_youtube_connection()
+    _set_youtube_compliance_status(status)
+
+    import app.services.publication_service as publication_service
+
+    asset_hash_called = {"value": False}
+    monkeypatch.setattr(
+        publication_service,
+        "_asset_sha256",
+        lambda asset: asset_hash_called.__setitem__("value", True),
+    )
+
+    with SessionLocal() as db:
+        jobs_before = db.query(PublicationJob).filter(PublicationJob.pipeline_run_id == run_id).count()
+        targets_before = db.query(PublicationTarget).count()
+        events_before = db.query(PipelineEvent).filter(PipelineEvent.pipeline_run_id == run_id).count()
+
+    response = client.post(
+        f"/api/pipeline-runs/{run_id}/publication-jobs",
+        json={
+            "connection_id": connection_id,
+            "title": "Blocked visibility",
+            "caption": "Blocked visibility",
+            "tags": ["youtube"],
+            "privacy": privacy,
+            "self_declared_made_for_kids": False,
+            "contains_synthetic_media": True,
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "youtube_compliance_audit_required"
+    assert asset_hash_called["value"] is False
+
+    with SessionLocal() as db:
+        assert db.query(PublicationJob).filter(PublicationJob.pipeline_run_id == run_id).count() == jobs_before
+        assert db.query(PublicationTarget).count() == targets_before
+        assert db.query(PipelineEvent).filter(PipelineEvent.pipeline_run_id == run_id).count() == events_before
+
+
+def test_unlisted_and_public_become_available_after_audit_approval(client):
+    run_id, _payload = _create_completed_run(client)
+    connection_id = _create_active_youtube_connection()
+    _set_youtube_compliance_status("audit_approved")
+
+    for privacy in ("unlisted", "public"):
+        response = client.post(
+            f"/api/pipeline-runs/{run_id}/publication-jobs",
+            json={
+                "connection_id": connection_id,
+                "title": f"{privacy} title",
+                "caption": "Allowed after approval",
+                "tags": ["youtube"],
+                "privacy": privacy,
+                "self_declared_made_for_kids": False,
+                "contains_synthetic_media": True,
+            },
+        )
+        assert response.status_code == 201
+        assert response.json()["job"]["targets"][0]["visibility"] == privacy

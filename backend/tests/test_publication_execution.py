@@ -63,6 +63,29 @@ def _patch_execution_isolation(monkeypatch):
     monkeypatch.setattr("app.services.publication_execution_service._decrypt_session_uri", lambda value: value)
 
 
+def _set_youtube_compliance_status(client, status: str):
+    payload = {
+        "compliance_status": status,
+        "submission_date": None,
+        "approval_date": None,
+        "case_reference": None,
+        "admin_note": None,
+        "confirm_audit_approved": False,
+    }
+    if status == "audit_approved":
+        payload.update(
+            {
+                "submission_date": "2026-07-13",
+                "approval_date": "2026-07-14",
+                "case_reference": "YT-AUDIT-EXEC",
+                "admin_note": "Execution test approval",
+                "confirm_audit_approved": True,
+            }
+        )
+    response = client.patch("/api/social-connections/youtube/compliance", json=payload)
+    assert response.status_code == 200
+
+
 def _create_and_approve_job(client, run_id: str, connection_id: str, *, privacy: str = "private"):
     created = client.post(
         f"/api/pipeline-runs/{run_id}/publication-jobs",
@@ -153,6 +176,7 @@ def test_private_publication_execution_completes_without_platform_post(client, m
 def test_public_publication_creates_exactly_one_platform_post_and_reconciliation_is_idempotent(client, monkeypatch):
     run_id, _payload = _create_completed_run(client)
     connection_id = _create_active_youtube_connection()
+    _set_youtube_compliance_status(client, "audit_approved")
     job_id = _create_and_approve_job(client, run_id, connection_id, privacy="public")
 
     _patch_execution_isolation(monkeypatch)
@@ -214,6 +238,7 @@ def test_public_publication_creates_exactly_one_platform_post_and_reconciliation
 def test_redelivered_upload_worker_with_video_id_skips_second_upload(client, monkeypatch):
     run_id, _payload = _create_completed_run(client)
     connection_id = _create_active_youtube_connection()
+    _set_youtube_compliance_status(client, "audit_approved")
     job_id = _create_and_approve_job(client, run_id, connection_id, privacy="unlisted")
 
     upload_calls = {"initiate": 0, "chunks": 0}
@@ -301,6 +326,7 @@ def test_retryable_failure_can_be_retried_without_provider_video_id(client, monk
 def test_crash_after_session_persistence_reuses_resumable_session_without_reupload(client, monkeypatch):
     run_id, _payload = _create_completed_run(client)
     connection_id = _create_active_youtube_connection()
+    _set_youtube_compliance_status(client, "audit_approved")
     job_id = _create_and_approve_job(client, run_id, connection_id, privacy="unlisted")
 
     upload_calls: list[dict[str, object]] = []
@@ -392,6 +418,7 @@ def test_crash_after_session_persistence_reuses_resumable_session_without_reuplo
 def test_platform_post_creation_failure_does_not_mark_target_published(client, monkeypatch):
     run_id, _payload = _create_completed_run(client)
     connection_id = _create_active_youtube_connection()
+    _set_youtube_compliance_status(client, "audit_approved")
     job_id = _create_and_approve_job(client, run_id, connection_id, privacy="public")
 
     _patch_execution_isolation(monkeypatch)

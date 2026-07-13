@@ -150,6 +150,68 @@ export type SocialConnectionSummary = {
   updated_at: string;
 };
 
+export type YouTubeComplianceStatus =
+  | "unknown"
+  | "private_only"
+  | "audit_pending"
+  | "audit_approved";
+
+export type YouTubeProjectCompliance = {
+  platform: "youtube";
+  compliance_status: YouTubeComplianceStatus;
+  status_updated_at: string;
+  submission_date?: string | null;
+  approval_date?: string | null;
+  case_reference?: string | null;
+  admin_note?: string | null;
+  can_publish_private: boolean;
+  can_publish_unlisted: boolean;
+  can_publish_public: boolean;
+  status_explanation: string;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
+export type YouTubeProjectComplianceUpdatePayload = {
+  compliance_status: YouTubeComplianceStatus;
+  submission_date?: string | null;
+  approval_date?: string | null;
+  case_reference?: string | null;
+  admin_note?: string | null;
+  confirm_audit_approved?: boolean;
+};
+
+export type YouTubeAuditReadinessScope = {
+  scope: string;
+  required_for: string;
+};
+
+export type YouTubeAuditReadinessSection = {
+  key: string;
+  title: string;
+  status:
+    | "implemented_verified"
+    | "inferred_from_configuration"
+    | "requires_human_confirmation"
+    | "not_implemented";
+  summary: string;
+  bullets: string[];
+};
+
+export type YouTubeAuditReadinessReport = {
+  platform: "youtube";
+  application_name: string;
+  application_purpose: string;
+  connected_youtube_functionality: string;
+  current_compliance_status: YouTubeComplianceStatus;
+  requested_scopes: string[];
+  scope_justifications: YouTubeAuditReadinessScope[];
+  sections: YouTubeAuditReadinessSection[];
+  generated_at: string;
+  application_version?: string | null;
+  markdown: string;
+};
+
 export type SocialAuthorizeResponse = {
   platform: "youtube";
   authorization_url: string;
@@ -564,6 +626,8 @@ async function request<T>(path: string, options?: RequestInit, baseUrl = API_BAS
               return JSON.stringify(item);
             })
             .join("; ");
+        } else if (payload.detail && typeof payload.detail === "object" && "message" in payload.detail) {
+          detail = String((payload.detail as { message: unknown }).message);
         } else {
           detail = JSON.stringify(payload.detail);
         }
@@ -578,6 +642,46 @@ async function request<T>(path: string, options?: RequestInit, baseUrl = API_BAS
     throw new Error(detail);
   }
   return response.json();
+}
+
+async function requestText(path: string, options?: RequestInit, baseUrl = API_BASE): Promise<string> {
+  let response: Response;
+  try {
+    const token = getStoredAccessToken();
+    const headers = new Headers(options?.headers ?? {});
+    if (token && !headers.has("Authorization")) {
+      headers.set("Authorization", `Bearer ${token}`);
+    }
+    response = await fetch(`${baseUrl}${path}`, {
+      headers,
+      ...options
+    });
+  } catch {
+    throw new Error("Backend unavailable");
+  }
+  if (!response.ok) {
+    let detail = `Request failed: ${response.status}`;
+    try {
+      const payload = await response.json();
+      if (payload?.detail) {
+        if (typeof payload.detail === "string") {
+          detail = payload.detail;
+        } else if (payload.detail && typeof payload.detail === "object" && "message" in payload.detail) {
+          detail = String((payload.detail as { message: unknown }).message);
+        } else {
+          detail = JSON.stringify(payload.detail);
+        }
+      }
+    } catch {
+      // ignore non-json error bodies
+    }
+    if (response.status === 401) {
+      clearStoredAccessToken();
+      window.dispatchEvent(new CustomEvent("app-access-expired"));
+    }
+    throw new Error(detail);
+  }
+  return response.text();
 }
 
 export const api = {
@@ -779,6 +883,16 @@ export const api = {
       method: "POST"
     }),
   listSocialConnections: () => request<{ items: SocialConnectionSummary[] }>("/social-connections"),
+  getYouTubeProjectCompliance: () => request<YouTubeProjectCompliance>("/social-connections/youtube/compliance"),
+  updateYouTubeProjectCompliance: (payload: YouTubeProjectComplianceUpdatePayload) =>
+    request<YouTubeProjectCompliance>("/social-connections/youtube/compliance", {
+      method: "PATCH",
+      body: JSON.stringify(payload)
+    }),
+  getYouTubeAuditReadinessReport: () =>
+    request<YouTubeAuditReadinessReport>("/social-connections/youtube/compliance/report"),
+  getYouTubeAuditReadinessReportMarkdown: () =>
+    requestText("/social-connections/youtube/compliance/report?format=markdown"),
   authorizeYouTubeConnection: (returnPath?: string) =>
     request<SocialAuthorizeResponse>("/social-connections/youtube/authorize", {
       method: "POST",

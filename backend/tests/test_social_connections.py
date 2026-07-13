@@ -55,7 +55,7 @@ def test_social_token_crypto_wrong_key_fails(monkeypatch):
 
 
 def test_social_token_crypto_missing_key_fails_closed(monkeypatch):
-    monkeypatch.delenv("SOCIAL_TOKEN_ENCRYPTION_KEY", raising=False)
+    monkeypatch.setenv("SOCIAL_TOKEN_ENCRYPTION_KEY", "")
     get_settings.cache_clear()
 
     with pytest.raises(SocialTokenCryptoError):
@@ -246,7 +246,15 @@ def test_exchange_callback_code_fails_when_multiple_youtube_channels_are_returne
         youtube_oauth.exchange_callback_code("valid-code")
 
 
-def test_authorize_youtube_connection_missing_configuration_fails_safely(client):
+def test_authorize_youtube_connection_missing_configuration_fails_safely(client, monkeypatch):
+    monkeypatch.setenv("SOCIAL_TOKEN_ENCRYPTION_KEY", "")
+    monkeypatch.setenv("GOOGLE_OAUTH_CLIENT_ID", "")
+    monkeypatch.setenv("GOOGLE_OAUTH_CLIENT_SECRET", "")
+    monkeypatch.setenv("GOOGLE_OAUTH_REDIRECT_URI", "")
+    monkeypatch.setenv("GOOGLE_OAUTH_FRONTEND_SUCCESS_URL", "")
+    monkeypatch.setenv("GOOGLE_OAUTH_FRONTEND_ERROR_URL", "")
+    from app.config import get_settings
+    get_settings.cache_clear()
     response = client.post("/api/social-connections/youtube/authorize", json={})
     assert response.status_code == 409
     assert "GOOGLE_OAUTH_CLIENT_ID" in response.json()["detail"]
