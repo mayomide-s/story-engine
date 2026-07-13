@@ -14,6 +14,7 @@ from app.services.providers import (
     get_storage_provider,
     get_video_provider,
 )
+from app.services.social_token_crypto import social_token_crypto_health
 
 
 def _status_payload(status: str, detail: str, **extra) -> dict:
@@ -30,6 +31,7 @@ def collect_health_details(settings: Settings) -> dict:
         "storage": check_storage_readiness(settings),
         "video_provider": check_video_provider_readiness(settings),
         "narration": check_narration_readiness(settings),
+        "social_publishing": check_social_publishing_readiness(settings),
         "configuration": _status_payload(
             "ok" if not config_errors else "error",
             "Configuration validated" if not config_errors else " ".join(config_errors),
@@ -110,3 +112,17 @@ def check_narration_readiness(settings: Settings) -> dict:
         )
     except Exception as exc:
         return _status_payload("error", f"Narration provider unavailable: {exc}")
+
+
+def check_social_publishing_readiness(settings: Settings) -> dict:
+    config_status = settings.social_publishing_status_summary()
+    if not config_status["configured"]:
+        return _status_payload(
+            "disabled",
+            "Social publishing is not fully configured.",
+            errors=config_status["errors"],
+        )
+    crypto_health = social_token_crypto_health()
+    if crypto_health.status != "ok":
+        return _status_payload("error", crypto_health.detail)
+    return _status_payload("ok", "Social publishing foundation configured")
