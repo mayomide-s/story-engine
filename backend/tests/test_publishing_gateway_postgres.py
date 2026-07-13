@@ -301,6 +301,39 @@ def test_sqlite_publication_gateway_create_all_supports_new_tables():
             os.unlink(temp_db.name)
 
 
+def test_sqlite_publication_gateway_downgrade_reupgrade_from_current_schema():
+    temp_db = tempfile.NamedTemporaryFile(delete=False, suffix=".db")
+    temp_db.close()
+    database_url = f"sqlite:///{temp_db.name.replace(os.sep, '/')}"
+    try:
+        engine = create_engine(database_url, future=True)
+        Base.metadata.create_all(bind=engine)
+        with engine.begin() as connection:
+            connection.exec_driver_sql("CREATE TABLE alembic_version (version_num VARCHAR(64) NOT NULL PRIMARY KEY)")
+            connection.exec_driver_sql(
+                "INSERT INTO alembic_version (version_num) VALUES ('0020_youtube_publication_execution')"
+            )
+
+        _run_alembic(database_url, "downgrade", "0019_publishing_gateway_core")
+        with engine.connect() as connection:
+            revision = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
+        assert revision == "0019_publishing_gateway_core"
+
+        _run_alembic(database_url, "upgrade", "0020_youtube_publication_execution")
+        with engine.connect() as connection:
+            revision = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
+        assert revision == EXPECTED_HEAD
+
+        inspector = inspect(engine)
+        target_columns = {column["name"] for column in inspector.get_columns("publication_targets")}
+        assert "platform_post_id" in target_columns
+        assert "actual_visibility" in target_columns
+        engine.dispose()
+    finally:
+        if os.path.exists(temp_db.name):
+            os.unlink(temp_db.name)
+
+
 @pytest.mark.skipif(not TEST_POSTGRES_DATABASE_URL, reason="TEST_POSTGRES_DATABASE_URL is not configured.")
 def test_postgres_publication_gateway_service_integration(monkeypatch):
     _configure_social_env(monkeypatch)

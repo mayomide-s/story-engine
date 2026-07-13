@@ -477,7 +477,10 @@ def process_youtube_publication_target(db: Session, target_id: str) -> dict[str,
 
         validate_publication_asset_snapshot(db, job)
         connection = refresh_youtube_connection_tokens_if_needed(db, connection)
-        _set_target_state(target, "validating")
+        if target.provider_upload_uri_encrypted:
+            _set_target_state(target, "uploading")
+        else:
+            _set_target_state(target, "validating")
         db.add(target)
         db.flush()
 
@@ -509,6 +512,7 @@ def process_youtube_publication_target(db: Session, target_id: str) -> dict[str,
                 )
 
             session_uri = _decrypt_session_uri(target.provider_upload_uri_encrypted)
+            reused_session = bool(session_uri)
             if not session_uri:
                 session_uri = initiate_resumable_upload(
                     db,
@@ -526,6 +530,8 @@ def process_youtube_publication_target(db: Session, target_id: str) -> dict[str,
             target.last_error_message = None
             db.add(target)
             db.flush()
+            _recalculate_job_status(db, job)
+            db.commit()
 
             progress = upload_media_chunks(
                 db,
@@ -535,6 +541,7 @@ def process_youtube_publication_target(db: Session, target_id: str) -> dict[str,
                 mime_type=asset.mime_type or "video/mp4",
                 chunk_size=get_settings().youtube_upload_chunk_size_bytes,
                 bytes_sent=target.upload_bytes_sent or 0,
+                probe_existing_session=reused_session,
             )
             target.provider_upload_uri_encrypted = _encrypt_session_uri(progress.session_uri)
             target.upload_bytes_total = progress.total_bytes
@@ -793,6 +800,32 @@ def _poll_youtube_publication_target_claimed(
             next_poll_at = _coerce_stored_datetime(target.next_poll_at)
             delay = max(1, int((next_poll_at - _utcnow()).total_seconds())) if next_poll_at else 1
             _enqueue_poll_target(target.id, countdown=delay)
+        return get_publication_target(db, target.id)
+    except (PublicationConflictError, SocialTokenCryptoError, RuntimeError) as exc:
+        provider_error = PublicationProviderError(
+            code="youtube_execution_error",
+            safe_message=str(exc),
+            retryable=False,
+            reconnect_required="reconnect" in str(exc).lower(),
+            permanent=True,
+        )
+        _schedule_permanent_failure(target, provider_error)
+        _recalculate_job_status(db, job)
+        release_publication_target_claim(db, target, claim_token)
+        db.add(target)
+        _add_publication_event(
+            db,
+            run,
+            "publication.permanent_failure",
+            "Publication failed permanently",
+            {
+                "publication_job_id": job.id,
+                "publication_target_id": target.id,
+                "provider_video_id": target.provider_submission_id,
+                "error_code": target.last_error_code,
+            },
+        )
+        db.commit()
         return get_publication_target(db, target.id)
 
 

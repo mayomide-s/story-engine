@@ -98,7 +98,7 @@ def test_private_publication_execution_completes_without_platform_post(client, m
     monkeypatch.setattr("app.services.publication_execution_service.initiate_resumable_upload", lambda db, connection, target, media_path, mime_type: "https://upload.example/session/private")
     monkeypatch.setattr(
         "app.services.publication_execution_service.upload_media_chunks",
-        lambda db, connection, session_uri, media_path, mime_type, chunk_size, bytes_sent=0: YouTubeUploadProgress(
+        lambda db, connection, session_uri, media_path, mime_type, chunk_size, bytes_sent=0, probe_existing_session=False: YouTubeUploadProgress(
             bytes_sent=media_path.stat().st_size,
             total_bytes=media_path.stat().st_size,
             session_uri=session_uri,
@@ -162,7 +162,7 @@ def test_public_publication_creates_exactly_one_platform_post_and_reconciliation
     monkeypatch.setattr("app.services.publication_execution_service.initiate_resumable_upload", lambda db, connection, target, media_path, mime_type: "https://upload.example/session/public")
     monkeypatch.setattr(
         "app.services.publication_execution_service.upload_media_chunks",
-        lambda db, connection, session_uri, media_path, mime_type, chunk_size, bytes_sent=0: YouTubeUploadProgress(
+        lambda db, connection, session_uri, media_path, mime_type, chunk_size, bytes_sent=0, probe_existing_session=False: YouTubeUploadProgress(
             bytes_sent=media_path.stat().st_size,
             total_bytes=media_path.stat().st_size,
             session_uri=session_uri,
@@ -296,3 +296,137 @@ def test_retryable_failure_can_be_retried_without_provider_video_id(client, monk
     assert retried.status_code == 200
     assert retried.json()["job"]["targets"][0]["state"] == "queued"
     assert len(enqueued) >= 2
+
+
+def test_crash_after_session_persistence_reuses_resumable_session_without_reupload(client, monkeypatch):
+    run_id, _payload = _create_completed_run(client)
+    connection_id = _create_active_youtube_connection()
+    job_id = _create_and_approve_job(client, run_id, connection_id, privacy="unlisted")
+
+    upload_calls: list[dict[str, object]] = []
+    _patch_execution_isolation(monkeypatch)
+    monkeypatch.setattr("app.services.publication_execution_service._enqueue_start_target", lambda target_id, countdown=0: None)
+    monkeypatch.setattr("app.services.publication_execution_service._enqueue_poll_target", lambda target_id, countdown=0: None)
+    monkeypatch.setattr("app.services.publication_execution_service.refresh_youtube_connection_tokens_if_needed", lambda db, connection, force=False: connection)
+    monkeypatch.setattr("app.services.publication_execution_service.initiate_resumable_upload", lambda db, connection, target, media_path, mime_type: "https://upload.example/session/reused")
+
+    def crashing_upload(*args, **kwargs):
+        upload_calls.append({"probe_existing_session": kwargs["probe_existing_session"], "session_uri": args[2]})
+        raise SystemExit("simulated worker crash")
+
+    monkeypatch.setattr("app.services.publication_execution_service.upload_media_chunks", crashing_upload)
+
+    dispatched = client.post(f"/api/publication-jobs/{job_id}/dispatch")
+    target_id = dispatched.json()["job"]["targets"][0]["id"]
+
+    with SessionLocal() as db:
+        try:
+            process_youtube_publication_target(db, target_id)
+        except SystemExit:
+            pass
+
+    with SessionLocal() as db:
+        target = db.get(PublicationTarget, target_id)
+        assert target is not None
+        assert target.state == "uploading"
+        assert target.provider_upload_uri_encrypted == "https://upload.example/session/reused"
+        assert target.provider_submission_id is None
+        target.worker_claimed_at = datetime.now(UTC) - timedelta(hours=1)
+        db.add(target)
+        db.commit()
+
+    def resumed_upload(*args, **kwargs):
+        upload_calls.append({"probe_existing_session": kwargs["probe_existing_session"], "session_uri": args[2]})
+        media_path = args[3]
+        return YouTubeUploadProgress(
+            bytes_sent=media_path.stat().st_size,
+            total_bytes=media_path.stat().st_size,
+            session_uri=args[2],
+            video_id="resume12345",
+        )
+
+    monkeypatch.setattr("app.services.publication_execution_service.upload_media_chunks", resumed_upload)
+    monkeypatch.setattr(
+        "app.services.publication_execution_service.fetch_youtube_video_state",
+        lambda db, connection, video_id: YouTubeVideoState(
+            video_id=video_id,
+            upload_status="processed",
+            privacy_status="unlisted",
+            processing_status="succeeded",
+            failure_reason=None,
+            rejection_reason=None,
+            raw_status={},
+            raw_processing_details={},
+        ),
+    )
+
+    with SessionLocal() as db:
+        resumed = process_youtube_publication_target(db, target_id)
+        assert resumed["state"] == "processing"
+        assert resumed["provider_video_id"] == "resume12345"
+
+    with SessionLocal() as db:
+        finished = poll_youtube_publication_target(db, target_id)
+        assert finished["state"] == "published"
+        assert finished["platform_post_id"] is not None
+
+    assert upload_calls == [
+        {"probe_existing_session": False, "session_uri": "https://upload.example/session/reused"},
+        {"probe_existing_session": True, "session_uri": "https://upload.example/session/reused"},
+    ]
+
+
+def test_platform_post_creation_failure_does_not_mark_target_published(client, monkeypatch):
+    run_id, _payload = _create_completed_run(client)
+    connection_id = _create_active_youtube_connection()
+    job_id = _create_and_approve_job(client, run_id, connection_id, privacy="public")
+
+    _patch_execution_isolation(monkeypatch)
+    monkeypatch.setattr("app.services.publication_execution_service._enqueue_start_target", lambda target_id, countdown=0: None)
+    monkeypatch.setattr("app.services.publication_execution_service._enqueue_poll_target", lambda target_id, countdown=0: None)
+    monkeypatch.setattr("app.services.publication_execution_service.refresh_youtube_connection_tokens_if_needed", lambda db, connection, force=False: connection)
+    monkeypatch.setattr("app.services.publication_execution_service.initiate_resumable_upload", lambda db, connection, target, media_path, mime_type: "https://upload.example/session/post-failure")
+    monkeypatch.setattr(
+        "app.services.publication_execution_service.upload_media_chunks",
+        lambda db, connection, session_uri, media_path, mime_type, chunk_size, bytes_sent=0, probe_existing_session=False: YouTubeUploadProgress(
+            bytes_sent=media_path.stat().st_size,
+            total_bytes=media_path.stat().st_size,
+            session_uri=session_uri,
+            video_id="failpost123",
+        ),
+    )
+    monkeypatch.setattr(
+        "app.services.publication_execution_service.fetch_youtube_video_state",
+        lambda db, connection, video_id: YouTubeVideoState(
+            video_id=video_id,
+            upload_status="processed",
+            privacy_status="public",
+            processing_status="succeeded",
+            failure_reason=None,
+            rejection_reason=None,
+            raw_status={},
+            raw_processing_details={},
+        ),
+    )
+    monkeypatch.setattr(
+        "app.services.publication_execution_service.create_platform_post_for_publication_target",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("Platform post transaction failed.")),
+    )
+
+    dispatched = client.post(f"/api/publication-jobs/{job_id}/dispatch")
+    target_id = dispatched.json()["job"]["targets"][0]["id"]
+
+    with SessionLocal() as db:
+        started = process_youtube_publication_target(db, target_id)
+        assert started["state"] == "processing"
+
+    with SessionLocal() as db:
+        failed = poll_youtube_publication_target(db, target_id)
+        assert failed["state"] == "permanent_failure"
+        assert failed["platform_post_id"] is None
+        assert failed["public_post_url"] == "https://www.youtube.com/watch?v=failpost123"
+        target = db.get(PublicationTarget, target_id)
+        assert target is not None
+        assert target.state == "permanent_failure"
+        assert target.platform_post_id is None
+        assert db.query(PlatformPost).filter(PlatformPost.pipeline_run_id == run_id).count() == 0

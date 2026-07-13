@@ -228,7 +228,7 @@ def _serialize_target(target: PublicationTarget, connection: SocialConnection | 
         outcome_confirmed_at=target.outcome_confirmed_at,
         last_error_code=target.last_error_code,
         last_error_message=target.last_error_message,
-        reconnect_required=bool(target.last_error_code in {"youtube_invalid_credentials", "youtube_missing_scope", "youtube_oauth_error"}),
+        reconnect_required=bool(target.last_error_code in {"youtube_credentials_invalid", "youtube_scope_missing", "youtube_oauth_error"}),
         submitted_at=target.submitted_at,
         published_at=target.published_at,
         created_at=target.created_at,

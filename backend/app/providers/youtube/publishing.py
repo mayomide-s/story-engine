@@ -211,11 +211,12 @@ def upload_media_chunks(
     mime_type: str,
     chunk_size: int,
     bytes_sent: int = 0,
+    probe_existing_session: bool = False,
 ) -> YouTubeUploadProgress:
     session, _connection = build_youtube_session(db, connection)
     total_bytes = media_path.stat().st_size
     start_offset = bytes_sent
-    if bytes_sent:
+    if probe_existing_session or bytes_sent:
         start_offset = query_resumable_progress(
             db,
             connection,

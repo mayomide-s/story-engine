@@ -61,16 +61,18 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    dialect_name = op.get_bind().dialect.name
     with op.batch_alter_table("publication_targets") as batch_op:
         batch_op.drop_index("ix_publication_targets_platform_post_id")
         batch_op.drop_constraint("uq_publication_targets_platform_post_id", type_="unique")
         batch_op.drop_constraint("ck_publication_targets_upload_bytes_sent_non_negative", type_="check")
         batch_op.drop_constraint("ck_publication_targets_upload_bytes_total_non_negative", type_="check")
         batch_op.drop_constraint("ck_publication_targets_actual_visibility", type_="check")
-        batch_op.drop_constraint(
-            "fk_publication_targets_platform_post_id_platform_posts",
-            type_="foreignkey",
-        )
+        if dialect_name != "sqlite":
+            batch_op.drop_constraint(
+                "fk_publication_targets_platform_post_id_platform_posts",
+                type_="foreignkey",
+            )
         batch_op.drop_column("last_attempt_at")
         batch_op.drop_column("worker_claim_token")
         batch_op.drop_column("worker_claimed_at")

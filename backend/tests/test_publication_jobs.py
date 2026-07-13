@@ -322,3 +322,37 @@ def test_publication_job_validation_limits(client):
         },
     )
     assert response.status_code == 422
+
+
+def test_publication_job_response_marks_reconnect_required_for_revoked_or_missing_scope_errors(client):
+    run_id, _payload = _create_completed_run(client)
+    connection_id = _create_active_youtube_connection()
+
+    created = client.post(
+        f"/api/pipeline-runs/{run_id}/publication-jobs",
+        json={
+            "connection_id": connection_id,
+            "title": "Reconnect check",
+            "caption": "Reconnect check",
+            "tags": ["youtube"],
+            "privacy": "private",
+            "self_declared_made_for_kids": False,
+            "contains_synthetic_media": False,
+        },
+    )
+    assert created.status_code == 201
+    job_id = created.json()["job"]["id"]
+    target_id = created.json()["job"]["targets"][0]["id"]
+
+    with SessionLocal() as db:
+        target = db.get(PublicationTarget, target_id)
+        assert target is not None
+        target.state = "retryable_failure"
+        target.last_error_code = "youtube_credentials_invalid"
+        target.last_error_message = "Reconnect required."
+        db.add(target)
+        db.commit()
+
+    response = client.get(f"/api/publication-jobs/{job_id}")
+    assert response.status_code == 200
+    assert response.json()["targets"][0]["reconnect_required"] is True
