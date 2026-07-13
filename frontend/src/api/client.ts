@@ -179,6 +179,7 @@ export type YouTubeProjectComplianceUpdatePayload = {
   case_reference?: string | null;
   admin_note?: string | null;
   confirm_audit_approved?: boolean;
+  confirm_google_audit_approval_received?: boolean;
 };
 
 export type YouTubeAuditReadinessScope = {
@@ -198,18 +199,139 @@ export type YouTubeAuditReadinessSection = {
   bullets: string[];
 };
 
-export type YouTubeAuditReadinessReport = {
+export type YouTubeHumanConfirmation = {
+  key: string;
+  title: string;
+  description: string;
+  required_for_approval: boolean;
+  completed: boolean;
+};
+
+export type YouTubeSubmissionProfile = {
   platform: "youtube";
-  application_name: string;
-  application_purpose: string;
-  connected_youtube_functionality: string;
+  application_display_name?: string | null;
+  product_description?: string | null;
+  organization_name?: string | null;
+  support_contact?: string | null;
+  privacy_policy_url?: string | null;
+  terms_of_service_url?: string | null;
+  application_homepage_url?: string | null;
+  production_oauth_redirect_uri?: string | null;
+  production_frontend_url?: string | null;
+  production_api_url?: string | null;
+  data_retention_summary?: string | null;
+  user_data_deletion_summary?: string | null;
+  token_revocation_summary?: string | null;
+  account_disconnection_summary?: string | null;
+  quota_monitoring_summary?: string | null;
+  incident_response_summary?: string | null;
+  security_contact_summary?: string | null;
+  intended_submission_date?: string | null;
+  submission_case_reference?: string | null;
+  last_reviewed_at?: string | null;
+  reviewed_by?: string | null;
+  admin_note?: string | null;
+  human_confirmations: YouTubeHumanConfirmation[];
+};
+
+export type YouTubeSubmissionProfileUpdatePayload = {
+  application_display_name?: string | null;
+  product_description?: string | null;
+  organization_name?: string | null;
+  support_contact?: string | null;
+  privacy_policy_url?: string | null;
+  terms_of_service_url?: string | null;
+  application_homepage_url?: string | null;
+  production_oauth_redirect_uri?: string | null;
+  production_frontend_url?: string | null;
+  production_api_url?: string | null;
+  data_retention_summary?: string | null;
+  user_data_deletion_summary?: string | null;
+  token_revocation_summary?: string | null;
+  account_disconnection_summary?: string | null;
+  quota_monitoring_summary?: string | null;
+  incident_response_summary?: string | null;
+  security_contact_summary?: string | null;
+  intended_submission_date?: string | null;
+  submission_case_reference?: string | null;
+  reviewed_by?: string | null;
+  admin_note?: string | null;
+};
+
+export type YouTubeReadinessRequirementStatus =
+  | "pass"
+  | "fail"
+  | "needs_confirmation"
+  | "not_applicable";
+
+export type YouTubeReadinessRequirement = {
+  key: string;
+  title: string;
+  description: string;
+  category: string;
+  status: YouTubeReadinessRequirementStatus;
+  evidence_source:
+    | "implemented_code"
+    | "configuration_contract"
+    | "submission_profile"
+    | "human_confirmation"
+    | "runtime_record";
+  evidence_summary: string;
+  blocker_severity: "blocking" | "advisory" | "none";
+  remediation_guidance: string;
+  human_confirmation_required: boolean;
+  last_evaluated_at: string;
+};
+
+export type YouTubeReadinessBlocker = {
+  key: string;
+  title: string;
+  category: string;
+  status: YouTubeReadinessRequirementStatus;
+  blocker_severity: "blocking" | "advisory" | "none";
+  evidence_summary: string;
+  remediation_guidance: string;
+};
+
+export type YouTubeComplianceReadiness = {
+  platform: "youtube";
   current_compliance_status: YouTubeComplianceStatus;
-  requested_scopes: string[];
-  scope_justifications: YouTubeAuditReadinessScope[];
-  sections: YouTubeAuditReadinessSection[];
+  overall_status: YouTubeReadinessRequirementStatus;
+  blocker_count: number;
+  blockers: YouTubeReadinessBlocker[];
+  requirements: YouTubeReadinessRequirement[];
+  human_confirmations: YouTubeHumanConfirmation[];
+  can_record_audit_approved: boolean;
+  generated_at: string;
+};
+
+export type YouTubeEvidenceManifestItem = {
+  key: string;
+  title: string;
+  required: boolean;
+  why_needed: string;
+  acceptable_evidence: string;
+  current_state: string;
+  human_action_required: boolean;
+};
+
+export type YouTubeComplianceSubmissionPackage = {
+  platform: "youtube";
+  executive_summary: Record<string, unknown>;
+  oauth_and_access: Record<string, unknown>;
+  publishing_workflow: Record<string, unknown>;
+  user_controls: Record<string, unknown>;
+  security_and_operations: Record<string, unknown>;
+  legal_and_policy: Record<string, unknown>;
+  readiness: YouTubeComplianceReadiness;
+  evidence_matrix: YouTubeReadinessRequirement[];
+  evidence_manifest: YouTubeEvidenceManifestItem[];
+  submission_checklist: string[];
+  human_completion_items: string[];
   generated_at: string;
   application_version?: string | null;
   markdown: string;
+  checklist_markdown: string;
 };
 
 export type SocialAuthorizeResponse = {
@@ -889,10 +1011,41 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify(payload)
     }),
-  getYouTubeAuditReadinessReport: () =>
-    request<YouTubeAuditReadinessReport>("/social-connections/youtube/compliance/report"),
-  getYouTubeAuditReadinessReportMarkdown: () =>
-    requestText("/social-connections/youtube/compliance/report?format=markdown"),
+  getYouTubeSubmissionProfile: () =>
+    request<YouTubeSubmissionProfile>("/social-connections/youtube/compliance/profile"),
+  updateYouTubeSubmissionProfile: (payload: YouTubeSubmissionProfileUpdatePayload) =>
+    request<YouTubeSubmissionProfile>("/social-connections/youtube/compliance/profile", {
+      method: "PATCH",
+      body: JSON.stringify(payload)
+    }),
+  setYouTubeHumanConfirmation: (key: string, completed: boolean, reviewedBy?: string | null) =>
+    request<YouTubeSubmissionProfile>(`/social-connections/youtube/compliance/confirmations/${key}`, {
+      method: "PUT",
+      body: JSON.stringify({ completed, reviewed_by: reviewedBy ?? null })
+    }),
+  clearYouTubeHumanConfirmation: (key: string, reviewedBy?: string | null) =>
+    request<YouTubeSubmissionProfile>(`/social-connections/youtube/compliance/confirmations/${key}?reviewed_by=${encodeURIComponent(reviewedBy ?? "")}`, {
+      method: "DELETE"
+    }),
+  getYouTubeComplianceReadiness: () =>
+    request<YouTubeComplianceReadiness>("/social-connections/youtube/compliance/readiness"),
+  getYouTubeComplianceBlockers: () =>
+    request<YouTubeReadinessBlocker[]>("/social-connections/youtube/compliance/blockers"),
+  getYouTubeComplianceSubmissionPackage: () =>
+    request<YouTubeComplianceSubmissionPackage>("/social-connections/youtube/compliance/package"),
+  getYouTubeComplianceSubmissionPackageMarkdown: () =>
+    requestText("/social-connections/youtube/compliance/package?format=markdown"),
+  getYouTubeComplianceSubmissionChecklistMarkdown: () =>
+    requestText("/social-connections/youtube/compliance/package?format=checklist"),
+  getYouTubeApprovalReadiness: () =>
+    request<{
+      platform: "youtube";
+      current_compliance_status: YouTubeComplianceStatus;
+      can_record_audit_approved: boolean;
+      blocker_count: number;
+      blockers: YouTubeReadinessBlocker[];
+      generated_at: string;
+    }>("/social-connections/youtube/compliance/approval-readiness"),
   authorizeYouTubeConnection: (returnPath?: string) =>
     request<SocialAuthorizeResponse>("/social-connections/youtube/authorize", {
       method: "POST",
