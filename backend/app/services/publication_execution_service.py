@@ -30,6 +30,7 @@ from app.services.publication_service import (
 from app.services.security import redact_sensitive_data
 from app.services.social_connection_service import refresh_youtube_connection_tokens_if_needed
 from app.services.social_token_crypto import SocialTokenCryptoError, decrypt_secret, encrypt_secret
+from app.services.youtube_compliance_service import ensure_youtube_visibility_allowed
 
 
 ACTIVE_TARGET_STATES = {"queued", "validating", "uploading", "processing"}
@@ -207,6 +208,7 @@ def dispatch_publication_job(db: Session, job_id: str) -> dict[str, Any]:
     for target in targets:
         if target.state == "pending":
             validate_publication_asset_snapshot(db, job)
+            ensure_youtube_visibility_allowed(db, target.visibility)
             refresh_youtube_connection_tokens_if_needed(db, db.get(SocialConnection, target.social_connection_id))
             _set_target_state(target, "queued")
             target.last_error_code = None

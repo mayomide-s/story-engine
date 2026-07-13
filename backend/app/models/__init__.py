@@ -30,6 +30,7 @@ from app.models.entities import (
     StoryAdherenceHumanReview,
     StoryAdherenceReview,
     Storyboard,
+    YouTubeProjectCompliance,
     Video,
     VideoStatus,
 )
@@ -66,6 +67,7 @@ __all__ = [
     "StoryAdherenceHumanReview",
     "StoryAdherenceReview",
     "Storyboard",
+    "YouTubeProjectCompliance",
     "Video",
     "VideoStatus",
 ]

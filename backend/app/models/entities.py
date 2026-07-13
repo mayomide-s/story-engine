@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import enum
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 from sqlalchemy import (
     BigInteger,
     Boolean,
     CheckConstraint,
+    Date,
     DateTime,
     Enum,
     Float,
@@ -153,6 +154,12 @@ YOUTUBE_PUBLICATION_VISIBILITIES = (
     "private",
     "unlisted",
     "public",
+)
+YOUTUBE_COMPLIANCE_STATUSES = (
+    "unknown",
+    "private_only",
+    "audit_pending",
+    "audit_approved",
 )
 
 
@@ -681,6 +688,37 @@ class SocialConnection(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )
+
+
+class YouTubeProjectCompliance(Base):
+    __tablename__ = "youtube_project_compliance"
+    __table_args__ = (
+        UniqueConstraint("platform", name="uq_youtube_project_compliance_platform"),
+        CheckConstraint(
+            "platform = 'youtube'",
+            name="ck_youtube_project_compliance_platform",
+        ),
+        CheckConstraint(
+            f"compliance_status IN {YOUTUBE_COMPLIANCE_STATUSES}",
+            name="ck_youtube_project_compliance_status",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    platform: Mapped[str] = mapped_column(String(50), nullable=False, default="youtube", server_default="youtube")
+    compliance_status: Mapped[str] = mapped_column(String(50), nullable=False, default="private_only", server_default="private_only")
+    status_updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC))
+    submission_date: Mapped[date | None] = mapped_column(Date)
+    approval_date: Mapped[date | None] = mapped_column(Date)
+    case_reference: Mapped[str | None] = mapped_column(String(255))
+    admin_note: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
         default=lambda: datetime.now(UTC),
         onupdate=lambda: datetime.now(UTC),
     )

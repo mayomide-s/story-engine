@@ -7,7 +7,30 @@ import {
   PublicationJobDraftPayload,
   PublicationTarget,
   SocialConnectionSummary,
+  YouTubeAuditReadinessReport,
+  YouTubeProjectCompliance,
+  YouTubeProjectComplianceUpdatePayload,
 } from "../api/client";
+
+function CopyButton({ text, label }: { text: string; label: string }) {
+  const [copied, setCopied] = useState(false);
+
+  async function handleClick() {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1200);
+    } catch {
+      setCopied(false);
+    }
+  }
+
+  return (
+    <button type="button" className="secondary" onClick={handleClick}>
+      {copied ? `${label} copied` : `Copy ${label}`}
+    </button>
+  );
+}
 
 function formatDateTime(value?: string | null) {
   if (!value) return "Unavailable";
@@ -66,6 +89,34 @@ function defaultDraftPayload(
   };
 }
 
+function defaultCompliancePayload(compliance: YouTubeProjectCompliance | null): YouTubeProjectComplianceUpdatePayload {
+  return {
+    compliance_status: compliance?.compliance_status ?? "private_only",
+    submission_date: compliance?.submission_date ?? null,
+    approval_date: compliance?.approval_date ?? null,
+    case_reference: compliance?.case_reference ?? null,
+    admin_note: compliance?.admin_note ?? null,
+    confirm_audit_approved: false,
+  };
+}
+
+function formatComplianceLabel(status: YouTubeProjectCompliance["compliance_status"] | string) {
+  switch (status) {
+    case "audit_approved":
+      return "Audit approved";
+    case "audit_pending":
+      return "Audit pending";
+    case "unknown":
+      return "Unknown";
+    default:
+      return "Private only";
+  }
+}
+
+function formatSectionStatus(status: string) {
+  return status.replace(/_/g, " ");
+}
+
 type Props = {
   runId: string;
   runStatus: string;
@@ -76,13 +127,21 @@ type Props = {
 export function YouTubePublicationPanel({ runId, runStatus, finalAssetSelection, manualPostPackage }: Props) {
   const [connections, setConnections] = useState<SocialConnectionSummary[]>([]);
   const [job, setJob] = useState<PublicationJob | null>(null);
+  const [compliance, setCompliance] = useState<YouTubeProjectCompliance | null>(null);
+  const [report, setReport] = useState<YouTubeAuditReadinessReport | null>(null);
+  const [reportMarkdown, setReportMarkdown] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isWorking, setIsWorking] = useState(false);
+  const [isSavingCompliance, setIsSavingCompliance] = useState(false);
+  const [isLoadingReport, setIsLoadingReport] = useState(false);
   const [error, setError] = useState("");
   const [approvalChecked, setApprovalChecked] = useState(false);
+  const [showReport, setShowReport] = useState(false);
+  const [reportMode, setReportMode] = useState<"json" | "markdown">("json");
   const [draft, setDraft] = useState<PublicationJobDraftPayload>(() => defaultDraftPayload(finalAssetSelection, manualPostPackage ?? null));
   const [tagsInput, setTagsInput] = useState(() => defaultDraftPayload(finalAssetSelection, manualPostPackage ?? null).tags.join(", "));
+  const [complianceForm, setComplianceForm] = useState<YouTubeProjectComplianceUpdatePayload>(() => defaultCompliancePayload(null));
 
   const selectedAsset = finalAssetSelection?.asset as Record<string, unknown> | undefined;
   const activeConnection = useMemo(
@@ -94,6 +153,9 @@ export function YouTubePublicationPanel({ runId, runStatus, finalAssetSelection,
   const target = job?.targets[0] ?? null;
   const canPublish = runStatus === "completed" && Boolean(finalAssetSelection?.asset);
   const terminalTarget = target ? ["uploaded_private", "published", "permanent_failure", "cancelled"].includes(target.state) : false;
+  const canUseUnlisted = Boolean(compliance?.can_publish_unlisted);
+  const canUsePublic = Boolean(compliance?.can_publish_public);
+  const complianceBadge = formatComplianceLabel(compliance?.compliance_status ?? "private_only");
 
   useEffect(() => {
     const nextDefault = defaultDraftPayload(finalAssetSelection, manualPostPackage ?? null);
@@ -102,11 +164,22 @@ export function YouTubePublicationPanel({ runId, runStatus, finalAssetSelection,
   }, [finalAssetSelection, manualPostPackage, job]);
 
   useEffect(() => {
+    if (job || !compliance) return;
+    if ((draft.privacy === "unlisted" && !canUseUnlisted) || (draft.privacy === "public" && !canUsePublic)) {
+      setDraft((current) => ({ ...current, privacy: "private" }));
+    }
+  }, [canUsePublic, canUseUnlisted, compliance, draft.privacy, job]);
+
+  useEffect(() => {
+    setComplianceForm(defaultCompliancePayload(compliance));
+  }, [compliance]);
+
+  useEffect(() => {
     let cancelled = false;
     async function load() {
       setIsLoading(true);
       try {
-        const [connectionResponse, latestJob] = await Promise.all([
+        const [connectionResponse, latestJob, complianceResponse] = await Promise.all([
           api.listSocialConnections(),
           api.getLatestPublicationJobForRun(runId).catch((requestError: Error) => {
             if (requestError.message === "Publication job not found") {
@@ -114,10 +187,12 @@ export function YouTubePublicationPanel({ runId, runStatus, finalAssetSelection,
             }
             throw requestError;
           }),
+          api.getYouTubeProjectCompliance(),
         ]);
         if (cancelled) return;
         setConnections(connectionResponse.items);
         setJob(latestJob);
+        setCompliance(complianceResponse);
         setError("");
       } catch (requestError) {
         if (cancelled) return;
@@ -196,6 +271,40 @@ export function YouTubePublicationPanel({ runId, runStatus, finalAssetSelection,
     }
   }
 
+  async function handleComplianceSave(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setIsSavingCompliance(true);
+    setError("");
+    try {
+      const response = await api.updateYouTubeProjectCompliance(complianceForm);
+      setCompliance(response);
+      setReport(null);
+      setReportMarkdown("");
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Failed to update YouTube compliance status.");
+    } finally {
+      setIsSavingCompliance(false);
+    }
+  }
+
+  async function loadAuditReport(mode: "json" | "markdown") {
+    setIsLoadingReport(true);
+    setError("");
+    setShowReport(true);
+    setReportMode(mode);
+    try {
+      if (mode === "markdown") {
+        setReportMarkdown(await api.getYouTubeAuditReadinessReportMarkdown());
+      } else {
+        setReport(await api.getYouTubeAuditReadinessReport());
+      }
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Failed to load the YouTube audit-readiness report.");
+    } finally {
+      setIsLoadingReport(false);
+    }
+  }
+
   const publishPreviewUrl = String(selectedAsset?.public_url ?? "");
 
   return (
@@ -215,7 +324,173 @@ export function YouTubePublicationPanel({ runId, runStatus, finalAssetSelection,
       ) : null}
 
       {error ? <p className="error-text">{error}</p> : null}
-      {isLoading ? <p className="subtle">Loading YouTube publication state…</p> : null}
+      {isLoading ? <p className="subtle">Loading YouTube publication state...</p> : null}
+
+      {compliance ? (
+        <div className={`notice-card ${compliance.compliance_status === "audit_approved" ? "" : "warning"}`}>
+          <strong>YouTube compliance status: {complianceBadge}</strong>
+          <p>{compliance.status_explanation}</p>
+          <div className="key-grid">
+            <div><span>Status updated</span><strong>{formatDateTime(compliance.status_updated_at)}</strong></div>
+            <div><span>Submission date</span><strong>{compliance.submission_date ?? "Not recorded"}</strong></div>
+            <div><span>Approval date</span><strong>{compliance.approval_date ?? "Not recorded"}</strong></div>
+            <div><span>Reference</span><strong>{compliance.case_reference ?? "Not recorded"}</strong></div>
+          </div>
+        </div>
+      ) : null}
+
+      {canPublish ? (
+        <details className="technical-disclosure">
+          <summary>YouTube audit readiness</summary>
+          <div className="stack compact">
+            <form className="stack" onSubmit={handleComplianceSave}>
+              <label>
+                <span>Compliance status</span>
+                <select
+                  value={complianceForm.compliance_status}
+                  onChange={(event) =>
+                    setComplianceForm((current) => ({
+                      ...current,
+                      compliance_status: event.target.value as YouTubeProjectComplianceUpdatePayload["compliance_status"],
+                    }))
+                  }
+                >
+                  <option value="unknown">Unknown</option>
+                  <option value="private_only">Private only</option>
+                  <option value="audit_pending">Audit pending</option>
+                  <option value="audit_approved">Audit approved</option>
+                </select>
+              </label>
+              <div className="form-grid compact">
+                <label>
+                  <span>Submission date</span>
+                  <input
+                    type="date"
+                    value={complianceForm.submission_date ?? ""}
+                    onChange={(event) =>
+                      setComplianceForm((current) => ({
+                        ...current,
+                        submission_date: event.target.value || null,
+                      }))
+                    }
+                  />
+                </label>
+                <label>
+                  <span>Approval date</span>
+                  <input
+                    type="date"
+                    value={complianceForm.approval_date ?? ""}
+                    onChange={(event) =>
+                      setComplianceForm((current) => ({
+                        ...current,
+                        approval_date: event.target.value || null,
+                      }))
+                    }
+                  />
+                </label>
+              </div>
+              <label>
+                <span>Case or reference ID</span>
+                <input
+                  value={complianceForm.case_reference ?? ""}
+                  onChange={(event) =>
+                    setComplianceForm((current) => ({
+                      ...current,
+                      case_reference: event.target.value || null,
+                    }))
+                  }
+                  maxLength={255}
+                />
+              </label>
+              <label>
+                <span>Administrative note</span>
+                <textarea
+                  value={complianceForm.admin_note ?? ""}
+                  onChange={(event) =>
+                    setComplianceForm((current) => ({
+                      ...current,
+                      admin_note: event.target.value || null,
+                    }))
+                  }
+                  rows={3}
+                  maxLength={2000}
+                />
+              </label>
+              <label className="checkbox-row">
+                <input
+                  type="checkbox"
+                  checked={Boolean(complianceForm.confirm_audit_approved)}
+                  onChange={(event) =>
+                    setComplianceForm((current) => ({
+                      ...current,
+                      confirm_audit_approved: event.target.checked,
+                    }))
+                  }
+                />
+                <span>I confirm that YouTube compliance approval has been granted for this Google API project.</span>
+              </label>
+              <div className="button-row">
+                <button type="submit" disabled={isSavingCompliance}>
+                  {isSavingCompliance ? "Saving..." : "Save compliance status"}
+                </button>
+                <button type="button" className="secondary" onClick={() => loadAuditReport("json")} disabled={isLoadingReport}>
+                  {isLoadingReport && reportMode === "json" ? "Loading report..." : "View audit report"}
+                </button>
+                <button type="button" className="secondary" onClick={() => loadAuditReport("markdown")} disabled={isLoadingReport}>
+                  {isLoadingReport && reportMode === "markdown" ? "Loading markdown..." : "Load markdown export"}
+                </button>
+              </div>
+            </form>
+
+            {showReport && reportMode === "json" && report ? (
+              <div className="panel inset stack">
+                <div className="panel-header">
+                  <div>
+                    <h4>YouTube audit-readiness report</h4>
+                    <p className="subtle">Generated {formatDateTime(report.generated_at)}.</p>
+                  </div>
+                  <CopyButton text={JSON.stringify(report, null, 2)} label="JSON report" />
+                </div>
+                <div className="key-grid">
+                  <div><span>Application</span><strong>{report.application_name}</strong></div>
+                  <div><span>Status</span><strong>{formatComplianceLabel(report.current_compliance_status)}</strong></div>
+                  <div><span>Version</span><strong>{report.application_version ?? "Unavailable"}</strong></div>
+                </div>
+                <p>{report.application_purpose}</p>
+                <div className="stack compact">
+                  <strong>OAuth scopes</strong>
+                  {report.scope_justifications.map((item) => (
+                    <p key={item.scope}><code>{item.scope}</code> - {item.required_for}</p>
+                  ))}
+                </div>
+                {report.sections.map((section) => (
+                  <div key={section.key} className="notice-card">
+                    <strong>{section.title}</strong>
+                    <p>{section.summary}</p>
+                    <p className="subtle">Status: {formatSectionStatus(section.status)}</p>
+                    <ul>
+                      {section.bullets.map((bullet) => <li key={bullet}>{bullet}</li>)}
+                    </ul>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+
+            {showReport && reportMode === "markdown" && reportMarkdown ? (
+              <div className="panel inset stack">
+                <div className="panel-header">
+                  <div>
+                    <h4>YouTube audit-readiness markdown</h4>
+                    <p className="subtle">Markdown export from the backend report endpoint.</p>
+                  </div>
+                  <CopyButton text={reportMarkdown} label="markdown report" />
+                </div>
+                <pre>{reportMarkdown}</pre>
+              </div>
+            ) : null}
+          </div>
+        </details>
+      ) : null}
 
       {canPublish && publishPreviewUrl ? (
         <div className="stack">
@@ -236,7 +511,7 @@ export function YouTubePublicationPanel({ runId, runStatus, finalAssetSelection,
           <strong>Connect YouTube first</strong>
           <p>An active YouTube connection is required before Story Engine can draft or execute a YouTube publication job.</p>
           <button type="button" onClick={handleConnect} disabled={isWorking}>
-            {isWorking ? "Opening YouTube…" : "Connect YouTube"}
+            {isWorking ? "Opening YouTube..." : "Connect YouTube"}
           </button>
         </div>
       ) : null}
@@ -251,7 +526,7 @@ export function YouTubePublicationPanel({ runId, runStatus, finalAssetSelection,
 
       {!job && activeConnection && canPublish ? (
         <form className="stack" onSubmit={handleCreateDraft}>
-          <p className="subtle">An unverified Google project may force a requested unlisted or public upload to remain private.</p>
+          <p className="subtle">Private uploads remain available. Unlisted and public stay disabled until audit approval is recorded for this YouTube API project.</p>
           <label>
             <span>Title</span>
             <input
@@ -288,15 +563,19 @@ export function YouTubePublicationPanel({ runId, runStatus, finalAssetSelection,
             <label>
               <span>Privacy</span>
               <select
+                aria-label="Privacy"
                 value={draft.privacy}
                 onChange={(event) => setDraft((current) => ({ ...current, privacy: event.target.value as PublicationJobDraftPayload["privacy"] }))}
               >
                 <option value="private">Private</option>
-                <option value="unlisted">Unlisted</option>
-                <option value="public">Public</option>
+                <option value="unlisted" disabled={!canUseUnlisted}>Unlisted</option>
+                <option value="public" disabled={!canUsePublic}>Public</option>
               </select>
             </label>
           </div>
+          {!canUseUnlisted || !canUsePublic ? (
+            <p className="subtle">{compliance?.status_explanation ?? "Unlisted and public remain blocked until audit approval is recorded."}</p>
+          ) : null}
           <label className="checkbox-row">
             <input
               type="checkbox"
@@ -314,7 +593,7 @@ export function YouTubePublicationPanel({ runId, runStatus, finalAssetSelection,
             <span>Contains synthetic media</span>
           </label>
           <button type="submit" disabled={isSaving}>
-            {isSaving ? "Saving draft…" : "Publish to YouTube"}
+            {isSaving ? "Saving draft..." : "Publish to YouTube"}
           </button>
         </form>
       ) : null}
@@ -359,7 +638,7 @@ export function YouTubePublicationPanel({ runId, runStatus, finalAssetSelection,
               </label>
               <div className="button-row">
                 <button type="button" onClick={() => runJobAction(() => api.approvePublicationJob(job.id))} disabled={!approvalChecked || isWorking}>
-                  {isWorking ? "Approving…" : "Approve publication"}
+                  {isWorking ? "Approving..." : "Approve publication"}
                 </button>
                 <button type="button" className="secondary" onClick={() => runJobAction(() => api.cancelPublicationJob(job.id))} disabled={isWorking}>
                   Cancel draft
@@ -370,19 +649,19 @@ export function YouTubePublicationPanel({ runId, runStatus, finalAssetSelection,
 
           {job.available_actions.includes("dispatch") ? (
             <button type="button" onClick={() => runJobAction(() => api.dispatchPublicationJob(job.id))} disabled={isWorking}>
-              {isWorking ? "Dispatching…" : "Start YouTube upload"}
+              {isWorking ? "Dispatching..." : "Start YouTube upload"}
             </button>
           ) : null}
 
           {target?.available_actions.includes("retry") ? (
             <button type="button" className="secondary" onClick={() => runJobAction(() => api.retryPublicationTarget(target.id))} disabled={isWorking}>
-              {isWorking ? "Retrying…" : "Retry target"}
+              {isWorking ? "Retrying..." : "Retry target"}
             </button>
           ) : null}
 
           {target?.available_actions.includes("reconcile") ? (
             <button type="button" className="secondary" onClick={() => runJobAction(() => api.reconcilePublicationTarget(target.id))} disabled={isWorking}>
-              {isWorking ? "Reconciling…" : "Reconcile target"}
+              {isWorking ? "Reconciling..." : "Reconcile target"}
             </button>
           ) : null}
 

@@ -2,6 +2,8 @@
 
 Sprint 1B extends the secure YouTube connection flow into a resumable upload and processing-reconciliation workflow.
 
+Sprint 1C adds YouTube audit-readiness controls so Story Engine can safely keep private uploads available while blocking unlisted and public until an administrator records compliance approval.
+
 Required environment variables:
 
 - `SOCIAL_TOKEN_ENCRYPTION_KEY`
@@ -48,3 +50,33 @@ Operational notes:
 - Story Engine treats those results as `uploaded_private` and does not create a `PlatformPost`.
 - Retry and reconciliation never create a second upload after a provider video ID has been persisted.
 - The worker queue must be running anywhere you expect uploads or polling to progress.
+
+YouTube compliance statuses:
+
+- `private_only`: safe default for new and existing projects. Private uploads remain available; unlisted/public stay blocked.
+- `audit_pending`: use after a compliance submission has been sent but before approval is recorded. Private uploads remain available; unlisted/public stay blocked.
+- `audit_approved`: use only after an administrator explicitly records that YouTube API compliance approval has been granted. Unlisted/public become selectable for future jobs.
+- `unknown`: available when the administrator cannot safely confirm the project state. Story Engine still blocks unlisted/public.
+
+Why OAuth success is not audit approval:
+
+- A connected channel proves only that the user completed OAuth and granted scopes.
+- It does not prove that the Google API project has passed the YouTube compliance audit.
+- Story Engine therefore keeps `private_only` as the safe default until an administrator records a different status.
+
+Administrative workflow:
+
+1. Connect the channel through the existing YouTube OAuth flow.
+2. Record `audit_pending` after submitting the YouTube compliance materials.
+3. Record `audit_approved` only after approval is granted.
+4. Return the project to `private_only` if approval is withdrawn or the project configuration changes.
+
+Audit-readiness report:
+
+- Story Engine can generate a structured audit-readiness report in JSON or Markdown.
+- The report captures implemented behaviour such as scopes, consent flow, token encryption, visibility blocking, retry/idempotency protections, and publication audit logging.
+- The report also highlights what a human still needs to provide, such as privacy-policy URLs, support contacts, and formal compliance submission references.
+
+Reference rule:
+
+- Uploads using `videos.insert` from unverified API projects created after 28 July 2020 are restricted to private viewing until the project passes a compliance audit.

@@ -27,6 +27,7 @@ from app.services.publication_execution_service import (
     request_reconcile_publication_target,
     retry_publication_target,
 )
+from app.services.youtube_compliance_service import YouTubeComplianceConflictError
 
 
 router = APIRouter(
@@ -41,6 +42,8 @@ def create_run_publication_job(run_id: UUID, payload: PublicationJobDraftRequest
         return PublicationJobMutationResponse(job=create_publication_job_draft(db, str(run_id), payload))
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except YouTubeComplianceConflictError as exc:
+        raise HTTPException(status_code=409, detail=exc.to_detail()) from exc
     except PublicationConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
@@ -67,6 +70,8 @@ def approve_publication_job_route(job_id: UUID, db: Session = Depends(get_db)):
         return PublicationJobMutationResponse(job=approve_publication_job(db, str(job_id)))
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except YouTubeComplianceConflictError as exc:
+        raise HTTPException(status_code=409, detail=exc.to_detail()) from exc
     except PublicationConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
@@ -77,6 +82,8 @@ def dispatch_publication_job_route(job_id: UUID, db: Session = Depends(get_db)):
         return PublicationJobMutationResponse(job=dispatch_publication_job(db, str(job_id)))
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except YouTubeComplianceConflictError as exc:
+        raise HTTPException(status_code=409, detail=exc.to_detail()) from exc
     except PublicationConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 

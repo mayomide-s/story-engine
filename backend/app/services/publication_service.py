@@ -21,6 +21,7 @@ from app.schemas.publication import PublicationJobDraftRequest, PublicationJobRe
 from app.services.final_asset_service import get_final_asset_selection_payload, get_selected_final_asset
 from app.services.pipeline_service import add_event, seed_default_account
 from app.services.providers import get_storage_provider
+from app.services.youtube_compliance_service import ensure_youtube_visibility_allowed
 
 
 YOUTUBE_PLATFORM = "youtube"
@@ -321,8 +322,9 @@ def create_publication_job_draft(
     run, package = _require_completed_run_and_package(db, run_id)
     selection, asset = _require_selected_video_asset(db, run, package)
     connection = _require_active_youtube_connection(db, str(payload.connection_id) if payload.connection_id else None)
-    asset_hash = _asset_sha256(asset)
     normalized_target = _normalize_target_payload(payload)
+    ensure_youtube_visibility_allowed(db, normalized_target["visibility"])
+    asset_hash = _asset_sha256(asset)
     idempotency_key = _target_idempotency_key(
         run_id=run.id,
         connection_id=connection.id,
@@ -418,6 +420,14 @@ def approve_publication_job(db: Session, job_id: str) -> dict[str, Any]:
         raise PublicationConflictError("Cancelled publication jobs cannot be approved.")
 
     validate_publication_asset_snapshot(db, job)
+    targets = (
+        db.query(PublicationTarget)
+        .filter(PublicationTarget.publication_job_id == job.id)
+        .all()
+    )
+    for target in targets:
+        if target.platform == YOUTUBE_PLATFORM:
+            ensure_youtube_visibility_allowed(db, target.visibility)
     job.status = "approved"
     job.approved_at = job.approved_at or _utcnow()
     job.updated_at = _utcnow()
