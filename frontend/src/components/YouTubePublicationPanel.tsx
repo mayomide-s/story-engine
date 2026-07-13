@@ -7,9 +7,13 @@ import {
   PublicationJobDraftPayload,
   PublicationTarget,
   SocialConnectionSummary,
-  YouTubeAuditReadinessReport,
+  YouTubeComplianceReadiness,
+  YouTubeComplianceSubmissionPackage,
+  YouTubeHumanConfirmation,
   YouTubeProjectCompliance,
   YouTubeProjectComplianceUpdatePayload,
+  YouTubeSubmissionProfile,
+  YouTubeSubmissionProfileUpdatePayload,
 } from "../api/client";
 
 function CopyButton({ text, label }: { text: string; label: string }) {
@@ -97,10 +101,37 @@ function defaultCompliancePayload(compliance: YouTubeProjectCompliance | null): 
     case_reference: compliance?.case_reference ?? null,
     admin_note: compliance?.admin_note ?? null,
     confirm_audit_approved: false,
+    confirm_google_audit_approval_received: false,
   };
 }
 
-function formatComplianceLabel(status: YouTubeProjectCompliance["compliance_status"] | string) {
+function defaultProfilePayload(profile: YouTubeSubmissionProfile | null): YouTubeSubmissionProfileUpdatePayload {
+  return {
+    application_display_name: profile?.application_display_name ?? null,
+    product_description: profile?.product_description ?? null,
+    organization_name: profile?.organization_name ?? null,
+    support_contact: profile?.support_contact ?? null,
+    privacy_policy_url: profile?.privacy_policy_url ?? null,
+    terms_of_service_url: profile?.terms_of_service_url ?? null,
+    application_homepage_url: profile?.application_homepage_url ?? null,
+    production_oauth_redirect_uri: profile?.production_oauth_redirect_uri ?? null,
+    production_frontend_url: profile?.production_frontend_url ?? null,
+    production_api_url: profile?.production_api_url ?? null,
+    data_retention_summary: profile?.data_retention_summary ?? null,
+    user_data_deletion_summary: profile?.user_data_deletion_summary ?? null,
+    token_revocation_summary: profile?.token_revocation_summary ?? null,
+    account_disconnection_summary: profile?.account_disconnection_summary ?? null,
+    quota_monitoring_summary: profile?.quota_monitoring_summary ?? null,
+    incident_response_summary: profile?.incident_response_summary ?? null,
+    security_contact_summary: profile?.security_contact_summary ?? null,
+    intended_submission_date: profile?.intended_submission_date ?? null,
+    submission_case_reference: profile?.submission_case_reference ?? null,
+    reviewed_by: profile?.reviewed_by ?? null,
+    admin_note: profile?.admin_note ?? null,
+  };
+}
+
+function formatComplianceLabel(status: string) {
   switch (status) {
     case "audit_approved":
       return "Audit approved";
@@ -113,8 +144,22 @@ function formatComplianceLabel(status: YouTubeProjectCompliance["compliance_stat
   }
 }
 
-function formatSectionStatus(status: string) {
-  return status.replace(/_/g, " ");
+function formatReadinessLabel(status: string) {
+  switch (status) {
+    case "needs_confirmation":
+      return "Needs confirmation";
+    case "not_applicable":
+      return "Not applicable";
+    default:
+      return status.charAt(0).toUpperCase() + status.slice(1);
+  }
+}
+
+function statusClassName(status: string) {
+  if (status === "pass") return "success";
+  if (status === "fail") return "warning";
+  if (status === "needs_confirmation") return "warning";
+  return "";
 }
 
 type Props = {
@@ -128,20 +173,27 @@ export function YouTubePublicationPanel({ runId, runStatus, finalAssetSelection,
   const [connections, setConnections] = useState<SocialConnectionSummary[]>([]);
   const [job, setJob] = useState<PublicationJob | null>(null);
   const [compliance, setCompliance] = useState<YouTubeProjectCompliance | null>(null);
-  const [report, setReport] = useState<YouTubeAuditReadinessReport | null>(null);
-  const [reportMarkdown, setReportMarkdown] = useState("");
+  const [profile, setProfile] = useState<YouTubeSubmissionProfile | null>(null);
+  const [readiness, setReadiness] = useState<YouTubeComplianceReadiness | null>(null);
+  const [submissionPackage, setSubmissionPackage] = useState<YouTubeComplianceSubmissionPackage | null>(null);
+  const [packageMarkdown, setPackageMarkdown] = useState("");
+  const [checklistMarkdown, setChecklistMarkdown] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isWorking, setIsWorking] = useState(false);
   const [isSavingCompliance, setIsSavingCompliance] = useState(false);
-  const [isLoadingReport, setIsLoadingReport] = useState(false);
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
+  const [isSavingConfirmationKey, setIsSavingConfirmationKey] = useState<string | null>(null);
+  const [isLoadingPackage, setIsLoadingPackage] = useState(false);
   const [error, setError] = useState("");
   const [approvalChecked, setApprovalChecked] = useState(false);
-  const [showReport, setShowReport] = useState(false);
-  const [reportMode, setReportMode] = useState<"json" | "markdown">("json");
+  const [showSubmissionPrep, setShowSubmissionPrep] = useState(false);
+  const [showExports, setShowExports] = useState(false);
+  const [exportMode, setExportMode] = useState<"json" | "markdown" | "checklist">("json");
   const [draft, setDraft] = useState<PublicationJobDraftPayload>(() => defaultDraftPayload(finalAssetSelection, manualPostPackage ?? null));
   const [tagsInput, setTagsInput] = useState(() => defaultDraftPayload(finalAssetSelection, manualPostPackage ?? null).tags.join(", "));
   const [complianceForm, setComplianceForm] = useState<YouTubeProjectComplianceUpdatePayload>(() => defaultCompliancePayload(null));
+  const [profileForm, setProfileForm] = useState<YouTubeSubmissionProfileUpdatePayload>(() => defaultProfilePayload(null));
 
   const selectedAsset = finalAssetSelection?.asset as Record<string, unknown> | undefined;
   const activeConnection = useMemo(
@@ -155,7 +207,16 @@ export function YouTubePublicationPanel({ runId, runStatus, finalAssetSelection,
   const terminalTarget = target ? ["uploaded_private", "published", "permanent_failure", "cancelled"].includes(target.state) : false;
   const canUseUnlisted = Boolean(compliance?.can_publish_unlisted);
   const canUsePublic = Boolean(compliance?.can_publish_public);
-  const complianceBadge = formatComplianceLabel(compliance?.compliance_status ?? "private_only");
+  const canRecordAuditApproved = Boolean(readiness?.can_record_audit_approved);
+  const groupedRequirements = useMemo(() => {
+    const groups = new Map<string, YouTubeComplianceReadiness["requirements"]>();
+    for (const item of readiness?.requirements ?? []) {
+      const group = groups.get(item.category) ?? [];
+      group.push(item);
+      groups.set(item.category, group);
+    }
+    return Array.from(groups.entries());
+  }, [readiness]);
 
   useEffect(() => {
     const nextDefault = defaultDraftPayload(finalAssetSelection, manualPostPackage ?? null);
@@ -175,11 +236,26 @@ export function YouTubePublicationPanel({ runId, runStatus, finalAssetSelection,
   }, [compliance]);
 
   useEffect(() => {
+    setProfileForm(defaultProfilePayload(profile));
+  }, [profile]);
+
+  async function loadComplianceResources() {
+    const [complianceResponse, profileResponse, readinessResponse] = await Promise.all([
+      api.getYouTubeProjectCompliance(),
+      api.getYouTubeSubmissionProfile(),
+      api.getYouTubeComplianceReadiness(),
+    ]);
+    setCompliance(complianceResponse);
+    setProfile(profileResponse);
+    setReadiness(readinessResponse);
+  }
+
+  useEffect(() => {
     let cancelled = false;
     async function load() {
       setIsLoading(true);
       try {
-        const [connectionResponse, latestJob, complianceResponse] = await Promise.all([
+        const [connectionResponse, latestJob] = await Promise.all([
           api.listSocialConnections(),
           api.getLatestPublicationJobForRun(runId).catch((requestError: Error) => {
             if (requestError.message === "Publication job not found") {
@@ -187,12 +263,12 @@ export function YouTubePublicationPanel({ runId, runStatus, finalAssetSelection,
             }
             throw requestError;
           }),
-          api.getYouTubeProjectCompliance(),
         ]);
         if (cancelled) return;
         setConnections(connectionResponse.items);
         setJob(latestJob);
-        setCompliance(complianceResponse);
+        await loadComplianceResources();
+        if (cancelled) return;
         setError("");
       } catch (requestError) {
         if (cancelled) return;
@@ -278,8 +354,10 @@ export function YouTubePublicationPanel({ runId, runStatus, finalAssetSelection,
     try {
       const response = await api.updateYouTubeProjectCompliance(complianceForm);
       setCompliance(response);
-      setReport(null);
-      setReportMarkdown("");
+      await loadComplianceResources();
+      setSubmissionPackage(null);
+      setPackageMarkdown("");
+      setChecklistMarkdown("");
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Failed to update YouTube compliance status.");
     } finally {
@@ -287,21 +365,60 @@ export function YouTubePublicationPanel({ runId, runStatus, finalAssetSelection,
     }
   }
 
-  async function loadAuditReport(mode: "json" | "markdown") {
-    setIsLoadingReport(true);
+  async function handleProfileSave(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setIsSavingProfile(true);
     setError("");
-    setShowReport(true);
-    setReportMode(mode);
+    try {
+      const response = await api.updateYouTubeSubmissionProfile(profileForm);
+      setProfile(response);
+      await loadComplianceResources();
+      setSubmissionPackage(null);
+      setPackageMarkdown("");
+      setChecklistMarkdown("");
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Failed to update the YouTube submission profile.");
+    } finally {
+      setIsSavingProfile(false);
+    }
+  }
+
+  async function toggleConfirmation(item: YouTubeHumanConfirmation, completed: boolean) {
+    setIsSavingConfirmationKey(item.key);
+    setError("");
+    try {
+      const response = completed
+        ? await api.setYouTubeHumanConfirmation(item.key, true, profileForm.reviewed_by ?? null)
+        : await api.clearYouTubeHumanConfirmation(item.key, profileForm.reviewed_by ?? null);
+      setProfile(response);
+      await loadComplianceResources();
+      setSubmissionPackage(null);
+      setPackageMarkdown("");
+      setChecklistMarkdown("");
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Failed to update the human confirmation.");
+    } finally {
+      setIsSavingConfirmationKey(null);
+    }
+  }
+
+  async function loadSubmissionPackage(mode: "json" | "markdown" | "checklist") {
+    setIsLoadingPackage(true);
+    setError("");
+    setShowExports(true);
+    setExportMode(mode);
     try {
       if (mode === "markdown") {
-        setReportMarkdown(await api.getYouTubeAuditReadinessReportMarkdown());
+        setPackageMarkdown(await api.getYouTubeComplianceSubmissionPackageMarkdown());
+      } else if (mode === "checklist") {
+        setChecklistMarkdown(await api.getYouTubeComplianceSubmissionChecklistMarkdown());
       } else {
-        setReport(await api.getYouTubeAuditReadinessReport());
+        setSubmissionPackage(await api.getYouTubeComplianceSubmissionPackage());
       }
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Failed to load the YouTube audit-readiness report.");
+      setError(requestError instanceof Error ? requestError.message : "Failed to load the YouTube compliance submission package.");
     } finally {
-      setIsLoadingReport(false);
+      setIsLoadingPackage(false);
     }
   }
 
@@ -327,8 +444,8 @@ export function YouTubePublicationPanel({ runId, runStatus, finalAssetSelection,
       {isLoading ? <p className="subtle">Loading YouTube publication state...</p> : null}
 
       {compliance ? (
-        <div className={`notice-card ${compliance.compliance_status === "audit_approved" ? "" : "warning"}`}>
-          <strong>YouTube compliance status: {complianceBadge}</strong>
+        <div className={`notice-card ${compliance.compliance_status === "audit_approved" ? "success" : "warning"}`}>
+          <strong>YouTube compliance status: {formatComplianceLabel(compliance.compliance_status)}</strong>
           <p>{compliance.status_explanation}</p>
           <div className="key-grid">
             <div><span>Status updated</span><strong>{formatDateTime(compliance.status_updated_at)}</strong></div>
@@ -339,11 +456,263 @@ export function YouTubePublicationPanel({ runId, runStatus, finalAssetSelection,
         </div>
       ) : null}
 
+      {readiness ? (
+        <div className={`notice-card ${statusClassName(readiness.overall_status)}`}>
+          <strong>YouTube submission readiness: {formatReadinessLabel(readiness.overall_status)}</strong>
+          <p>
+            {readiness.blocker_count} blocker{readiness.blocker_count === 1 ? "" : "s"} remain. Story Engine cannot self-certify Google approval,
+            and audit approval stays blocked until the backend readiness check passes.
+          </p>
+          <div className="key-grid">
+            <div><span>Blocker count</span><strong>{String(readiness.blocker_count)}</strong></div>
+            <div><span>Can record audit approval</span><strong>{readiness.can_record_audit_approved ? "Yes" : "No"}</strong></div>
+            <div><span>Generated</span><strong>{formatDateTime(readiness.generated_at)}</strong></div>
+          </div>
+        </div>
+      ) : null}
+
       {canPublish ? (
-        <details className="technical-disclosure">
-          <summary>YouTube audit readiness</summary>
+        <details className="technical-disclosure" open={showSubmissionPrep} onToggle={(event) => setShowSubmissionPrep((event.target as HTMLDetailsElement).open)}>
+          <summary>YouTube compliance submission preparation</summary>
           <div className="stack compact">
-            <form className="stack" onSubmit={handleComplianceSave}>
+            {readiness?.blockers.length ? (
+              <div className="notice-card warning">
+                <strong>Unresolved blockers</strong>
+                <ul>
+                  {readiness.blockers.map((item) => (
+                    <li key={item.key}>
+                      <strong>{item.title}:</strong> {item.remediation_guidance}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : (
+              <div className="notice-card success">
+                <strong>No current blockers</strong>
+                <p>The current readiness evaluation has no blocking failures or pending human confirmations.</p>
+              </div>
+            )}
+
+            <form className="stack" onSubmit={handleProfileSave}>
+              <div className="panel inset stack">
+                <h4>Submission profile</h4>
+                <p className="subtle">Store only non-secret reviewer-facing metadata here. Story Engine does not invent legal claims, production domains, or support contacts for you.</p>
+                <div className="form-grid compact">
+                  <label>
+                    <span>Application display name</span>
+                    <input
+                      value={profileForm.application_display_name ?? ""}
+                      onChange={(event) => setProfileForm((current) => ({ ...current, application_display_name: event.target.value || null }))}
+                      maxLength={255}
+                    />
+                  </label>
+                  <label>
+                    <span>Organization or developer name</span>
+                    <input
+                      value={profileForm.organization_name ?? ""}
+                      onChange={(event) => setProfileForm((current) => ({ ...current, organization_name: event.target.value || null }))}
+                      maxLength={255}
+                    />
+                  </label>
+                </div>
+                <label>
+                  <span>Product description</span>
+                  <textarea
+                    value={profileForm.product_description ?? ""}
+                    onChange={(event) => setProfileForm((current) => ({ ...current, product_description: event.target.value || null }))}
+                    rows={3}
+                    maxLength={4000}
+                  />
+                </label>
+                <div className="form-grid compact">
+                  <label>
+                    <span>Support contact</span>
+                    <input
+                      value={profileForm.support_contact ?? ""}
+                      onChange={(event) => setProfileForm((current) => ({ ...current, support_contact: event.target.value || null }))}
+                      maxLength={255}
+                    />
+                  </label>
+                  <label>
+                    <span>Security contact summary</span>
+                    <input
+                      value={profileForm.security_contact_summary ?? ""}
+                      onChange={(event) => setProfileForm((current) => ({ ...current, security_contact_summary: event.target.value || null }))}
+                      maxLength={4000}
+                    />
+                  </label>
+                </div>
+                <div className="form-grid compact">
+                  <label>
+                    <span>Privacy policy URL</span>
+                    <input
+                      value={profileForm.privacy_policy_url ?? ""}
+                      onChange={(event) => setProfileForm((current) => ({ ...current, privacy_policy_url: event.target.value || null }))}
+                    />
+                  </label>
+                  <label>
+                    <span>Terms of service URL</span>
+                    <input
+                      value={profileForm.terms_of_service_url ?? ""}
+                      onChange={(event) => setProfileForm((current) => ({ ...current, terms_of_service_url: event.target.value || null }))}
+                    />
+                  </label>
+                </div>
+                <div className="form-grid compact">
+                  <label>
+                    <span>Application homepage URL</span>
+                    <input
+                      value={profileForm.application_homepage_url ?? ""}
+                      onChange={(event) => setProfileForm((current) => ({ ...current, application_homepage_url: event.target.value || null }))}
+                    />
+                  </label>
+                  <label>
+                    <span>Production OAuth redirect URI</span>
+                    <input
+                      value={profileForm.production_oauth_redirect_uri ?? ""}
+                      onChange={(event) => setProfileForm((current) => ({ ...current, production_oauth_redirect_uri: event.target.value || null }))}
+                    />
+                  </label>
+                </div>
+                <div className="form-grid compact">
+                  <label>
+                    <span>Production frontend URL</span>
+                    <input
+                      value={profileForm.production_frontend_url ?? ""}
+                      onChange={(event) => setProfileForm((current) => ({ ...current, production_frontend_url: event.target.value || null }))}
+                    />
+                  </label>
+                  <label>
+                    <span>Production API URL</span>
+                    <input
+                      value={profileForm.production_api_url ?? ""}
+                      onChange={(event) => setProfileForm((current) => ({ ...current, production_api_url: event.target.value || null }))}
+                    />
+                  </label>
+                </div>
+                <label>
+                  <span>Data retention summary</span>
+                  <textarea
+                    value={profileForm.data_retention_summary ?? ""}
+                    onChange={(event) => setProfileForm((current) => ({ ...current, data_retention_summary: event.target.value || null }))}
+                    rows={2}
+                    maxLength={4000}
+                  />
+                </label>
+                <label>
+                  <span>User-data deletion summary</span>
+                  <textarea
+                    value={profileForm.user_data_deletion_summary ?? ""}
+                    onChange={(event) => setProfileForm((current) => ({ ...current, user_data_deletion_summary: event.target.value || null }))}
+                    rows={2}
+                    maxLength={4000}
+                  />
+                </label>
+                <label>
+                  <span>Token revocation summary</span>
+                  <textarea
+                    value={profileForm.token_revocation_summary ?? ""}
+                    onChange={(event) => setProfileForm((current) => ({ ...current, token_revocation_summary: event.target.value || null }))}
+                    rows={2}
+                    maxLength={4000}
+                  />
+                </label>
+                <label>
+                  <span>Account disconnection summary</span>
+                  <textarea
+                    value={profileForm.account_disconnection_summary ?? ""}
+                    onChange={(event) => setProfileForm((current) => ({ ...current, account_disconnection_summary: event.target.value || null }))}
+                    rows={2}
+                    maxLength={4000}
+                  />
+                </label>
+                <div className="form-grid compact">
+                  <label>
+                    <span>Quota monitoring summary</span>
+                    <textarea
+                      value={profileForm.quota_monitoring_summary ?? ""}
+                      onChange={(event) => setProfileForm((current) => ({ ...current, quota_monitoring_summary: event.target.value || null }))}
+                      rows={2}
+                      maxLength={4000}
+                    />
+                  </label>
+                  <label>
+                    <span>Incident response summary</span>
+                    <textarea
+                      value={profileForm.incident_response_summary ?? ""}
+                      onChange={(event) => setProfileForm((current) => ({ ...current, incident_response_summary: event.target.value || null }))}
+                      rows={2}
+                      maxLength={4000}
+                    />
+                  </label>
+                </div>
+                <div className="form-grid compact">
+                  <label>
+                    <span>Submission case/reference ID</span>
+                    <input
+                      value={profileForm.submission_case_reference ?? ""}
+                      onChange={(event) => setProfileForm((current) => ({ ...current, submission_case_reference: event.target.value || null }))}
+                      maxLength={255}
+                    />
+                  </label>
+                  <label>
+                    <span>Intended submission date</span>
+                    <input
+                      type="date"
+                      value={profileForm.intended_submission_date ?? ""}
+                      onChange={(event) => setProfileForm((current) => ({ ...current, intended_submission_date: event.target.value || null }))}
+                    />
+                  </label>
+                </div>
+                <div className="form-grid compact">
+                  <label>
+                    <span>Reviewed by</span>
+                    <input
+                      value={profileForm.reviewed_by ?? ""}
+                      onChange={(event) => setProfileForm((current) => ({ ...current, reviewed_by: event.target.value || null }))}
+                      maxLength={255}
+                    />
+                  </label>
+                  <label>
+                    <span>Non-secret note</span>
+                    <input
+                      value={profileForm.admin_note ?? ""}
+                      onChange={(event) => setProfileForm((current) => ({ ...current, admin_note: event.target.value || null }))}
+                      maxLength={2000}
+                    />
+                  </label>
+                </div>
+                <div className="button-row">
+                  <button type="submit" disabled={isSavingProfile}>
+                    {isSavingProfile ? "Saving..." : "Save submission profile"}
+                  </button>
+                </div>
+              </div>
+            </form>
+
+            <div className="panel inset stack">
+              <h4>Human confirmations</h4>
+              <p className="subtle">These confirmations represent review steps that Story Engine cannot truthfully complete on its own.</p>
+              {(profile?.human_confirmations ?? []).map((item) => (
+                <label key={item.key} className="checkbox-row">
+                  <input
+                    type="checkbox"
+                    checked={item.completed}
+                    disabled={isSavingConfirmationKey === item.key}
+                    onChange={(event) => toggleConfirmation(item, event.target.checked)}
+                  />
+                  <span>
+                    <strong>{item.title}</strong>
+                    <br />
+                    {item.description}
+                  </span>
+                </label>
+              ))}
+            </div>
+
+            <form className="panel inset stack" onSubmit={handleComplianceSave}>
+              <h4>Compliance status</h4>
+              <p className="subtle">Story Engine cannot infer Google approval from OAuth success, a private upload, or any local test. Audit approval stays blocked until the backend confirms readiness.</p>
               <label>
                 <span>Compliance status</span>
                 <select
@@ -358,7 +727,9 @@ export function YouTubePublicationPanel({ runId, runStatus, finalAssetSelection,
                   <option value="unknown">Unknown</option>
                   <option value="private_only">Private only</option>
                   <option value="audit_pending">Audit pending</option>
-                  <option value="audit_approved">Audit approved</option>
+                  <option value="audit_approved" disabled={!canRecordAuditApproved && compliance?.compliance_status !== "audit_approved"}>
+                    Audit approved
+                  </option>
                 </select>
               </label>
               <div className="form-grid compact">
@@ -367,12 +738,7 @@ export function YouTubePublicationPanel({ runId, runStatus, finalAssetSelection,
                   <input
                     type="date"
                     value={complianceForm.submission_date ?? ""}
-                    onChange={(event) =>
-                      setComplianceForm((current) => ({
-                        ...current,
-                        submission_date: event.target.value || null,
-                      }))
-                    }
+                    onChange={(event) => setComplianceForm((current) => ({ ...current, submission_date: event.target.value || null }))}
                   />
                 </label>
                 <label>
@@ -380,25 +746,15 @@ export function YouTubePublicationPanel({ runId, runStatus, finalAssetSelection,
                   <input
                     type="date"
                     value={complianceForm.approval_date ?? ""}
-                    onChange={(event) =>
-                      setComplianceForm((current) => ({
-                        ...current,
-                        approval_date: event.target.value || null,
-                      }))
-                    }
+                    onChange={(event) => setComplianceForm((current) => ({ ...current, approval_date: event.target.value || null }))}
                   />
                 </label>
               </div>
               <label>
-                <span>Case or reference ID</span>
+                <span>Approval or submission reference</span>
                 <input
                   value={complianceForm.case_reference ?? ""}
-                  onChange={(event) =>
-                    setComplianceForm((current) => ({
-                      ...current,
-                      case_reference: event.target.value || null,
-                    }))
-                  }
+                  onChange={(event) => setComplianceForm((current) => ({ ...current, case_reference: event.target.value || null }))}
                   maxLength={255}
                 />
               </label>
@@ -406,12 +762,7 @@ export function YouTubePublicationPanel({ runId, runStatus, finalAssetSelection,
                 <span>Administrative note</span>
                 <textarea
                   value={complianceForm.admin_note ?? ""}
-                  onChange={(event) =>
-                    setComplianceForm((current) => ({
-                      ...current,
-                      admin_note: event.target.value || null,
-                    }))
-                  }
+                  onChange={(event) => setComplianceForm((current) => ({ ...current, admin_note: event.target.value || null }))}
                   rows={3}
                   maxLength={2000}
                 />
@@ -420,74 +771,119 @@ export function YouTubePublicationPanel({ runId, runStatus, finalAssetSelection,
                 <input
                   type="checkbox"
                   checked={Boolean(complianceForm.confirm_audit_approved)}
-                  onChange={(event) =>
-                    setComplianceForm((current) => ({
-                      ...current,
-                      confirm_audit_approved: event.target.checked,
-                    }))
-                  }
+                  onChange={(event) => setComplianceForm((current) => ({ ...current, confirm_audit_approved: event.target.checked }))}
                 />
-                <span>I confirm that YouTube compliance approval has been granted for this Google API project.</span>
+                <span>I understand that Story Engine may record audit approval only after all readiness blockers are resolved.</span>
+              </label>
+              <label className="checkbox-row">
+                <input
+                  type="checkbox"
+                  checked={Boolean(complianceForm.confirm_google_audit_approval_received)}
+                  onChange={(event) => setComplianceForm((current) => ({ ...current, confirm_google_audit_approval_received: event.target.checked }))}
+                />
+                <span>I confirm that only Google can grant audit approval and that this status is not inferred from Story Engine behaviour.</span>
               </label>
               <div className="button-row">
-                <button type="submit" disabled={isSavingCompliance}>
+                <button
+                  type="submit"
+                  disabled={isSavingCompliance || (complianceForm.compliance_status === "audit_approved" && !canRecordAuditApproved && compliance?.compliance_status !== "audit_approved")}
+                >
                   {isSavingCompliance ? "Saving..." : "Save compliance status"}
-                </button>
-                <button type="button" className="secondary" onClick={() => loadAuditReport("json")} disabled={isLoadingReport}>
-                  {isLoadingReport && reportMode === "json" ? "Loading report..." : "View audit report"}
-                </button>
-                <button type="button" className="secondary" onClick={() => loadAuditReport("markdown")} disabled={isLoadingReport}>
-                  {isLoadingReport && reportMode === "markdown" ? "Loading markdown..." : "Load markdown export"}
                 </button>
               </div>
             </form>
 
-            {showReport && reportMode === "json" && report ? (
-              <div className="panel inset stack">
-                <div className="panel-header">
-                  <div>
-                    <h4>YouTube audit-readiness report</h4>
-                    <p className="subtle">Generated {formatDateTime(report.generated_at)}.</p>
-                  </div>
-                  <CopyButton text={JSON.stringify(report, null, 2)} label="JSON report" />
-                </div>
-                <div className="key-grid">
-                  <div><span>Application</span><strong>{report.application_name}</strong></div>
-                  <div><span>Status</span><strong>{formatComplianceLabel(report.current_compliance_status)}</strong></div>
-                  <div><span>Version</span><strong>{report.application_version ?? "Unavailable"}</strong></div>
-                </div>
-                <p>{report.application_purpose}</p>
-                <div className="stack compact">
-                  <strong>OAuth scopes</strong>
-                  {report.scope_justifications.map((item) => (
-                    <p key={item.scope}><code>{item.scope}</code> - {item.required_for}</p>
+            <div className="panel inset stack">
+              <h4>Requirements by category</h4>
+              {groupedRequirements.map(([category, items]) => (
+                <div key={category} className="stack compact">
+                  <strong>{category}</strong>
+                  {items.map((item) => (
+                    <div key={item.key} className={`notice-card ${statusClassName(item.status)}`}>
+                      <strong>{item.title} ({formatReadinessLabel(item.status)})</strong>
+                      <p>{item.description}</p>
+                      <p className="subtle">{item.evidence_summary}</p>
+                      <p className="subtle">Remediation: {item.remediation_guidance}</p>
+                    </div>
                   ))}
                 </div>
-                {report.sections.map((section) => (
-                  <div key={section.key} className="notice-card">
-                    <strong>{section.title}</strong>
-                    <p>{section.summary}</p>
-                    <p className="subtle">Status: {formatSectionStatus(section.status)}</p>
+              ))}
+            </div>
+
+            <div className="panel inset stack">
+              <h4>Submission package exports</h4>
+              <div className="button-row">
+                <button type="button" className="secondary" onClick={() => loadSubmissionPackage("json")} disabled={isLoadingPackage}>
+                  {isLoadingPackage && exportMode === "json" ? "Loading JSON..." : "View JSON package"}
+                </button>
+                <button type="button" className="secondary" onClick={() => loadSubmissionPackage("markdown")} disabled={isLoadingPackage}>
+                  {isLoadingPackage && exportMode === "markdown" ? "Loading Markdown..." : "View Markdown package"}
+                </button>
+                <button type="button" className="secondary" onClick={() => loadSubmissionPackage("checklist")} disabled={isLoadingPackage}>
+                  {isLoadingPackage && exportMode === "checklist" ? "Loading checklist..." : "View checklist export"}
+                </button>
+              </div>
+
+              {showExports && exportMode === "json" && submissionPackage ? (
+                <div className="stack">
+                  <div className="panel-header">
+                    <div>
+                      <h4>YouTube compliance submission package</h4>
+                      <p className="subtle">Generated {formatDateTime(submissionPackage.generated_at)}.</p>
+                    </div>
+                    <CopyButton text={JSON.stringify(submissionPackage, null, 2)} label="JSON package" />
+                  </div>
+                  <div className="key-grid">
+                    <div><span>Application</span><strong>{String(submissionPackage.executive_summary.application_display_name ?? "Unavailable")}</strong></div>
+                    <div><span>Readiness</span><strong>{String(submissionPackage.executive_summary.readiness_status ?? "Unavailable")}</strong></div>
+                    <div><span>Blockers</span><strong>{String(submissionPackage.executive_summary.blocker_count ?? "0")}</strong></div>
+                  </div>
+                  <p>{String(submissionPackage.executive_summary.product_purpose ?? "")}</p>
+                  <div className="stack compact">
+                    <strong>Evidence manifest</strong>
+                    {submissionPackage.evidence_manifest.map((item) => (
+                      <div key={item.key} className="notice-card">
+                        <strong>{item.title}</strong>
+                        <p>{item.why_needed}</p>
+                        <p className="subtle">Current state: {item.current_state}</p>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="stack compact">
+                    <strong>Human completion items</strong>
                     <ul>
-                      {section.bullets.map((bullet) => <li key={bullet}>{bullet}</li>)}
+                      {submissionPackage.human_completion_items.map((item) => <li key={item}>{item}</li>)}
                     </ul>
                   </div>
-                ))}
-              </div>
-            ) : null}
-
-            {showReport && reportMode === "markdown" && reportMarkdown ? (
-              <div className="panel inset stack">
-                <div className="panel-header">
-                  <div>
-                    <h4>YouTube audit-readiness markdown</h4>
-                    <p className="subtle">Markdown export from the backend report endpoint.</p>
-                  </div>
-                  <CopyButton text={reportMarkdown} label="markdown report" />
                 </div>
-                <pre>{reportMarkdown}</pre>
-              </div>
-            ) : null}
+              ) : null}
+
+              {showExports && exportMode === "markdown" && packageMarkdown ? (
+                <div className="stack">
+                  <div className="panel-header">
+                    <div>
+                      <h4>Submission package markdown</h4>
+                      <p className="subtle">Human-readable export for manual review.</p>
+                    </div>
+                    <CopyButton text={packageMarkdown} label="Markdown package" />
+                  </div>
+                  <pre>{packageMarkdown}</pre>
+                </div>
+              ) : null}
+
+              {showExports && exportMode === "checklist" && checklistMarkdown ? (
+                <div className="stack">
+                  <div className="panel-header">
+                    <div>
+                      <h4>Submission checklist export</h4>
+                      <p className="subtle">Concise reviewer checklist.</p>
+                    </div>
+                    <CopyButton text={checklistMarkdown} label="Checklist markdown" />
+                  </div>
+                  <pre>{checklistMarkdown}</pre>
+                </div>
+              ) : null}
+            </div>
           </div>
         </details>
       ) : null}
@@ -519,8 +915,8 @@ export function YouTubePublicationPanel({ runId, runStatus, finalAssetSelection,
       {activeConnection ? (
         <div className="notice-card">
           <strong>Connected channel</strong>
-          <p>{formatConnectionLabel(activeConnection)}</p>
-          <small>{activeConnection.external_identity_hint}</small>
+          <p>{formatConnectionLabel(activeConnection)} <span className="subtle">({activeConnection.external_identity_hint})</span></p>
+          <p className="subtle">Token health: {activeConnection.token_health}</p>
         </div>
       ) : null}
 
@@ -539,8 +935,8 @@ export function YouTubePublicationPanel({ runId, runStatus, finalAssetSelection,
             <span>Description</span>
             <textarea
               value={draft.caption ?? ""}
-              onChange={(event) => setDraft((current) => ({ ...current, caption: event.target.value }))}
-              rows={5}
+              onChange={(event) => setDraft((current) => ({ ...current, caption: event.target.value || null }))}
+              rows={4}
               maxLength={5000}
             />
           </label>
@@ -549,12 +945,12 @@ export function YouTubePublicationPanel({ runId, runStatus, finalAssetSelection,
             <input
               value={tagsInput}
               onChange={(event) => setTagsInput(event.target.value)}
-              placeholder="api, backend, frontend"
+              placeholder="api, backend, tutorial"
             />
           </label>
           <div className="form-grid compact">
             <label>
-              <span>Category</span>
+              <span>YouTube category ID</span>
               <input
                 value={draft.category_id}
                 onChange={(event) => setDraft((current) => ({ ...current, category_id: event.target.value }))}
@@ -602,29 +998,15 @@ export function YouTubePublicationPanel({ runId, runStatus, finalAssetSelection,
         <div className="stack">
           <div className="notice-card">
             <strong>Publication status</strong>
-            <p>Job: {job.status.replace(/_/g, " ")}</p>
+            <p>Job status: {job.status.replace(/_/g, " ")}</p>
+            {target ? (
+              <>
+                <p>Target state: {formatTargetState(target)}</p>
+                {target.upload_progress_percent != null ? <p>Upload progress: {target.upload_progress_percent}%</p> : null}
+                {target.last_error_message ? <p className="error-text">{target.last_error_message}</p> : null}
+              </>
+            ) : null}
           </div>
-          {target ? (
-            <div className="panel inset">
-              <div className="key-grid">
-                <div><span>Target state</span><strong>{formatTargetState(target)}</strong></div>
-                <div><span>Requested visibility</span><strong>{target.visibility}</strong></div>
-                <div><span>Actual visibility</span><strong>{target.actual_visibility ?? "Unavailable"}</strong></div>
-                <div><span>Attempt count</span><strong>{String(target.attempt_count)}</strong></div>
-                <div><span>Video ID</span><strong>{target.provider_video_id ?? "Unavailable"}</strong></div>
-                <div><span>PlatformPost</span><strong>{target.platform_post_id ?? "Not created"}</strong></div>
-              </div>
-              {typeof target.upload_progress_percent === "number" ? (
-                <p className="subtle">Upload progress: {target.upload_progress_percent}%</p>
-              ) : null}
-              {target.public_post_url ? (
-                <p>
-                  <a href={target.public_post_url} target="_blank" rel="noreferrer">Open canonical YouTube URL</a>
-                </p>
-              ) : null}
-              {target.last_error_message ? <p className="error-text">{target.last_error_message}</p> : null}
-            </div>
-          ) : null}
 
           {job.status === "draft" ? (
             <div className="stack">
@@ -634,7 +1016,7 @@ export function YouTubePublicationPanel({ runId, runStatus, finalAssetSelection,
                   checked={approvalChecked}
                   onChange={(event) => setApprovalChecked(event.target.checked)}
                 />
-                <span>I approve publication of this frozen final video with the reviewed YouTube metadata.</span>
+                <span>I reviewed the frozen asset, metadata, visibility, made-for-kids setting, and synthetic-media disclosure for this YouTube upload.</span>
               </label>
               <div className="button-row">
                 <button type="button" onClick={() => runJobAction(() => api.approvePublicationJob(job.id))} disabled={!approvalChecked || isWorking}>
@@ -668,7 +1050,7 @@ export function YouTubePublicationPanel({ runId, runStatus, finalAssetSelection,
           {target?.state === "uploaded_private" ? (
             <div className="notice-card warning">
               <strong>Uploaded privately</strong>
-              <p>Google may have forced this upload to remain private. Story Engine will not create a PlatformPost until YouTube confirms unlisted or public visibility.</p>
+              <p>The Google project still resulted in a private upload. Story Engine did not create a PlatformPost because the video is not publicly attributable yet.</p>
             </div>
           ) : null}
         </div>

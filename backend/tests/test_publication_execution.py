@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 from app.db.session import SessionLocal
-from app.models import PipelineEvent, PlatformPost, PublicationTarget, SocialConnection
+from app.models import PipelineEvent, PlatformPost, PublicationTarget, SocialConnection, YouTubeProjectCompliance
 from app.providers.youtube.publishing import YouTubeUploadProgress, YouTubeVideoState
 from app.services.pipeline_service import seed_default_account
 from app.services.publication_execution_service import poll_youtube_publication_target, process_youtube_publication_target
@@ -64,26 +64,18 @@ def _patch_execution_isolation(monkeypatch):
 
 
 def _set_youtube_compliance_status(client, status: str):
-    payload = {
-        "compliance_status": status,
-        "submission_date": None,
-        "approval_date": None,
-        "case_reference": None,
-        "admin_note": None,
-        "confirm_audit_approved": False,
-    }
-    if status == "audit_approved":
-        payload.update(
-            {
-                "submission_date": "2026-07-13",
-                "approval_date": "2026-07-14",
-                "case_reference": "YT-AUDIT-EXEC",
-                "admin_note": "Execution test approval",
-                "confirm_audit_approved": True,
-            }
-        )
-    response = client.patch("/api/social-connections/youtube/compliance", json=payload)
-    assert response.status_code == 200
+    with SessionLocal() as db:
+        record = db.query(YouTubeProjectCompliance).filter(YouTubeProjectCompliance.platform == "youtube").first()
+        if record is None:
+            record = YouTubeProjectCompliance(
+                platform="youtube",
+                compliance_status=status,
+                human_confirmations_json={},
+            )
+        else:
+            record.compliance_status = status
+        db.add(record)
+        db.commit()
 
 
 def _create_and_approve_job(client, run_id: str, connection_id: str, *, privacy: str = "private"):
