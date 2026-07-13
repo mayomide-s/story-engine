@@ -11,6 +11,9 @@ from collections.abc import Mapping
 from fastapi import Header, HTTPException, status
 
 from app.config import Settings, get_settings
+from app.db.session import SessionLocal
+from app.models import Account
+from app.services.pipeline_service import DEFAULT_ACCOUNT_NAME
 
 ACCESS_TOKEN_TTL_SECONDS = 60 * 60 * 24 * 7
 TOKEN_SCOPE = "private-access"
@@ -40,6 +43,12 @@ def _extract_bearer_token(authorization: str | None) -> str | None:
     return token
 
 
+def _is_default_account_deleted() -> bool:
+    with SessionLocal() as db:
+        account = db.query(Account).filter(Account.name == DEFAULT_ACCOUNT_NAME).first()
+        return bool(account and account.account_status == "deleted")
+
+
 def issue_access_token(settings: Settings | None = None) -> str:
     active_settings = settings or get_settings()
     issued_at = int(time.time())
@@ -56,8 +65,10 @@ def issue_access_token(settings: Settings | None = None) -> str:
 
 def verify_access_token(token: str, settings: Settings | None = None) -> Mapping[str, object]:
     active_settings = settings or get_settings()
+    if _is_default_account_deleted():
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account has been deleted.")
     if not active_settings.auth_enabled:
-        return {"scope": TOKEN_SCOPE, "auth_enabled": False}
+        return {"scope": TOKEN_SCOPE, "auth_enabled": False, "account_deleted": False}
     try:
         payload_segment, signature_segment = token.split(".", 1)
     except ValueError as exc:
@@ -79,6 +90,8 @@ def verify_access_token(token: str, settings: Settings | None = None) -> Mapping
 
 def require_app_access(authorization: str | None = Header(default=None)) -> None:
     settings = get_settings()
+    if _is_default_account_deleted():
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account has been deleted.")
     if not settings.auth_enabled:
         return
     token = _extract_bearer_token(authorization)
@@ -89,20 +102,24 @@ def require_app_access(authorization: str | None = Header(default=None)) -> None
 
 def get_auth_status(authorization: str | None = Header(default=None)) -> dict[str, bool]:
     settings = get_settings()
+    if _is_default_account_deleted():
+        return {"auth_enabled": settings.auth_enabled, "authenticated": False, "account_deleted": True}
     if not settings.auth_enabled:
-        return {"auth_enabled": False, "authenticated": True}
+        return {"auth_enabled": False, "authenticated": True, "account_deleted": False}
     token = _extract_bearer_token(authorization)
     if not token:
-        return {"auth_enabled": True, "authenticated": False}
+        return {"auth_enabled": True, "authenticated": False, "account_deleted": False}
     try:
         verify_access_token(token, settings)
     except HTTPException:
-        return {"auth_enabled": True, "authenticated": False}
-    return {"auth_enabled": True, "authenticated": True}
+        return {"auth_enabled": True, "authenticated": False, "account_deleted": False}
+    return {"auth_enabled": True, "authenticated": True, "account_deleted": False}
 
 
 def validate_access_password(password: str, settings: Settings | None = None) -> None:
     active_settings = settings or get_settings()
+    if _is_default_account_deleted():
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account has been deleted.")
     if not active_settings.auth_enabled:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Private access mode is disabled.")
     if not hmac.compare_digest(password, active_settings.app_access_password):

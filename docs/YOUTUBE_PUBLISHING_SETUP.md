@@ -6,6 +6,8 @@ Sprint 1C adds YouTube audit-readiness controls so Story Engine can safely keep 
 
 Sprint 1D adds a full compliance submission profile, readiness requirement catalogue, evidence manifest, and exportable submission package so an administrator can prepare a manual YouTube API compliance submission without exposing secrets.
 
+Account deletion and 12-month retention controls are documented separately in `docs/ACCOUNT_DELETION_RETENTION.md`. Story Engine can now truthfully describe local deletion, local token removal, and dry-run retention reporting in the YouTube compliance materials, while keeping provider-side Google revocation and uploaded-video deletion manual.
+
 Required environment variables:
 
 - `SOCIAL_TOKEN_ENCRYPTION_KEY`

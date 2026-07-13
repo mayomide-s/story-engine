@@ -13,6 +13,7 @@ def access_status(auth_state: dict[str, bool] = Depends(get_auth_status)):
     return AccessStatusResponse(
         auth_enabled=auth_state["auth_enabled"],
         authenticated=auth_state["authenticated"],
+        account_deleted=auth_state.get("account_deleted", False),
         environment=settings.environment,
     )
 

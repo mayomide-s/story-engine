@@ -14,6 +14,7 @@ import { VideoReviewPage } from "./pages/VideoReview";
 import { PerformancePage } from "./pages/Performance";
 
 const SIDEBAR_COLLAPSED_STORAGE_KEY = "story-engine-sidebar-collapsed";
+const ACCOUNT_DELETION_NOTICE_KEY = "story-engine-account-deletion-notice";
 
 export default function App() {
   const [accessStatus, setAccessStatus] = useState<AccessStatus | null>(null);
@@ -26,6 +27,16 @@ export default function App() {
       return false;
     }
     return window.localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY) === "true";
+  });
+  const [accountDeletionNotice, setAccountDeletionNotice] = useState(() => {
+    if (typeof window === "undefined") {
+      return "";
+    }
+    const message = window.sessionStorage.getItem(ACCOUNT_DELETION_NOTICE_KEY) ?? "";
+    if (message) {
+      window.sessionStorage.removeItem(ACCOUNT_DELETION_NOTICE_KEY);
+    }
+    return message;
   });
 
   async function refreshAccessStatus() {
@@ -46,13 +57,41 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    function handleAccessExpired() {
-      setAccessStatus((current) => current ? { ...current, authenticated: false } : current);
-      setAccessError("Your access session expired. Enter the app password again.");
+    async function handleAccessExpired() {
+      try {
+        const status = await api.getAccessStatus();
+        setAccessStatus(status);
+        if (status.account_deleted) {
+          setAccessError("");
+          return;
+        }
+        setAccessError("Your access session expired. Enter the app password again.");
+      } catch (error) {
+        setAccessStatus(null);
+        setAccessError(error instanceof Error ? error.message : "Backend unavailable");
+      }
+    }
+
+    async function handleAccountDeleted(event: Event) {
+      if (event instanceof CustomEvent && typeof event.detail?.message === "string") {
+        setAccountDeletionNotice(event.detail.message);
+      }
+      try {
+        const status = await api.getAccessStatus();
+        setAccessStatus(status);
+        setAccessError("");
+      } catch (error) {
+        setAccessStatus(null);
+        setAccessError(error instanceof Error ? error.message : "Backend unavailable");
+      }
     }
 
     window.addEventListener("app-access-expired", handleAccessExpired);
-    return () => window.removeEventListener("app-access-expired", handleAccessExpired);
+    window.addEventListener("story-engine-account-deleted", handleAccountDeleted);
+    return () => {
+      window.removeEventListener("app-access-expired", handleAccessExpired);
+      window.removeEventListener("story-engine-account-deleted", handleAccountDeleted);
+    };
   }, []);
 
   useEffect(() => {
@@ -108,6 +147,20 @@ export default function App() {
     );
   }
 
+  if (accessStatus.account_deleted) {
+    return (
+      <main className="access-shell">
+        <section className="panel access-panel">
+          <p className="eyebrow">Story Engine</p>
+          <h1>Account deleted</h1>
+          <p className="subtle">
+            {accountDeletionNotice || "This Story Engine account has been permanently deleted and can no longer be used."}
+          </p>
+        </section>
+      </main>
+    );
+  }
+
   if (accessStatus.auth_enabled && !accessStatus.authenticated) {
     return (
       <main className="access-shell">
@@ -133,6 +186,12 @@ export default function App() {
             <strong>Auth enabled</strong>
             <p>Protected API routes stay locked until the backend issues a valid access token.</p>
           </div>
+          {accountDeletionNotice ? (
+            <div className="notice-card success">
+              <strong>Account deletion complete</strong>
+              <p>{accountDeletionNotice}</p>
+            </div>
+          ) : null}
           {accessError ? <p className="error">{accessError}</p> : null}
         </section>
       </main>

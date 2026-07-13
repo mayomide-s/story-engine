@@ -202,6 +202,8 @@ def build_idea_input_config(account_config: dict[str, Any], payload: dict[str, A
 def seed_default_account(db: Session) -> Account:
     account = db.query(Account).filter(Account.name == DEFAULT_ACCOUNT_NAME).first()
     if account:
+        if account.account_status != "active":
+            return account
         merged_config = build_account_config(account.account_config_json or {})
         if merged_config != (account.account_config_json or {}):
             account.account_config_json = merged_config

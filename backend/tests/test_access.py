@@ -22,7 +22,11 @@ def test_auth_disabled_preserves_existing_behavior(client, monkeypatch):
     monkeypatch.delenv("APP_ACCESS_PASSWORD", raising=False)
     get_settings.cache_clear()
 
+    status = client.get("/api/access/status")
     response = client.post("/api/pipeline-runs", json={"topic": "CORS", "auto_mode": False})
+
+    assert status.status_code == 200
+    assert status.json()["account_deleted"] is False
     assert response.status_code == 200
     assert response.json()["pipeline_run"]["status"] == "awaiting_review"
 
@@ -43,11 +47,14 @@ def test_login_succeeds_with_correct_password(client, monkeypatch):
     _enable_auth(monkeypatch)
 
     response = client.post("/api/access/login", json={"password": "open-sesame"})
+    status = client.get("/api/access/status")
 
     assert response.status_code == 200
     payload = response.json()
     assert payload["auth_enabled"] is True
     assert payload["token"]
+    assert status.status_code == 200
+    assert status.json()["account_deleted"] is False
 
 
 def test_login_fails_with_wrong_password(client, monkeypatch):

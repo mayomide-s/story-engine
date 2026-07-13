@@ -31,6 +31,75 @@ export type AccountDefaults = {
   };
 };
 
+export type AccountDeletionPreviewCategory = {
+  key: string;
+  title: string;
+  count: number;
+  description: string;
+};
+
+export type AccountDeletionPreview = {
+  account_status: string;
+  can_delete: boolean;
+  requires_password_confirmation: boolean;
+  requires_recent_authentication: boolean;
+  confirmation_phrase: string;
+  provider_video_warning: string;
+  connected_accounts: Array<{
+    platform: string;
+    display_name?: string | null;
+    username?: string | null;
+  }>;
+  deletion_categories: AccountDeletionPreviewCategory[];
+  anonymised_categories: AccountDeletionPreviewCategory[];
+  temporarily_retained_categories: AccountDeletionPreviewCategory[];
+};
+
+export type AccountDeletionValidatePayload = {
+  confirmation_phrase: string;
+  acknowledge_provider_videos_remain_online: boolean;
+  password?: string | null;
+};
+
+export type AccountDeletionValidation = {
+  can_delete: boolean;
+  requires_password_confirmation: boolean;
+  validation_message: string;
+  preview: AccountDeletionPreview;
+};
+
+export type AccountDeletionResult = {
+  deleted: boolean;
+  account_status: string;
+  message: string;
+  disconnected_connection_count: number;
+  deleted_social_connection_count: number;
+  deleted_pipeline_run_count: number;
+  deleted_asset_count: number;
+  deleted_local_file_count: number;
+  deleted_publication_job_count: number;
+  deleted_publication_target_count: number;
+  deleted_platform_post_count: number;
+  deleted_snapshot_count: number;
+  deleted_learning_count: number;
+};
+
+export type RetentionCategoryReport = {
+  key: string;
+  title: string;
+  retention_months: number;
+  cleanup_action: string;
+  description: string;
+  automatically_deleted: boolean;
+  expired_record_count: number;
+};
+
+export type RetentionReport = {
+  default_retention_months: number;
+  generated_at: string;
+  categories: RetentionCategoryReport[];
+};
+
 export type PipelineRunDetail = {
   pipeline_run: Record<string, unknown>;
   idea: Record<string, unknown> | null;
@@ -689,6 +758,7 @@ export type HealthDetails = {
 export type AccessStatus = {
   auth_enabled: boolean;
   authenticated: boolean;
+  account_deleted: boolean;
   environment: string;
 };
 
@@ -821,6 +891,20 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify(payload)
     }),
+  getAccountDeletionPreview: () =>
+    request<AccountDeletionPreview>("/settings/account-deletion/preview"),
+  validateAccountDeletion: (payload: AccountDeletionValidatePayload) =>
+    request<AccountDeletionValidation>("/settings/account-deletion/validate", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    }),
+  deleteAccount: (payload: AccountDeletionValidatePayload) =>
+    request<AccountDeletionResult>("/settings/account-deletion", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    }),
+  getRetentionReport: () =>
+    request<RetentionReport>("/settings/data-retention/report"),
   listRuns: () => request<PipelineRunSummary[]>("/pipeline-runs"),
   createRun: (payload: Record<string, unknown>) =>
     request<PipelineRunDetail>("/pipeline-runs", {

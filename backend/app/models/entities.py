@@ -127,6 +127,11 @@ SOCIAL_CONNECTION_STATUSES = (
     "error",
     "disconnected",
 )
+ACCOUNT_STATUSES = (
+    "active",
+    "deletion_in_progress",
+    "deleted",
+)
 PUBLICATION_JOB_STATUSES = (
     "draft",
     "ready",
@@ -173,11 +178,21 @@ PERFORMANCE_PLATFORM_ENUM = Enum(
 
 class Account(Base):
     __tablename__ = "accounts"
+    __table_args__ = (
+        CheckConstraint(
+            f"account_status IN {ACCOUNT_STATUSES}",
+            name="ck_accounts_account_status",
+        ),
+        Index("ix_accounts_account_status", "account_status"),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     name: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
     niche: Mapped[str] = mapped_column(String(255), nullable=False)
     account_config_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    account_status: Mapped[str] = mapped_column(String(50), nullable=False, default="active", server_default="active")
+    deletion_started_at: Mapped[datetime | None] = mapped_column(DateTime)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 

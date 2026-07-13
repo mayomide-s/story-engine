@@ -13,4 +13,5 @@ class AccessLoginResponse(BaseModel):
 class AccessStatusResponse(BaseModel):
     auth_enabled: bool
     authenticated: bool
+    account_deleted: bool = False
     environment: str

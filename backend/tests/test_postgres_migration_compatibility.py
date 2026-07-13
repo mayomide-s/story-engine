@@ -18,7 +18,7 @@ from app.models.entities import PerformanceLearning
 
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
-EXPECTED_HEAD = "0022_youtube_compliance_submission_package"
+EXPECTED_HEAD = "0023_account_deletion_retention"
 TEST_POSTGRES_DATABASE_URL = os.environ.get("TEST_POSTGRES_DATABASE_URL")
 
 
@@ -195,6 +195,8 @@ def test_postgres_fresh_database_upgrades_from_base_to_head_and_is_idempotent():
         assert {"winner_platform_post_id", "winner_selected_at", "winner_selection_revision"} <= manual_package_columns
         assert "performance_learnings" in inspector.get_table_names()
         assert "youtube_project_compliance" in inspector.get_table_names()
+        account_columns = {column["name"] for column in inspector.get_columns("accounts")}
+        assert {"account_status", "deletion_started_at", "deleted_at"} <= account_columns
 
         run_id = _create_run(engine, "Postgres fresh base")
         learning = _insert_learning_without_is_archived(engine, run_id, "Fresh base default should be false.")
@@ -231,6 +233,8 @@ def test_postgres_migration_upgrade_from_0015_and_repeated_head_is_idempotent():
         assert {"winner_platform_post_id", "winner_selected_at", "winner_selection_revision"} <= manual_package_columns
         assert "performance_learnings" in inspector.get_table_names()
         assert "youtube_project_compliance" in inspector.get_table_names()
+        account_columns = {column["name"] for column in inspector.get_columns("accounts")}
+        assert {"account_status", "deletion_started_at", "deleted_at"} <= account_columns
 
         run_id = _create_run(engine, "Postgres scenario A")
         learning = _insert_learning_without_is_archived(engine, run_id, "Default should be false.")
@@ -279,6 +283,8 @@ def test_postgres_existing_0017_upgrades_to_0018_without_rewriting_learning_data
         second_learning = _insert_learning_without_is_archived(engine, second_run_id, "New default remains false.")
         assert second_learning.is_archived is False
         assert _postgres_default_expression(engine) == "false"
+        account_columns = {column["name"] for column in inspect(engine).get_columns("accounts")}
+        assert {"account_status", "deletion_started_at", "deleted_at"} <= account_columns
         engine.dispose()
 
 
@@ -292,6 +298,8 @@ def test_postgres_direct_create_all_uses_portable_false_default():
         inspector = inspect(engine)
         assert "performance_learnings" in inspector.get_table_names()
         assert "youtube_project_compliance" in inspector.get_table_names()
+        account_columns = {column["name"] for column in inspector.get_columns("accounts")}
+        assert {"account_status", "deletion_started_at", "deleted_at"} <= account_columns
 
         run_id = _create_run(engine, "Postgres create_all")
         learning = _insert_learning_without_is_archived(engine, run_id, "Create all succeeds.")
@@ -309,6 +317,8 @@ def test_sqlite_direct_create_all_accepts_false_default():
         inspector = inspect(engine)
         columns = {column["name"]: column for column in inspector.get_columns("performance_learnings")}
         assert columns["is_archived"]["default"] in {"0", "false", "FALSE", "False", None}
+        account_columns = {column["name"] for column in inspector.get_columns("accounts")}
+        assert {"account_status", "deletion_started_at", "deleted_at"} <= account_columns
 
         run_id = _create_run(engine, "SQLite create_all")
         learning = _insert_learning_without_is_archived(engine, run_id, "SQLite create_all succeeds.")
