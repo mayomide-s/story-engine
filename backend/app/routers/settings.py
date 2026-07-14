@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
@@ -20,9 +20,14 @@ from app.services.account_deletion_service import (
     validate_account_deletion,
 )
 from app.services.account_service import get_account_defaults, update_account_defaults
-from app.services.access_service import require_app_access
+from app.services.access_service import clear_session_cookie, require_app_access, require_csrf_protection
+from app.services.rate_limit_service import limit_from_settings
 
-router = APIRouter(prefix="/settings", tags=["settings"], dependencies=[Depends(require_app_access)])
+router = APIRouter(
+    prefix="/settings",
+    tags=["settings"],
+    dependencies=[Depends(require_app_access), Depends(require_csrf_protection)],
+)
 
 
 @router.get("/account-defaults", response_model=AccountDefaultsResponse)
@@ -41,7 +46,18 @@ def read_account_deletion_preview(db: Session = Depends(get_db)):
 
 
 @router.post("/account-deletion/validate", response_model=AccountDeletionValidationResponse)
-def validate_account_deletion_route(payload: AccountDeletionValidateRequest, db: Session = Depends(get_db)):
+def validate_account_deletion_route(
+    payload: AccountDeletionValidateRequest,
+    db: Session = Depends(get_db),
+    _rate_limit: None = Depends(
+        limit_from_settings(
+            "account-deletion-validate",
+            attempts_setting="sensitive_rate_limit_attempts",
+            window_setting="sensitive_rate_limit_window_seconds",
+            include_account=True,
+        )
+    ),
+):
     try:
         return AccountDeletionValidationResponse(
             **validate_account_deletion(
@@ -58,9 +74,21 @@ def validate_account_deletion_route(payload: AccountDeletionValidateRequest, db:
 
 
 @router.post("/account-deletion", response_model=AccountDeletionResultResponse)
-def execute_account_deletion_route(payload: AccountDeletionExecuteRequest, db: Session = Depends(get_db)):
+def execute_account_deletion_route(
+    payload: AccountDeletionExecuteRequest,
+    response: Response,
+    db: Session = Depends(get_db),
+    _rate_limit: None = Depends(
+        limit_from_settings(
+            "account-deletion-execute",
+            attempts_setting="sensitive_rate_limit_attempts",
+            window_setting="sensitive_rate_limit_window_seconds",
+            include_account=True,
+        )
+    ),
+):
     try:
-        return AccountDeletionResultResponse(
+        result = AccountDeletionResultResponse(
             **execute_account_deletion(
                 db,
                 confirmation_phrase=payload.confirmation_phrase,
@@ -68,6 +96,8 @@ def execute_account_deletion_route(payload: AccountDeletionExecuteRequest, db: S
                 password=payload.password,
             )
         )
+        clear_session_cookie(response)
+        return result
     except AccountDeletionConflictError as exc:
         from fastapi import HTTPException
 

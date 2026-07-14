@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.models import (
     Account,
+    AppSession,
     Asset,
     ContentIdea,
     GenerationCost,
@@ -34,7 +35,7 @@ from app.models import (
     Video,
     YouTubeProjectCompliance,
 )
-from app.services.access_service import validate_access_password
+from app.services.access_service import revoke_all_account_sessions, validate_access_password
 from app.services.pipeline_service import DEFAULT_ACCOUNT_NAME
 from app.services.providers import get_storage_provider
 
@@ -410,6 +411,7 @@ def execute_account_deletion(
     account.updated_at = _naive_utcnow()
     db.add(account)
     db.flush()
+    revoke_all_account_sessions(db, account.id, reason="account_deleted")
 
     disconnected_count, deleted_social_connection_count = _clear_and_delete_social_connections(db, account.id)
     db.query(OAuthState).filter(OAuthState.account_id == account.id).delete(synchronize_session=False)

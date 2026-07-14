@@ -15,11 +15,29 @@ class Settings(BaseSettings):
     auth_enabled: bool = Field(default=False, alias="AUTH_ENABLED")
     app_access_password: str = Field(default="", alias="APP_ACCESS_PASSWORD")
     app_session_secret: str = Field(default="", alias="APP_SESSION_SECRET")
+    session_cookie_name: str = Field(default="story_engine_session", alias="SESSION_COOKIE_NAME")
+    session_cookie_domain: str = Field(default="", alias="SESSION_COOKIE_DOMAIN")
+    session_cookie_max_age_seconds: int = Field(default=60 * 60 * 12, alias="SESSION_COOKIE_MAX_AGE_SECONDS")
+    session_cookie_samesite: Literal["lax", "strict", "none"] = Field(default="lax", alias="SESSION_COOKIE_SAMESITE")
+    session_cookie_secure_override: bool | None = Field(default=None, alias="SESSION_COOKIE_SECURE")
+    csrf_header_name: str = Field(default="X-CSRF-Token", alias="CSRF_HEADER_NAME")
     social_token_encryption_key: str = Field(default="", alias="SOCIAL_TOKEN_ENCRYPTION_KEY")
     cors_allowed_origins: str = Field(
         default="http://localhost:5173,http://127.0.0.1:5173",
         alias="CORS_ALLOWED_ORIGINS",
     )
+    allowed_hosts: str = Field(default="localhost,127.0.0.1,testserver", alias="ALLOWED_HOSTS")
+    trust_proxy_headers: bool = Field(default=False, alias="TRUST_PROXY_HEADERS")
+    trusted_proxy_cidrs: str = Field(default="127.0.0.1/32,::1/128", alias="TRUSTED_PROXY_CIDRS")
+    require_schema_up_to_date: bool = Field(default=True, alias="REQUIRE_SCHEMA_UP_TO_DATE")
+    login_rate_limit_attempts: int = Field(default=5, alias="LOGIN_RATE_LIMIT_ATTEMPTS")
+    login_rate_limit_window_seconds: int = Field(default=300, alias="LOGIN_RATE_LIMIT_WINDOW_SECONDS")
+    sensitive_rate_limit_attempts: int = Field(default=10, alias="SENSITIVE_RATE_LIMIT_ATTEMPTS")
+    sensitive_rate_limit_window_seconds: int = Field(default=300, alias="SENSITIVE_RATE_LIMIT_WINDOW_SECONDS")
+    publication_rate_limit_attempts: int = Field(default=10, alias="PUBLICATION_RATE_LIMIT_ATTEMPTS")
+    publication_rate_limit_window_seconds: int = Field(default=300, alias="PUBLICATION_RATE_LIMIT_WINDOW_SECONDS")
+    compliance_write_rate_limit_attempts: int = Field(default=20, alias="COMPLIANCE_WRITE_RATE_LIMIT_ATTEMPTS")
+    compliance_write_rate_limit_window_seconds: int = Field(default=600, alias="COMPLIANCE_WRITE_RATE_LIMIT_WINDOW_SECONDS")
 
     database_url: str = Field(default="sqlite:///./socipost.db", alias="DATABASE_URL")
     redis_url: str = Field(default="redis://redis:6379/0", alias="REDIS_URL")
@@ -77,6 +95,12 @@ class Settings(BaseSettings):
     def cors_allowed_origins_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_allowed_origins.split(",") if origin.strip()]
 
+    def allowed_hosts_list(self) -> list[str]:
+        return [host.strip() for host in self.allowed_hosts.split(",") if host.strip()]
+
+    def trusted_proxy_cidrs_list(self) -> list[str]:
+        return [cidr.strip() for cidr in self.trusted_proxy_cidrs.split(",") if cidr.strip()]
+
     def auth_status_label(self) -> str:
         return "enabled" if self.auth_enabled else "disabled"
 
@@ -85,6 +109,15 @@ class Settings(BaseSettings):
 
     def is_development_like_environment(self) -> bool:
         return self.environment.lower() in {"development", "dev", "local", "test", "testing"}
+
+    def session_cookie_secure(self) -> bool:
+        if self.session_cookie_secure_override is not None:
+            return self.session_cookie_secure_override
+        return not self.is_development_like_environment()
+
+    def session_cookie_domain_value(self) -> str | None:
+        value = self.session_cookie_domain.strip()
+        return value or None
 
     def _is_local_http_allowed(self, parsed) -> bool:
         return (
@@ -227,6 +260,29 @@ class Settings(BaseSettings):
             errors.append(
                 f"Missing required narration settings for {mode_label}: {', '.join(missing['narration'])}"
             )
+        cors_origins = self.cors_allowed_origins_list()
+        if any(origin == "*" for origin in cors_origins):
+            errors.append("CORS_ALLOWED_ORIGINS cannot contain '*' when credentials are enabled.")
+        if self.is_development_like_environment():
+            if not self.allowed_hosts_list():
+                errors.append("ALLOWED_HOSTS must include localhost-compatible hosts in development.")
+        else:
+            if not self.allowed_hosts_list():
+                errors.append("ALLOWED_HOSTS must be configured outside local development.")
+            if "*" in self.allowed_hosts_list():
+                errors.append("ALLOWED_HOSTS cannot contain '*' outside local development.")
+            if not self.session_cookie_secure():
+                errors.append("SESSION_COOKIE_SECURE must be enabled outside local development.")
+            for origin in cors_origins:
+                parsed = urlparse(origin)
+                if parsed.scheme != "https":
+                    errors.append("CORS_ALLOWED_ORIGINS must use HTTPS outside local development.")
+            if self.trust_proxy_headers and not self.trusted_proxy_cidrs_list():
+                errors.append("TRUSTED_PROXY_CIDRS must be configured when TRUST_PROXY_HEADERS is enabled.")
+            if self.storage_provider == "r2" and self.r2_public_base_url:
+                parsed_r2_url = urlparse(self.r2_public_base_url)
+                if parsed_r2_url.scheme != "https" or not parsed_r2_url.netloc:
+                    errors.append("R2_PUBLIC_BASE_URL must be an absolute HTTPS URL outside local development.")
         return errors
 
     def validate_configuration(self) -> None:

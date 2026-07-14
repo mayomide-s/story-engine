@@ -6,7 +6,7 @@ import {
   AccountDeletionPreview,
   AccessStatus,
   RetentionReport,
-  clearStoredAccessToken,
+  clearClientAccessState,
 } from "../api/client";
 import { AUDIENCE_LEVELS, CONTENT_FORMATS, EMOJI_PREFERENCES, STYLE_PRESETS, TARGET_PLATFORMS } from "../constants";
 
@@ -141,7 +141,7 @@ export function SettingsPage() {
         password: requiresPassword ? deletionPassword : null,
       });
       window.sessionStorage.setItem(ACCOUNT_DELETION_NOTICE_KEY, result.message);
-      clearStoredAccessToken();
+      clearClientAccessState();
       window.dispatchEvent(new CustomEvent("story-engine-account-deleted", { detail: { message: result.message } }));
     } catch (requestError) {
       setDeletionError(requestError instanceof Error ? requestError.message : "Failed to delete the account.");

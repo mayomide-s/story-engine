@@ -12,7 +12,8 @@ from app.schemas.publication import (
     PublicationJobResponse,
     PublicationTargetResponse,
 )
-from app.services.access_service import require_app_access
+from app.services.access_service import require_app_access, require_csrf_protection
+from app.services.rate_limit_service import limit_from_settings
 from app.services.publication_service import (
     PublicationConflictError,
     approve_publication_job,
@@ -32,11 +33,25 @@ from app.services.youtube_compliance_service import YouTubeComplianceConflictErr
 
 router = APIRouter(
     tags=["publication-jobs"],
-    dependencies=[Depends(require_app_access)],
+    dependencies=[Depends(require_app_access), Depends(require_csrf_protection)],
 )
 
 
-@router.post("/pipeline-runs/{run_id}/publication-jobs", response_model=PublicationJobMutationResponse, status_code=201)
+@router.post(
+    "/pipeline-runs/{run_id}/publication-jobs",
+    response_model=PublicationJobMutationResponse,
+    status_code=201,
+    dependencies=[
+        Depends(
+            limit_from_settings(
+                "publication-job-create",
+                attempts_setting="publication_rate_limit_attempts",
+                window_setting="publication_rate_limit_window_seconds",
+                include_account=True,
+            )
+        )
+    ],
+)
 def create_run_publication_job(run_id: UUID, payload: PublicationJobDraftRequest, db: Session = Depends(get_db)):
     try:
         return PublicationJobMutationResponse(job=create_publication_job_draft(db, str(run_id), payload))
@@ -108,7 +123,20 @@ def get_publication_target_route(target_id: UUID, db: Session = Depends(get_db))
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
-@router.post("/publication-targets/{target_id}/retry", response_model=PublicationJobMutationResponse)
+@router.post(
+    "/publication-targets/{target_id}/retry",
+    response_model=PublicationJobMutationResponse,
+    dependencies=[
+        Depends(
+            limit_from_settings(
+                "publication-target-retry",
+                attempts_setting="publication_rate_limit_attempts",
+                window_setting="publication_rate_limit_window_seconds",
+                include_account=True,
+            )
+        )
+    ],
+)
 def retry_publication_target_route(target_id: UUID, db: Session = Depends(get_db)):
     try:
         return PublicationJobMutationResponse(job=retry_publication_target(db, str(target_id)))

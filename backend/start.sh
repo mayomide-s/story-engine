@@ -37,7 +37,23 @@ if last_error is not None:
 sys.exit(1)
 PY
 
-echo "Running Alembic migrations..."
-alembic upgrade head
+should_run_migrations="${RUN_MIGRATIONS_ON_STARTUP:-}"
+if [ -z "$should_run_migrations" ]; then
+  case "${ENVIRONMENT:-development}" in
+    production|prod|staging)
+      should_run_migrations="false"
+      ;;
+    *)
+      should_run_migrations="true"
+      ;;
+  esac
+fi
+
+if [ "$should_run_migrations" = "true" ]; then
+  echo "Running Alembic migrations..."
+  alembic upgrade head
+else
+  echo "Skipping automatic Alembic migrations on startup."
+fi
 echo "Starting API server..."
 exec uvicorn app.main:app --host 0.0.0.0 --port 8000

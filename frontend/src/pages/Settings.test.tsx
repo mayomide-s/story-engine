@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { api, setStoredAccessToken, type AccountDefaults, type AccountDeletionPreview, type RetentionReport } from "../api/client";
+import { api, type AccountDefaults, type AccountDeletionPreview, type RetentionReport } from "../api/client";
 import { SettingsPage } from "./Settings";
 
 const defaults: AccountDefaults = {
@@ -140,7 +140,6 @@ describe("SettingsPage account deletion controls", () => {
   });
 
   it("validates, deletes, clears the local token, and dispatches the deleted-account event", async () => {
-    setStoredAccessToken("temporary-token");
     render(<SettingsPage />);
 
     await screen.findByRole("heading", { name: "Delete account" });
@@ -168,7 +167,6 @@ describe("SettingsPage account deletion controls", () => {
         expect.objectContaining({ type: "story-engine-account-deleted" }),
       ),
     );
-    expect(window.localStorage.getItem("story-engine-access-token")).toBeNull();
     expect(window.sessionStorage.getItem("story-engine-account-deletion-notice")).toBe(
       "Your Story Engine account has been permanently deleted.",
     );

@@ -3,8 +3,10 @@ services:
     build:
       context: ./backend
     environment:
+      ENVIRONMENT: ${ENVIRONMENT:-development}
       DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/sociopost
       REDIS_URL: redis://redis:6379/0
+      RUN_MIGRATIONS_ON_STARTUP: ${RUN_MIGRATIONS_ON_STARTUP:-true}
       R2_ACCOUNT_ID: ${R2_ACCOUNT_ID:-}
       R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID:-}
       R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY:-}
@@ -36,6 +38,7 @@ services:
       AUTH_ENABLED: ${AUTH_ENABLED:-false}
       APP_ACCESS_PASSWORD: ${APP_ACCESS_PASSWORD:-}
       APP_SESSION_SECRET: ${APP_SESSION_SECRET:-}
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1,testserver}
       SOCIAL_TOKEN_ENCRYPTION_KEY: ${SOCIAL_TOKEN_ENCRYPTION_KEY:-}
       GOOGLE_OAUTH_CLIENT_ID: ${GOOGLE_OAUTH_CLIENT_ID:-}
       GOOGLE_OAUTH_CLIENT_SECRET: ${GOOGLE_OAUTH_CLIENT_SECRET:-}
@@ -92,6 +95,7 @@ services:
       context: ./backend
     command: celery -A app.workers.celery_app.celery_app worker --loglevel=info
     environment:
+      ENVIRONMENT: ${ENVIRONMENT:-development}
       DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/sociopost
       REDIS_URL: redis://redis:6379/0
       R2_PUBLIC_BASE_URL: ${R2_PUBLIC_BASE_URL:-http://localhost:8000/assets}
@@ -125,6 +129,7 @@ services:
       AUTH_ENABLED: ${AUTH_ENABLED:-false}
       APP_ACCESS_PASSWORD: ${APP_ACCESS_PASSWORD:-}
       APP_SESSION_SECRET: ${APP_SESSION_SECRET:-}
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1,testserver}
       SOCIAL_TOKEN_ENCRYPTION_KEY: ${SOCIAL_TOKEN_ENCRYPTION_KEY:-}
       GOOGLE_OAUTH_CLIENT_ID: ${GOOGLE_OAUTH_CLIENT_ID:-}
       GOOGLE_OAUTH_CLIENT_SECRET: ${GOOGLE_OAUTH_CLIENT_SECRET:-}
@@ -145,6 +150,7 @@ services:
       context: ./backend
     command: celery -A app.workers.celery_app.celery_app beat --loglevel=info
     environment:
+      ENVIRONMENT: ${ENVIRONMENT:-development}
       DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/sociopost
       REDIS_URL: redis://redis:6379/0
       R2_ACCOUNT_ID: ${R2_ACCOUNT_ID:-}
@@ -178,6 +184,7 @@ services:
       AUTH_ENABLED: ${AUTH_ENABLED:-false}
       APP_ACCESS_PASSWORD: ${APP_ACCESS_PASSWORD:-}
       APP_SESSION_SECRET: ${APP_SESSION_SECRET:-}
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1,testserver}
       SOCIAL_TOKEN_ENCRYPTION_KEY: ${SOCIAL_TOKEN_ENCRYPTION_KEY:-}
       GOOGLE_OAUTH_CLIENT_ID: ${GOOGLE_OAUTH_CLIENT_ID:-}
       GOOGLE_OAUTH_CLIENT_SECRET: ${GOOGLE_OAUTH_CLIENT_SECRET:-}

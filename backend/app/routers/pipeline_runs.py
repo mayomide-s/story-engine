@@ -40,7 +40,7 @@ from app.services.pipeline_service import (
     recheck_story_adherence,
     resume_pipeline,
 )
-from app.services.access_service import require_app_access
+from app.services.access_service import require_app_access, require_csrf_protection
 from app.services.narration_service import (
     PaidNarrationConfirmationRequiredError,
     create_narration_draft,
@@ -52,7 +52,11 @@ from app.services.narration_service import (
     regenerate_narration_draft,
 )
 
-router = APIRouter(prefix="/pipeline-runs", tags=["pipeline-runs"], dependencies=[Depends(require_app_access)])
+router = APIRouter(
+    prefix="/pipeline-runs",
+    tags=["pipeline-runs"],
+    dependencies=[Depends(require_app_access), Depends(require_csrf_protection)],
+)
 
 
 @router.post("")

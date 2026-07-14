@@ -14,6 +14,9 @@ from app.db.base import Base  # noqa: E402
 from app.db.session import engine  # noqa: E402
 from app.config import get_settings  # noqa: E402
 from app.main import app  # noqa: E402
+from app.models import AppSession  # noqa: E402
+from app.db.session import SessionLocal  # noqa: E402
+from app.services.rate_limit_service import reset_local_rate_limits  # noqa: E402
 
 Base.metadata.create_all(bind=engine)
 
@@ -21,9 +24,17 @@ Base.metadata.create_all(bind=engine)
 @pytest.fixture
 def client():
     get_settings.cache_clear()
+    reset_local_rate_limits()
+    with SessionLocal() as db:
+        db.query(AppSession).delete(synchronize_session=False)
+        db.commit()
     with TestClient(app) as test_client:
         yield test_client
+    with SessionLocal() as db:
+        db.query(AppSession).delete(synchronize_session=False)
+        db.commit()
     get_settings.cache_clear()
+    reset_local_rate_limits()
 
 
 @pytest.fixture(autouse=True)
