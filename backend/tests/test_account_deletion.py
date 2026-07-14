@@ -9,6 +9,7 @@ from app.config import get_settings
 from app.db.session import SessionLocal
 from app.models import (
     Account,
+    AppSession,
     Asset,
     ContentIdea,
     IdeaQueueItem,
@@ -69,6 +70,7 @@ def isolate_account_deletion_tests():
         db.query(SocialConnection).delete(synchronize_session=False)
         db.query(IdeaQueueItem).delete(synchronize_session=False)
         db.query(YouTubeProjectCompliance).delete(synchronize_session=False)
+        db.query(AppSession).delete(synchronize_session=False)
         db.query(Account).delete(synchronize_session=False)
         db.commit()
         seed_default_account(db)
@@ -102,6 +104,7 @@ def isolate_account_deletion_tests():
         db.query(SocialConnection).delete(synchronize_session=False)
         db.query(IdeaQueueItem).delete(synchronize_session=False)
         db.query(YouTubeProjectCompliance).delete(synchronize_session=False)
+        db.query(AppSession).delete(synchronize_session=False)
         db.query(Account).delete(synchronize_session=False)
         db.commit()
         seed_default_account(db)
@@ -256,7 +259,8 @@ def _enable_auth(monkeypatch):
 def _auth_headers(client):
     login = client.post("/api/access/login", json={"password": "open-sesame"})
     assert login.status_code == 200
-    return {"Authorization": f"Bearer {login.json()['token']}"}
+    csrf_token = login.json()["csrf_token"]
+    return {"X-CSRF-Token": csrf_token}
 
 
 def test_account_deletion_preview_execute_and_access_shutdown(client):
@@ -422,6 +426,12 @@ def test_account_deletion_requires_auth_and_deleted_account_cannot_log_in(client
     login_after = client.post("/api/access/login", json={"password": "open-sesame"})
     assert login_after.status_code == 403
     assert login_after.json()["detail"] == "Account has been deleted."
+
+    with SessionLocal() as db:
+        sessions = db.query(AppSession).all()
+        assert sessions
+        assert all(session.revoked_at is not None for session in sessions)
+        assert all(session.revocation_reason == "account_deleted" for session in sessions)
 
     status = client.get("/api/access/status", headers=headers)
     assert status.status_code == 200

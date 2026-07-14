@@ -8,6 +8,8 @@ from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+from alembic.config import Config
+from alembic.script import ScriptDirectory
 import pytest
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine import URL, make_url
@@ -35,8 +37,17 @@ from app.services.social_token_crypto import decrypt_secret
 
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
-EXPECTED_HEAD = "0023_account_deletion_retention"
 TEST_POSTGRES_DATABASE_URL = os.environ.get("TEST_POSTGRES_DATABASE_URL")
+PUBLISHING_GATEWAY_HEAD = "0023_account_deletion_retention"
+
+
+def _expected_head() -> str:
+    config = Config(str(BACKEND_DIR / "alembic.ini"))
+    config.set_main_option("script_location", str(BACKEND_DIR / "alembic"))
+    return ScriptDirectory.from_config(config).get_current_head()
+
+
+EXPECTED_HEAD = _expected_head()
 
 
 def _get_admin_url() -> URL:
@@ -246,10 +257,10 @@ def test_postgres_publication_gateway_migration_upgrade_downgrade_reupgrade():
         assert "publication_jobs" not in inspector.get_table_names()
         assert "youtube_project_compliance" not in inspector.get_table_names()
 
-        _run_alembic(database_url, "upgrade", "0023_account_deletion_retention")
+        _run_alembic(database_url, "upgrade", PUBLISHING_GATEWAY_HEAD)
         with engine.connect() as connection:
             revision = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-        assert revision == EXPECTED_HEAD
+        assert revision == PUBLISHING_GATEWAY_HEAD
         engine.dispose()
 
 
@@ -332,10 +343,10 @@ def test_sqlite_publication_gateway_downgrade_reupgrade_from_current_schema():
             revision = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
         assert revision == "0022_youtube_compliance_submission_package"
 
-        _run_alembic(database_url, "upgrade", "0023_account_deletion_retention")
+        _run_alembic(database_url, "upgrade", PUBLISHING_GATEWAY_HEAD)
         with engine.connect() as connection:
             revision = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-        assert revision == EXPECTED_HEAD
+        assert revision == PUBLISHING_GATEWAY_HEAD
 
         inspector = inspect(engine)
         target_columns = {column["name"] for column in inspector.get_columns("publication_targets")}
@@ -344,8 +355,8 @@ def test_sqlite_publication_gateway_downgrade_reupgrade_from_current_schema():
         assert "youtube_project_compliance" in inspector.get_table_names()
         account_columns = {column["name"] for column in inspector.get_columns("accounts")}
         assert {"account_status", "deletion_started_at", "deleted_at"} <= account_columns
-        engine.dispose()
     finally:
+        engine.dispose()
         if os.path.exists(temp_db.name):
             os.unlink(temp_db.name)
 

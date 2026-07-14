@@ -9,9 +9,13 @@ from app.services.asset_library_service import (
     list_asset_library_items,
     update_asset_manual_posting,
 )
-from app.services.access_service import require_app_access
+from app.services.access_service import require_app_access, require_csrf_protection
 
-router = APIRouter(prefix="/asset-library", tags=["asset-library"], dependencies=[Depends(require_app_access)])
+router = APIRouter(
+    prefix="/asset-library",
+    tags=["asset-library"],
+    dependencies=[Depends(require_app_access), Depends(require_csrf_protection)],
+)
 
 
 @router.get("")

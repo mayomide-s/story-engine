@@ -68,7 +68,7 @@ Before a deployment cutover:
 
 ```bash
 docker-compose exec backend alembic current
-docker-compose exec backend alembic upgrade head
+docker-compose exec backend sh /app/migrate.sh
 ```
 
 If using another runtime target, the equivalent requirement is:
@@ -76,6 +76,7 @@ If using another runtime target, the equivalent requirement is:
 - database reachable
 - Alembic installed
 - `alembic upgrade head` completed before traffic
+- API startup separated from migration execution in production
 
 Do not:
 
@@ -122,9 +123,11 @@ docker-compose ps
 
 ### CORS and frontend/backend URL
 
-The backend currently allows all origins.
+Credentialed CORS must be restricted to the deployed frontend origin.
 
-Before a real internet-facing deployment, review whether CORS should remain permissive or be restricted to the deployed frontend origin.
+Recommended production value:
+
+- `CORS_ALLOWED_ORIGINS=https://storyengine.soremekun.org`
 
 ### Public API base URL
 
@@ -135,6 +138,20 @@ Frontend builds need the correct public backend URL through:
 Example:
 
 - `https://api.example.com/api`
+
+### Session and CSRF runtime
+
+Production auth now expects:
+
+- server-managed HTTP-only session cookies
+- `SESSION_COOKIE_SECURE` enabled
+- `ALLOWED_HOSTS` set explicitly
+- `TRUST_PROXY_HEADERS` enabled only behind a trusted proxy path
+- `REQUIRE_SCHEMA_UP_TO_DATE=true`
+
+See:
+
+- `docs/PRODUCTION_SECURITY_HARDENING.md`
 
 ### R2 public URL
 

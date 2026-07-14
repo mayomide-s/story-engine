@@ -18,7 +18,7 @@ from app.services.performance_learning_service import (
     create_performance_learning,
     update_performance_learning,
 )
-from app.services.access_service import require_app_access
+from app.services.access_service import require_app_access, require_csrf_protection
 from app.services.performance_service import (
     PerformanceConflictError,
     append_performance_snapshot,
@@ -32,7 +32,7 @@ from app.services.performance_service import (
 router = APIRouter(
     prefix="/pipeline-runs",
     tags=["performance"],
-    dependencies=[Depends(require_app_access)],
+    dependencies=[Depends(require_app_access), Depends(require_csrf_protection)],
 )
 
 

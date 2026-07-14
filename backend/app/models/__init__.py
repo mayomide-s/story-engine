@@ -1,5 +1,6 @@
 from app.models.entities import (
     Account,
+    AppSession,
     Asset,
     ContentIdea,
     GenerationCost,
@@ -38,6 +39,7 @@ from app.models.entities import (
 
 __all__ = [
     "Account",
+    "AppSession",
     "Asset",
     "ContentIdea",
     "GenerationCost",

@@ -132,6 +132,15 @@ ACCOUNT_STATUSES = (
     "deletion_in_progress",
     "deleted",
 )
+APP_SESSION_REVOCATION_REASONS = (
+    "logout",
+    "logout_all",
+    "account_deleted",
+    "account_disabled",
+    "password_changed",
+    "security_forced_logout",
+    "expired",
+)
 PUBLICATION_JOB_STATUSES = (
     "draft",
     "ready",
@@ -193,6 +202,30 @@ class Account(Base):
     account_status: Mapped[str] = mapped_column(String(50), nullable=False, default="active", server_default="active")
     deletion_started_at: Mapped[datetime | None] = mapped_column(DateTime)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class AppSession(Base):
+    __tablename__ = "app_sessions"
+    __table_args__ = (
+        Index("ix_app_sessions_account_id", "account_id"),
+        Index("ix_app_sessions_expires_at", "expires_at"),
+        Index("ix_app_sessions_revoked_at", "revoked_at"),
+        Index("ix_app_sessions_last_used_at", "last_used_at"),
+        UniqueConstraint("token_hash", name="uq_app_sessions_token_hash"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    account_id: Mapped[str] = mapped_column(ForeignKey("accounts.id"), nullable=False)
+    token_hash: Mapped[str] = mapped_column(String(128), nullable=False)
+    csrf_token_hash: Mapped[str] = mapped_column(String(128), nullable=False)
+    password_fingerprint: Mapped[str] = mapped_column(String(128), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime)
+    revocation_reason: Mapped[str | None] = mapped_column(String(100))
+    session_metadata_json: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 

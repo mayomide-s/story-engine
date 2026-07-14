@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import { NavLink, Route, Routes, useLocation } from "react-router-dom";
 
-import { api, AccessStatus, clearStoredAccessToken, setStoredAccessToken } from "./api/client";
+import { api, AccessStatus, clearClientAccessState } from "./api/client";
 import { EnvironmentStatusPanel } from "./components/EnvironmentStatusPanel";
 import { DashboardPage } from "./pages/Dashboard";
 import { AssetLibraryPage } from "./pages/AssetLibrary";
@@ -122,8 +122,7 @@ export default function App() {
     try {
       setIsLoggingIn(true);
       setAccessError("");
-      const result = await api.login(password);
-      setStoredAccessToken(result.token);
+      await api.login(password);
       setPassword("");
       await refreshAccessStatus();
     } catch (error) {
@@ -133,10 +132,16 @@ export default function App() {
     }
   }
 
-  function handleLogout() {
-    clearStoredAccessToken();
-    setAccessStatus((current) => current ? { ...current, authenticated: false } : current);
-    setAccessError("");
+  async function handleLogout() {
+    try {
+      await api.logout();
+    } catch {
+      // The session may already be gone, so we still clear local UI state.
+    } finally {
+      clearClientAccessState();
+      setAccessStatus((current) => current ? { ...current, authenticated: false, csrf_token: null } : current);
+      setAccessError("");
+    }
   }
 
   if (isCheckingAccess) {

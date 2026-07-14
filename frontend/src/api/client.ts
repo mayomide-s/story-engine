@@ -759,44 +759,65 @@ export type AccessStatus = {
   auth_enabled: boolean;
   authenticated: boolean;
   account_deleted: boolean;
+  csrf_token?: string | null;
+  session_expires_at?: string | null;
   environment: string;
 };
 
 export type AccessLoginResponse = {
   auth_enabled: boolean;
-  token: string;
+  authenticated: boolean;
+  account_deleted: boolean;
+  csrf_token?: string | null;
+  session_expires_at?: string | null;
+};
+
+export type AccessLogoutResponse = {
+  auth_enabled: boolean;
+  authenticated: boolean;
+  account_deleted: boolean;
+  logged_out: boolean;
+  session_expires_at?: string | null;
 };
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000/api";
 const BACKEND_BASE = API_BASE.replace(/\/api\/?$/, "");
-const ACCESS_TOKEN_KEY = "story-engine-access-token";
+let currentCsrfToken: string | null = null;
 
-export function getStoredAccessToken() {
-  return window.localStorage.getItem(ACCESS_TOKEN_KEY);
+function setCurrentCsrfToken(token?: string | null) {
+  currentCsrfToken = token ?? null;
 }
 
-export function setStoredAccessToken(token: string) {
-  window.localStorage.setItem(ACCESS_TOKEN_KEY, token);
+function clearCurrentCsrfToken() {
+  currentCsrfToken = null;
 }
 
-export function clearStoredAccessToken() {
-  window.localStorage.removeItem(ACCESS_TOKEN_KEY);
+export function clearClientAccessState() {
+  clearCurrentCsrfToken();
+}
+
+function updateCsrfTokenFromPayload(payload: unknown) {
+  if (payload && typeof payload === "object" && "csrf_token" in payload) {
+    const token = (payload as { csrf_token?: unknown }).csrf_token;
+    setCurrentCsrfToken(typeof token === "string" && token ? token : null);
+  }
 }
 
 async function request<T>(path: string, options?: RequestInit, baseUrl = API_BASE): Promise<T> {
   let response: Response;
   try {
-    const token = getStoredAccessToken();
+    const method = (options?.method ?? "GET").toUpperCase();
     const headers = new Headers(options?.headers ?? {});
     if (!headers.has("Content-Type")) {
       headers.set("Content-Type", "application/json");
     }
-    if (token && !headers.has("Authorization")) {
-      headers.set("Authorization", `Bearer ${token}`);
+    if (method !== "GET" && method !== "HEAD" && method !== "OPTIONS" && path !== "/access/login" && currentCsrfToken && !headers.has("X-CSRF-Token")) {
+      headers.set("X-CSRF-Token", currentCsrfToken);
     }
     response = await fetch(`${baseUrl}${path}`, {
       headers,
-      ...options
+      credentials: "include",
+      ...options,
     });
   } catch {
     throw new Error("Backend unavailable");
@@ -828,25 +849,28 @@ async function request<T>(path: string, options?: RequestInit, baseUrl = API_BAS
       // ignore non-json error bodies
     }
     if (response.status === 401) {
-      clearStoredAccessToken();
+      clearCurrentCsrfToken();
       window.dispatchEvent(new CustomEvent("app-access-expired"));
     }
     throw new Error(detail);
   }
-  return response.json();
+  const payload = await response.json();
+  updateCsrfTokenFromPayload(payload);
+  return payload;
 }
 
 async function requestText(path: string, options?: RequestInit, baseUrl = API_BASE): Promise<string> {
   let response: Response;
   try {
-    const token = getStoredAccessToken();
+    const method = (options?.method ?? "GET").toUpperCase();
     const headers = new Headers(options?.headers ?? {});
-    if (token && !headers.has("Authorization")) {
-      headers.set("Authorization", `Bearer ${token}`);
+    if (method !== "GET" && method !== "HEAD" && method !== "OPTIONS" && currentCsrfToken && !headers.has("X-CSRF-Token")) {
+      headers.set("X-CSRF-Token", currentCsrfToken);
     }
     response = await fetch(`${baseUrl}${path}`, {
       headers,
-      ...options
+      credentials: "include",
+      ...options,
     });
   } catch {
     throw new Error("Backend unavailable");
@@ -868,7 +892,7 @@ async function requestText(path: string, options?: RequestInit, baseUrl = API_BA
       // ignore non-json error bodies
     }
     if (response.status === 401) {
-      clearStoredAccessToken();
+      clearCurrentCsrfToken();
       window.dispatchEvent(new CustomEvent("app-access-expired"));
     }
     throw new Error(detail);
@@ -882,6 +906,14 @@ export const api = {
     request<AccessLoginResponse>("/access/login", {
       method: "POST",
       body: JSON.stringify({ password })
+    }),
+  logout: () =>
+    request<AccessLogoutResponse>("/access/logout", {
+      method: "POST"
+    }),
+  logoutAll: () =>
+    request<AccessLogoutResponse>("/access/logout-all", {
+      method: "POST"
     }),
   getHealth: () => request<HealthCheck>("/health", undefined, BACKEND_BASE),
   getHealthDetails: () => request<HealthDetails>("/health/details", undefined, BACKEND_BASE),

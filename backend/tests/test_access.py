@@ -13,8 +13,7 @@ def _enable_auth(monkeypatch):
 def _auth_headers(client):
     login = client.post("/api/access/login", json={"password": "open-sesame"})
     assert login.status_code == 200
-    token = login.json()["token"]
-    return {"Authorization": f"Bearer {token}"}
+    return {"X-CSRF-Token": login.json()["csrf_token"]}
 
 
 def test_auth_disabled_preserves_existing_behavior(client, monkeypatch):
@@ -52,9 +51,24 @@ def test_login_succeeds_with_correct_password(client, monkeypatch):
     assert response.status_code == 200
     payload = response.json()
     assert payload["auth_enabled"] is True
-    assert payload["token"]
+    assert payload["authenticated"] is True
+    assert payload["csrf_token"]
     assert status.status_code == 200
+    assert status.json()["authenticated"] is True
     assert status.json()["account_deleted"] is False
+
+
+def test_logout_revokes_session_and_clears_auth_status(client, monkeypatch):
+    _enable_auth(monkeypatch)
+    headers = _auth_headers(client)
+
+    logout = client.post("/api/access/logout", headers=headers)
+    status = client.get("/api/access/status")
+
+    assert logout.status_code == 200
+    assert logout.json()["logged_out"] is True
+    assert status.status_code == 200
+    assert status.json()["authenticated"] is False
 
 
 def test_login_fails_with_wrong_password(client, monkeypatch):

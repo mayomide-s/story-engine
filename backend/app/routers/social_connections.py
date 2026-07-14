@@ -23,7 +23,8 @@ from app.schemas.social_connections import (
     SocialConnectionListResponse,
     SocialConnectionMutationResponse,
 )
-from app.services.access_service import require_app_access
+from app.services.access_service import require_app_access, require_csrf_protection
+from app.services.rate_limit_service import limit_from_settings
 from app.services.social_connection_service import (
     SocialConnectionConfigurationError,
     begin_youtube_authorization,
@@ -61,7 +62,21 @@ def get_social_connections(
     return SocialConnectionListResponse(items=list_social_connections(db))
 
 
-@router.post("/youtube/authorize", response_model=SocialAuthorizeResponse)
+@router.post(
+    "/youtube/authorize",
+    response_model=SocialAuthorizeResponse,
+    dependencies=[
+        Depends(require_csrf_protection),
+        Depends(
+            limit_from_settings(
+                "youtube-authorize",
+                attempts_setting="sensitive_rate_limit_attempts",
+                window_setting="sensitive_rate_limit_window_seconds",
+                include_account=True,
+            )
+        ),
+    ],
+)
 def authorize_youtube_connection(
     payload: SocialAuthorizeRequest,
     _access: None = Depends(require_app_access),
@@ -96,7 +111,21 @@ def get_youtube_compliance(
     return YouTubeProjectComplianceResponse(**get_youtube_project_compliance_response(db))
 
 
-@router.patch("/youtube/compliance", response_model=YouTubeProjectComplianceResponse)
+@router.patch(
+    "/youtube/compliance",
+    response_model=YouTubeProjectComplianceResponse,
+    dependencies=[
+        Depends(require_csrf_protection),
+        Depends(
+            limit_from_settings(
+                "youtube-compliance-write",
+                attempts_setting="compliance_write_rate_limit_attempts",
+                window_setting="compliance_write_rate_limit_window_seconds",
+                include_account=True,
+            )
+        ),
+    ],
+)
 def update_youtube_compliance(
     payload: YouTubeProjectComplianceUpdateRequest,
     _access: None = Depends(require_app_access),
@@ -129,7 +158,21 @@ def get_youtube_compliance_profile(
     return YouTubeSubmissionProfileResponse(**get_youtube_submission_profile_response(db))
 
 
-@router.patch("/youtube/compliance/profile", response_model=YouTubeSubmissionProfileResponse)
+@router.patch(
+    "/youtube/compliance/profile",
+    response_model=YouTubeSubmissionProfileResponse,
+    dependencies=[
+        Depends(require_csrf_protection),
+        Depends(
+            limit_from_settings(
+                "youtube-compliance-profile-write",
+                attempts_setting="compliance_write_rate_limit_attempts",
+                window_setting="compliance_write_rate_limit_window_seconds",
+                include_account=True,
+            )
+        ),
+    ],
+)
 def update_youtube_compliance_profile(
     payload: YouTubeSubmissionProfileUpdateRequest,
     _access: None = Depends(require_app_access),
@@ -166,7 +209,21 @@ def update_youtube_compliance_profile(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.put("/youtube/compliance/confirmations/{confirmation_key}", response_model=YouTubeSubmissionProfileResponse)
+@router.put(
+    "/youtube/compliance/confirmations/{confirmation_key}",
+    response_model=YouTubeSubmissionProfileResponse,
+    dependencies=[
+        Depends(require_csrf_protection),
+        Depends(
+            limit_from_settings(
+                "youtube-compliance-confirmation-write",
+                attempts_setting="compliance_write_rate_limit_attempts",
+                window_setting="compliance_write_rate_limit_window_seconds",
+                include_account=True,
+            )
+        ),
+    ],
+)
 def set_youtube_compliance_confirmation(
     confirmation_key: str,
     payload: YouTubeHumanConfirmationUpdateRequest,
@@ -186,7 +243,21 @@ def set_youtube_compliance_confirmation(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.delete("/youtube/compliance/confirmations/{confirmation_key}", response_model=YouTubeSubmissionProfileResponse)
+@router.delete(
+    "/youtube/compliance/confirmations/{confirmation_key}",
+    response_model=YouTubeSubmissionProfileResponse,
+    dependencies=[
+        Depends(require_csrf_protection),
+        Depends(
+            limit_from_settings(
+                "youtube-compliance-confirmation-clear",
+                attempts_setting="compliance_write_rate_limit_attempts",
+                window_setting="compliance_write_rate_limit_window_seconds",
+                include_account=True,
+            )
+        ),
+    ],
+)
 def clear_youtube_compliance_confirmation(
     confirmation_key: str,
     reviewed_by: str | None = Query(default=None),
@@ -244,7 +315,11 @@ def get_youtube_compliance_report(
     return YouTubeComplianceSubmissionPackageResponse(**report)
 
 
-@router.post("/{connection_id}/refresh", response_model=SocialConnectionMutationResponse)
+@router.post(
+    "/{connection_id}/refresh",
+    response_model=SocialConnectionMutationResponse,
+    dependencies=[Depends(require_csrf_protection)],
+)
 def refresh_connection(
     connection_id: UUID,
     _access: None = Depends(require_app_access),
@@ -260,7 +335,11 @@ def refresh_connection(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
-@router.delete("/{connection_id}", response_model=SocialConnectionMutationResponse)
+@router.delete(
+    "/{connection_id}",
+    response_model=SocialConnectionMutationResponse,
+    dependencies=[Depends(require_csrf_protection)],
+)
 def disconnect_connection(
     connection_id: UUID,
     _access: None = Depends(require_app_access),
