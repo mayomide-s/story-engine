@@ -1,0 +1,230 @@
+name: story_engine_managed_prod
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+x-backend-env: &backend-env
+  ENVIRONMENT: ${ENVIRONMENT:?set ENVIRONMENT in .env.production}
+  DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL in .env.production}
+  REDIS_URL: ${REDIS_URL:?set REDIS_URL in .env.production}
+  VIDEO_PROVIDER: ${VIDEO_PROVIDER:-runway}
+  STORAGE_PROVIDER: ${STORAGE_PROVIDER:-r2}
+  LOCAL_STORAGE_PATH: ${LOCAL_STORAGE_PATH:-/app/storage}
+  AUTH_ENABLED: ${AUTH_ENABLED:-true}
+  APP_ACCESS_PASSWORD: ${APP_ACCESS_PASSWORD:?set APP_ACCESS_PASSWORD in .env.production}
+  APP_SESSION_SECRET: ${APP_SESSION_SECRET:?set APP_SESSION_SECRET in .env.production}
+  SESSION_COOKIE_NAME: ${SESSION_COOKIE_NAME:-story_engine_session}
+  SESSION_COOKIE_DOMAIN: ${SESSION_COOKIE_DOMAIN:-}
+  SESSION_COOKIE_MAX_AGE_SECONDS: ${SESSION_COOKIE_MAX_AGE_SECONDS:-43200}
+  SESSION_COOKIE_SAMESITE: ${SESSION_COOKIE_SAMESITE:-lax}
+  SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-true}
+  CSRF_HEADER_NAME: ${CSRF_HEADER_NAME:-X-CSRF-Token}
+  SOCIAL_TOKEN_ENCRYPTION_KEY: ${SOCIAL_TOKEN_ENCRYPTION_KEY:-}
+  CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:?set CORS_ALLOWED_ORIGINS in .env.production}
+  ALLOWED_HOSTS: ${ALLOWED_HOSTS:?set ALLOWED_HOSTS in .env.production}
+  TRUST_PROXY_HEADERS: ${TRUST_PROXY_HEADERS:-true}
+  TRUSTED_PROXY_CIDRS: ${TRUSTED_PROXY_CIDRS:?set TRUSTED_PROXY_CIDRS in .env.production}
+  REQUIRE_SCHEMA_UP_TO_DATE: ${REQUIRE_SCHEMA_UP_TO_DATE:-true}
+  RUN_MIGRATIONS_ON_STARTUP: ${RUN_MIGRATIONS_ON_STARTUP:-false}
+  LOGIN_RATE_LIMIT_ATTEMPTS: ${LOGIN_RATE_LIMIT_ATTEMPTS:-5}
+  LOGIN_RATE_LIMIT_WINDOW_SECONDS: ${LOGIN_RATE_LIMIT_WINDOW_SECONDS:-300}
+  SENSITIVE_RATE_LIMIT_ATTEMPTS: ${SENSITIVE_RATE_LIMIT_ATTEMPTS:-10}
+  SENSITIVE_RATE_LIMIT_WINDOW_SECONDS: ${SENSITIVE_RATE_LIMIT_WINDOW_SECONDS:-300}
+  PUBLICATION_RATE_LIMIT_ATTEMPTS: ${PUBLICATION_RATE_LIMIT_ATTEMPTS:-10}
+  PUBLICATION_RATE_LIMIT_WINDOW_SECONDS: ${PUBLICATION_RATE_LIMIT_WINDOW_SECONDS:-300}
+  COMPLIANCE_WRITE_RATE_LIMIT_ATTEMPTS: ${COMPLIANCE_WRITE_RATE_LIMIT_ATTEMPTS:-20}
+  COMPLIANCE_WRITE_RATE_LIMIT_WINDOW_SECONDS: ${COMPLIANCE_WRITE_RATE_LIMIT_WINDOW_SECONDS:-600}
+  R2_ACCOUNT_ID: ${R2_ACCOUNT_ID:?set R2_ACCOUNT_ID in .env.production}
+  R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID:?set R2_ACCESS_KEY_ID in .env.production}
+  R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY:?set R2_SECRET_ACCESS_KEY in .env.production}
+  R2_BUCKET_NAME: ${R2_BUCKET_NAME:?set R2_BUCKET_NAME in .env.production}
+  R2_PUBLIC_BASE_URL: ${R2_PUBLIC_BASE_URL:?set R2_PUBLIC_BASE_URL in .env.production}
+  GOOGLE_OAUTH_CLIENT_ID: ${GOOGLE_OAUTH_CLIENT_ID:-}
+  GOOGLE_OAUTH_CLIENT_SECRET: ${GOOGLE_OAUTH_CLIENT_SECRET:-}
+  GOOGLE_OAUTH_REDIRECT_URI: ${GOOGLE_OAUTH_REDIRECT_URI:-}
+  GOOGLE_OAUTH_FRONTEND_SUCCESS_URL: ${GOOGLE_OAUTH_FRONTEND_SUCCESS_URL:-}
+  GOOGLE_OAUTH_FRONTEND_ERROR_URL: ${GOOGLE_OAUTH_FRONTEND_ERROR_URL:-}
+  YOUTUBE_DEFAULT_CATEGORY_ID: ${YOUTUBE_DEFAULT_CATEGORY_ID:-27}
+  YOUTUBE_UPLOAD_CHUNK_SIZE_BYTES: ${YOUTUBE_UPLOAD_CHUNK_SIZE_BYTES:-8388608}
+  YOUTUBE_TOKEN_REFRESH_LEEWAY_SECONDS: ${YOUTUBE_TOKEN_REFRESH_LEEWAY_SECONDS:-300}
+  YOUTUBE_CLAIM_TIMEOUT_SECONDS: ${YOUTUBE_CLAIM_TIMEOUT_SECONDS:-300}
+  YOUTUBE_MAX_RETRY_ATTEMPTS: ${YOUTUBE_MAX_RETRY_ATTEMPTS:-5}
+  YOUTUBE_POLL_INTERVAL_SECONDS: ${YOUTUBE_POLL_INTERVAL_SECONDS:-30}
+  YOUTUBE_MAX_POLL_ATTEMPTS: ${YOUTUBE_MAX_POLL_ATTEMPTS:-20}
+  RUNWAY_API_KEY: ${RUNWAY_API_KEY:-}
+  OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+  SEMANTIC_CRITIC_ENABLED: ${SEMANTIC_CRITIC_ENABLED:-false}
+  SEMANTIC_CRITIC_PROVIDER: ${SEMANTIC_CRITIC_PROVIDER:-openai}
+  SEMANTIC_CRITIC_MODEL: ${SEMANTIC_CRITIC_MODEL:-gpt-4.1-mini}
+  SEMANTIC_CRITIC_VERSION: ${SEMANTIC_CRITIC_VERSION:-v1}
+  SEMANTIC_CRITIC_TIMEOUT_SECONDS: ${SEMANTIC_CRITIC_TIMEOUT_SECONDS:-60}
+  NARRATION_ENABLED: ${NARRATION_ENABLED:-false}
+  NARRATION_WRITER_PROVIDER: ${NARRATION_WRITER_PROVIDER:-mock}
+  NARRATION_WRITER_MODEL: ${NARRATION_WRITER_MODEL:-gpt-4.1-mini}
+  NARRATION_WRITER_PROMPT_VERSION: ${NARRATION_WRITER_PROMPT_VERSION:-v1}
+  NARRATION_SPEECH_PROVIDER: ${NARRATION_SPEECH_PROVIDER:-mock}
+  NARRATION_SPEECH_MODEL: ${NARRATION_SPEECH_MODEL:-gpt-4o-mini-tts}
+  NARRATION_VOICE: ${NARRATION_VOICE:-alloy}
+  NARRATION_VERSION: ${NARRATION_VERSION:-v1}
+  NARRATION_CAPTION_VERSION: ${NARRATION_CAPTION_VERSION:-v1}
+  NARRATION_RENDER_VERSION: ${NARRATION_RENDER_VERSION:-v1}
+  NARRATION_TIMEOUT_SECONDS: ${NARRATION_TIMEOUT_SECONDS:-90}
+  NARRATION_MAX_WORDS: ${NARRATION_MAX_WORDS:-20}
+  NARRATION_MAX_ATEMPO_ADJUSTMENT_PERCENT: ${NARRATION_MAX_ATEMPO_ADJUSTMENT_PERCENT:-10}
+
+services:
+  reverse_proxy:
+    image: nginx:1.27-alpine
+    depends_on:
+      frontend:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    environment:
+      FRONTEND_HOST: ${FRONTEND_HOST:-storyengine.soremekun.org}
+      API_HOST: ${API_HOST:-api.storyengine.soremekun.org}
+      FRONTEND_UPSTREAM: ${FRONTEND_UPSTREAM:-frontend:80}
+      BACKEND_UPSTREAM: ${BACKEND_UPSTREAM:-backend:8000}
+      CLIENT_MAX_BODY_SIZE: ${CLIENT_MAX_BODY_SIZE:-256m}
+      PROXY_READ_TIMEOUT: ${PROXY_READ_TIMEOUT:-900s}
+      PROXY_SEND_TIMEOUT: ${PROXY_SEND_TIMEOUT:-900s}
+      NGINX_TLS_CERT_PATH: ${NGINX_TLS_CERT_PATH:-/etc/nginx/tls/fullchain.pem}
+      NGINX_TLS_KEY_PATH: ${NGINX_TLS_KEY_PATH:-/etc/nginx/tls/privkey.pem}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/nginx/managed-prod.conf.template:/etc/nginx/templates/default.conf.template:ro
+      - ${NGINX_TLS_MOUNT_DIR:-./deploy/nginx/tls}:/etc/nginx/tls:ro
+    networks:
+      - story_engine_internal
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/nginx-health >/dev/null 2>&1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    logging: *default-logging
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:?set VITE_API_BASE_URL in .env.production}
+        VITE_VIDEO_PROVIDER: ${VIDEO_PROVIDER:-runway}
+        VITE_STORAGE_PROVIDER: ${STORAGE_PROVIDER:-r2}
+    expose:
+      - "80"
+    networks:
+      - story_engine_internal
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/ >/dev/null 2>&1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    logging: *default-logging
+
+  backend:
+    build:
+      context: ./backend
+    command: ["sh", "/app/start-api.sh"]
+    environment: *backend-env
+    expose:
+      - "8000"
+    networks:
+      - story_engine_internal
+    volumes:
+      # Temporary working media only. Durable assets must be stored in R2.
+      - working_media:/app/storage
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import json, sys, urllib.request; data=json.load(urllib.request.urlopen('http://127.0.0.1:8000/health')); sys.exit(0 if data.get('status') == 'ok' else 1)\"",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+    logging: *default-logging
+
+  celery_worker:
+    build:
+      context: ./backend
+    command: ["celery", "-A", "app.workers.celery_app.celery_app", "worker", "--loglevel=info"]
+    environment: *backend-env
+    networks:
+      - story_engine_internal
+    volumes:
+      # Temporary working media only. Durable assets must be stored in R2.
+      - working_media:/app/storage
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 2m
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"from app.workers.celery_app import celery_app; import sys; required={'app.workers.jobs.resume_pipeline_task','app.workers.jobs.start_youtube_publication_target_task','app.workers.jobs.poll_youtube_publication_target_task'}; sys.exit(0 if required.issubset(set(celery_app.tasks)) else 1)\"",
+        ]
+      interval: 30s
+      timeout: 15s
+      retries: 5
+      start_period: 20s
+    logging: *default-logging
+
+  config_check:
+    build:
+      context: ./backend
+    profiles: ["ops"]
+    command:
+      [
+        "python",
+        "-c",
+        "from app.config import get_settings; settings = get_settings(); settings.validate_configuration(); print('Configuration validation passed.')",
+      ]
+    environment: *backend-env
+    networks:
+      - story_engine_internal
+    volumes:
+      - working_media:/app/storage
+    logging: *default-logging
+
+  migrate:
+    build:
+      context: ./backend
+    profiles: ["ops"]
+    command: ["sh", "/app/migrate.sh"]
+    environment: *backend-env
+    networks:
+      - story_engine_internal
+    volumes:
+      - working_media:/app/storage
+    logging: *default-logging
+
+  revision:
+    build:
+      context: ./backend
+    profiles: ["ops"]
+    command: ["alembic", "current"]
+    environment: *backend-env
+    networks:
+      - story_engine_internal
+    volumes:
+      - working_media:/app/storage
+    logging: *default-logging
+
+networks:
+  story_engine_internal:
+    driver: bridge
+
+volumes:
+  working_media:

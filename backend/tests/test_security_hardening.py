@@ -133,3 +133,31 @@ def test_wildcard_credentialed_cors_is_rejected_by_configuration(monkeypatch):
     errors = get_settings().configuration_errors()
 
     assert any("cannot contain '*'" in error for error in errors)
+
+
+def test_sqlite_database_url_is_rejected_outside_local_development(monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.setenv("DATABASE_URL", "sqlite:///./prod.db")
+    monkeypatch.setenv("REDIS_URL", "rediss://:password@valkey.internal:25061/0")
+    monkeypatch.setenv("ALLOWED_HOSTS", "storyengine.soremekun.org,api.storyengine.soremekun.org")
+    monkeypatch.setenv("CORS_ALLOWED_ORIGINS", "https://storyengine.soremekun.org")
+    monkeypatch.setenv("SESSION_COOKIE_SECURE", "true")
+    get_settings.cache_clear()
+
+    errors = get_settings().configuration_errors()
+
+    assert any("cannot use SQLite" in error for error in errors)
+
+
+def test_insecure_redis_url_is_rejected_outside_local_development(monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://user:password@db.internal:25060/storyengine?sslmode=require")
+    monkeypatch.setenv("REDIS_URL", "redis://valkey.internal:6379/0")
+    monkeypatch.setenv("ALLOWED_HOSTS", "storyengine.soremekun.org,api.storyengine.soremekun.org")
+    monkeypatch.setenv("CORS_ALLOWED_ORIGINS", "https://storyengine.soremekun.org")
+    monkeypatch.setenv("SESSION_COOKIE_SECURE", "true")
+    get_settings.cache_clear()
+
+    errors = get_settings().configuration_errors()
+
+    assert any("must use rediss://" in error for error in errors)

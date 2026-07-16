@@ -119,6 +119,12 @@ class Settings(BaseSettings):
         value = self.session_cookie_domain.strip()
         return value or None
 
+    def _parsed_database_url(self):
+        return urlparse(self.database_url)
+
+    def _parsed_redis_url(self):
+        return urlparse(self.redis_url)
+
     def _is_local_http_allowed(self, parsed) -> bool:
         return (
             parsed.scheme == "http"
@@ -271,6 +277,14 @@ class Settings(BaseSettings):
                 errors.append("ALLOWED_HOSTS must be configured outside local development.")
             if "*" in self.allowed_hosts_list():
                 errors.append("ALLOWED_HOSTS cannot contain '*' outside local development.")
+            parsed_database_url = self._parsed_database_url()
+            if parsed_database_url.scheme == "sqlite":
+                errors.append("DATABASE_URL cannot use SQLite outside local development.")
+            if parsed_database_url.scheme not in {"postgresql", "postgresql+psycopg"}:
+                errors.append("DATABASE_URL must use PostgreSQL outside local development.")
+            parsed_redis_url = self._parsed_redis_url()
+            if parsed_redis_url.scheme != "rediss":
+                errors.append("REDIS_URL must use rediss:// outside local development.")
             if not self.session_cookie_secure():
                 errors.append("SESSION_COOKIE_SECURE must be enabled outside local development.")
             for origin in cors_origins:

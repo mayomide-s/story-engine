@@ -23,6 +23,13 @@ Optional but currently present in local compose:
 
 - `celery_beat`
 
+Managed production path:
+
+- `docker-compose.managed.prod.yml`
+- external managed PostgreSQL
+- external managed Valkey
+- Cloudflare R2
+
 ## Required Storage And Providers
 
 - Cloudflare R2 for durable asset storage
@@ -77,6 +84,14 @@ If using another runtime target, the equivalent requirement is:
 - Alembic installed
 - `alembic upgrade head` completed before traffic
 - API startup separated from migration execution in production
+
+Managed production shortcut:
+
+```bash
+./scripts/managed-prod-config-check.sh .env.production
+./scripts/managed-prod-migrate.sh .env.production current
+./scripts/managed-prod-migrate.sh .env.production upgrade
+```
 
 Do not:
 
@@ -139,6 +154,10 @@ Example:
 
 - `https://api.example.com/api`
 
+Managed production target:
+
+- `https://api.storyengine.soremekun.org/api`
+
 ### Session and CSRF runtime
 
 Production auth now expects:
@@ -163,6 +182,10 @@ Example:
 
 - `https://cdn.example.com`
 
+Managed production target:
+
+- `https://assets.storyengine.soremekun.org`
+
 ### Database persistence
 
 Postgres must use persistent storage in any deployment.
@@ -172,6 +195,10 @@ Requirements:
 - durable volume or managed database
 - regular backups
 - restore path tested separately
+
+Approved managed production direction:
+
+- managed PostgreSQL cluster instead of a local Compose Postgres service
 
 ### Redis persistence or acceptable loss
 
@@ -183,6 +210,10 @@ Decide explicitly whether:
 - Redis persistence is required for the deployment target
 
 For this app, short-lived broker loss may be acceptable only if the operational team understands that in-flight work may need manual review.
+
+Approved managed production direction:
+
+- managed Valkey instead of a local Compose Redis service
 
 ### Celery worker process
 
@@ -213,6 +244,13 @@ Back up:
 - `.env` stored outside git
 - R2 bucket configuration and asset retention assumptions
 - release tags used for rollback
+
+Do not copy:
+
+- local database dumps into production as a starting state
+- active OAuth tokens
+- app sessions
+- pilot publication records
 
 ## Secret-Handling Rules
 
