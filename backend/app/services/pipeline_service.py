@@ -121,6 +121,7 @@ STYLE_PRESETS = {
 DEFAULT_ACCOUNT_CONFIG = {
     "tone": "funny, simple, visual, slightly chaotic",
     "style": "clean 3D cartoon",
+    "default_content_type": "coding_video",
     "duration_min": 18,
     "duration_max": 30,
     "default_duration_seconds": 18,
@@ -165,6 +166,7 @@ def get_run_input_config(run: PipelineRun, account_config: dict[str, Any] | None
 def build_run_input_config(account_config: dict[str, Any], payload: PipelineRunCreate) -> dict[str, Any]:
     config = build_account_config(account_config)
     return {
+        "content_type": payload.content_type or config["default_content_type"],
         "style_preset": payload.style_preset or config["default_style_preset"],
         "target_platforms": payload.target_platforms or config["target_platforms"],
         "caption_tone": payload.caption_tone or config["default_caption_tone"],
@@ -185,6 +187,7 @@ def build_idea_input_config(account_config: dict[str, Any], payload: dict[str, A
     target_platform = source.get("target_platform") or (source.get("target_platforms") or config["target_platforms"])[0]
     target_platforms = [target_platform] if source.get("target_platform") else (source.get("target_platforms") or [target_platform])
     return {
+        "content_type": source.get("content_type") or config["default_content_type"],
         "style_preset": source.get("style_preset") or config["default_style_preset"],
         "target_platforms": target_platforms,
         "caption_tone": source.get("caption_tone") or config["default_caption_tone"],

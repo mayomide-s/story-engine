@@ -9,6 +9,7 @@ from app.models.entities import ManualPostingStatus
 
 class PipelineRunCreate(BaseModel):
     topic: str
+    content_type: Literal["coding_video", "news_image"] = "coding_video"
     auto_mode: bool = False
     style_preset: str | None = None
     target_platforms: list[str] | None = None
