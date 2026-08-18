@@ -113,6 +113,7 @@ def generate_run_from_idea_queue_item(db: Session, item_id: str) -> dict:
         db,
         PipelineRunCreate(
             topic=item.topic,
+            content_type=(item.input_config_json or {}).get("content_type", "coding_video"),
             auto_mode=False,
             style_preset=item.style_preset,
             target_platforms=(item.input_config_json or {}).get("target_platforms"),
