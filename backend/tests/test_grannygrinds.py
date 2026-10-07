@@ -12,7 +12,7 @@ def test_granny_rotation_has_three_stable_characters():
 
 def test_granny_prompt_is_preservation_first():
     prompt = build_granny_prompt(GRANNY_CHARACTER_SPECS[0]).lower()
-    assert "replace only the primary skateboarder" in prompt
+    assert "change only the primary skateboarder" in prompt
     assert "keep the skateboard itself unchanged" in prompt
     assert "camera" in prompt
     assert "do not change the environment" in prompt
