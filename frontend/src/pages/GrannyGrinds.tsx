@@ -143,20 +143,6 @@ export function GrannyGrindsPage() {
     }
   }
 
-  async function handlePublish() {
-    if (!selected) return;
-    try {
-      setBusy("publish");
-      setError("");
-      const updated = await api.publishGrannyGrindJob(selected.id);
-      setJobs((current) => current.map((job) => job.id === updated.id ? updated : job));
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Instagram publish failed.");
-    } finally {
-      setBusy("");
-    }
-  }
-
   return (
     <div className="page stack">
       <section className="panel granny-hero">
@@ -422,13 +408,15 @@ export function GrannyGrindsPage() {
 
               {selected.status === "approved" ? (
                 <section className="panel">
-                  <div className="notice-card warning">
-                    <strong>First-10 publishing gate</strong>
-                    <p>Instagram API publishing is wired, but auto-publish stays off. Add the photorealistic AI Info disclosure in Instagram until we verify an API-supported disclosure flag.</p>
+                  <div className="notice-card success">
+                    <strong>Approved for the first-10 batch</strong>
+                    <p>This clip is ready for manual Instagram upload. Keep the original audio and add Instagram's photorealistic AI Info disclosure during posting.</p>
                   </div>
-                  <button type="button" onClick={handlePublish} disabled={Boolean(busy)}>
-                    {busy === "publish" ? "Publishing…" : "Publish approved Reel"}
-                  </button>
+                  {selected.transformed_public_url ? (
+                    <a className="inline-link" href={mediaUrl(selected.transformed_public_url)} target="_blank" rel="noreferrer">
+                      Open final approved video
+                    </a>
+                  ) : null}
                 </section>
               ) : null}
             </>
