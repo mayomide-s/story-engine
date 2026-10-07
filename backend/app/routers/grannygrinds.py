@@ -52,6 +52,8 @@ def create_job(payload: GrannyGrindCreate, db: Session = Depends(get_db)):
         return create_grannygrind_job(db, payload)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except GrannyGrindsConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.get("/jobs/{job_id}", response_model=GrannyGrindJobResponse)
