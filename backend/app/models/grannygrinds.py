@@ -63,6 +63,7 @@ class GrannyGrindJob(Base):
     source_public_url: Mapped[str | None] = mapped_column(Text)
     source_metadata_json: Mapped[dict] = mapped_column(JSON, default=dict)
 
+    generation_attempt: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     runway_task_id: Mapped[str | None] = mapped_column(String(255))
     runway_response_json: Mapped[dict] = mapped_column(JSON, default=dict)
 
