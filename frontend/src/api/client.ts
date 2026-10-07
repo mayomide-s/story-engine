@@ -803,6 +803,7 @@ export type GrannyGrindJob = {
   status: string;
   source_public_url?: string | null;
   source_metadata_json: Record<string, unknown>;
+  generation_attempt: number;
   runway_task_id?: string | null;
   transformed_public_url?: string | null;
   transformed_metadata_json: Record<string, unknown>;
@@ -1250,6 +1251,11 @@ export const api = {
     request<GrannyGrindJob>("/grannygrinds/jobs", {
       method: "POST",
       body: JSON.stringify(payload)
+    }),
+  regenerateGrannyGrindJob: (jobId: string) =>
+    request<GrannyGrindJob>(`/grannygrinds/jobs/${jobId}/regenerate`, {
+      method: "POST",
+      body: JSON.stringify({ confirm_paid_generation: true })
     }),
   approveGrannyGrindJob: (jobId: string, notes = "") =>
     request<GrannyGrindJob>(`/grannygrinds/jobs/${jobId}/approve`, {
