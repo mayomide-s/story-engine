@@ -289,16 +289,31 @@ def _validate_download_url(url: str) -> None:
 
 
 def _download_file(url: str, destination: Path, *, max_bytes: int = 250 * 1024 * 1024) -> None:
-    _validate_download_url(url)
-    total = 0
-    with httpx.stream("GET", url, timeout=120.0, follow_redirects=True) as response:
-        response.raise_for_status()
-        with destination.open("wb") as handle:
-            for chunk in response.iter_bytes():
-                total += len(chunk)
-                if total > max_bytes:
-                    raise ValueError("Source media exceeds the 250 MB GrannyGrinds ingest limit.")
-                handle.write(chunk)
+    current_url = url
+    redirect_codes = {301, 302, 303, 307, 308}
+
+    for _redirect_index in range(6):
+        _validate_download_url(current_url)
+        with httpx.stream("GET", current_url, timeout=120.0, follow_redirects=False) as response:
+            if response.status_code in redirect_codes:
+                location = response.headers.get("location")
+                if not location:
+                    raise ValueError("Source media redirect did not include a destination.")
+                current_url = str(httpx.URL(current_url).join(location))
+                continue
+
+            response.raise_for_status()
+            total = 0
+            with destination.open("wb") as handle:
+                for chunk in response.iter_bytes():
+                    total += len(chunk)
+                    if total > max_bytes:
+                        raise ValueError("Source media exceeds the 250 MB GrannyGrinds ingest limit.")
+                    handle.write(chunk)
+            break
+    else:
+        raise ValueError("Source media exceeded the maximum redirect count.")
+
     if destination.stat().st_size == 0:
         raise ValueError("Downloaded source media is empty.")
 
