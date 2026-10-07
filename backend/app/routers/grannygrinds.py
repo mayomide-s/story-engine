@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import tempfile
+from pathlib import Path
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
@@ -19,6 +21,7 @@ from app.services.grannygrinds_service import (
     GrannyGrindsConflictError,
     approve_grannygrind_job,
     create_grannygrind_job,
+    create_grannygrind_uploaded_job,
     get_grannygrind_job,
     list_granny_characters,
     list_grannygrind_jobs,
@@ -56,6 +59,56 @@ def create_job(payload: GrannyGrindCreate, db: Session = Depends(get_db)):
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except GrannyGrindsConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/jobs/upload", response_model=GrannyGrindJobResponse, status_code=201)
+async def upload_job(
+    source_post_url: str = Form(...),
+    source_creator_handle: str | None = Form(default=None),
+    source_credit_text: str | None = Form(default=None),
+    rights_status: str = Form(default="credited"),
+    confirm_paid_generation: bool = Form(default=False),
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    filename = (file.filename or "").lower()
+    if not filename.endswith(".mp4") and file.content_type != "video/mp4":
+        raise HTTPException(status_code=422, detail="First-10 uploads must be MP4 video files.")
+
+    max_bytes = 250 * 1024 * 1024
+    written = 0
+    temp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(prefix="grannygrinds-upload-", suffix=".mp4", delete=False) as handle:
+            temp_path = Path(handle.name)
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                written += len(chunk)
+                if written > max_bytes:
+                    raise HTTPException(status_code=413, detail="Uploaded video exceeds the 250 MB limit.")
+                handle.write(chunk)
+        if written == 0:
+            raise HTTPException(status_code=422, detail="Uploaded video is empty.")
+
+        return create_grannygrind_uploaded_job(
+            db,
+            source_path=temp_path,
+            source_post_url=source_post_url,
+            source_creator_handle=source_creator_handle,
+            source_credit_text=source_credit_text,
+            rights_status=rights_status,
+            confirm_paid_generation=confirm_paid_generation,
+        )
+    except GrannyGrindsConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    finally:
+        await file.close()
+        if temp_path is not None:
+            temp_path.unlink(missing_ok=True)
 
 
 @router.get("/jobs/{job_id}", response_model=GrannyGrindJobResponse)
