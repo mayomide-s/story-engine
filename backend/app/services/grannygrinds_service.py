@@ -324,8 +324,11 @@ def probe_video(file_path: Path) -> dict[str, Any]:
         "json",
         str(file_path),
     ]
-    result = subprocess.run(command, check=True, capture_output=True, text=True)
-    payload = json.loads(result.stdout)
+    try:
+        result = subprocess.run(command, check=True, capture_output=True, text=True)
+        payload = json.loads(result.stdout)
+    except (subprocess.CalledProcessError, json.JSONDecodeError, KeyError, TypeError) as exc:
+        raise ValueError("Could not inspect the uploaded/source video with ffprobe.") from exc
     streams = payload.get("streams") or []
     video_stream = next((item for item in streams if item.get("codec_type") == "video"), None)
     if not video_stream:
