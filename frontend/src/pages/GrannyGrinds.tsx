@@ -54,6 +54,7 @@ export function GrannyGrindsPage() {
   const [selectedId, setSelectedId] = useState("");
   const [sourcePostUrl, setSourcePostUrl] = useState("");
   const [sourceMediaUrl, setSourceMediaUrl] = useState("");
+  const [sourceFile, setSourceFile] = useState<File | null>(null);
   const [sourceCreatorHandle, setSourceCreatorHandle] = useState("");
   const [sourceCreditText, setSourceCreditText] = useState("");
   const [rightsStatus, setRightsStatus] = useState<GrannyGrindRightsStatus>("credited");
@@ -98,28 +99,47 @@ export function GrannyGrindsPage() {
 
   async function handleCreate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const form = event.currentTarget;
     if (!confirmPaidGeneration) {
       setError("Confirm the paid Aleph generation before creating the clip.");
+      return;
+    }
+    if (!sourceFile && !sourceMediaUrl.trim()) {
+      setError("Choose an MP4 file or provide a direct HTTPS source video URL.");
       return;
     }
     try {
       setBusy("create");
       setError("");
-      const created = await api.createGrannyGrindJob({
-        source_post_url: sourcePostUrl.trim(),
-        source_media_url: sourceMediaUrl.trim(),
-        source_creator_handle: sourceCreatorHandle.trim() || null,
-        source_credit_text: sourceCreditText.trim() || null,
-        rights_status: rightsStatus,
-        confirm_paid_generation: true,
-      });
+      let created: GrannyGrindJob;
+      if (sourceFile) {
+        const formData = new FormData();
+        formData.append("file", sourceFile);
+        formData.append("source_post_url", sourcePostUrl.trim());
+        formData.append("source_creator_handle", sourceCreatorHandle.trim());
+        formData.append("source_credit_text", sourceCreditText.trim());
+        formData.append("rights_status", rightsStatus);
+        formData.append("confirm_paid_generation", "true");
+        created = await api.uploadGrannyGrindJob(formData);
+      } else {
+        created = await api.createGrannyGrindJob({
+          source_post_url: sourcePostUrl.trim(),
+          source_media_url: sourceMediaUrl.trim(),
+          source_creator_handle: sourceCreatorHandle.trim() || null,
+          source_credit_text: sourceCreditText.trim() || null,
+          rights_status: rightsStatus,
+          confirm_paid_generation: true,
+        });
+      }
       setJobs((current) => [created, ...current]);
       setSelectedId(created.id);
       setSourcePostUrl("");
       setSourceMediaUrl("");
+      setSourceFile(null);
       setSourceCreatorHandle("");
       setSourceCreditText("");
       setConfirmPaidGeneration(false);
+      form.reset();
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Could not create GrannyGrinds clip.");
     } finally {
@@ -204,15 +224,24 @@ export function GrannyGrindsPage() {
               />
             </label>
             <label className="field field-wide">
-              <span>Direct source video URL</span>
+              <span>Source MP4</span>
               <input
-                required
+                type="file"
+                accept="video/mp4,.mp4"
+                onChange={(event) => setSourceFile(event.target.files?.[0] ?? null)}
+              />
+              <small className="subtle">Recommended for the first 10: download the public skate clip as MP4, then upload it here. It is validated before Aleph is called.</small>
+            </label>
+            <label className="field field-wide">
+              <span>Or direct HTTPS source video URL</span>
+              <input
                 type="url"
                 value={sourceMediaUrl}
                 onChange={(event) => setSourceMediaUrl(event.target.value)}
                 placeholder="https://.../clip.mp4"
+                disabled={Boolean(sourceFile)}
               />
-              <small className="subtle">For the first 10, paste a direct downloadable MP4/HTTPS media URL. Discovery comes after quality is proven.</small>
+              <small className="subtle">Use this only when you already have a stable direct media URL.</small>
             </label>
             <label className="field">
               <span>Creator / source handle</span>
