@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import ipaddress
 import json
-import math
+import socket
 import subprocess
 import tempfile
 from datetime import UTC, datetime
@@ -167,11 +168,31 @@ def create_grannygrind_job(db: Session, payload: GrannyGrindCreate) -> dict[str,
 
 def _validate_download_url(url: str) -> None:
     parsed = urlparse(url)
-    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc or not parsed.hostname:
         raise ValueError("Source media URL must be an absolute HTTP(S) URL.")
     settings = get_settings()
     if parsed.scheme != "https" and not settings.is_development_like_environment():
         raise ValueError("Source media URL must use HTTPS outside local development.")
+
+    if settings.is_development_like_environment():
+        return
+
+    try:
+        resolved = socket.getaddrinfo(parsed.hostname, parsed.port or 443, type=socket.SOCK_STREAM)
+    except socket.gaierror as exc:
+        raise ValueError("Source media hostname could not be resolved.") from exc
+
+    for item in resolved:
+        address = ipaddress.ip_address(item[4][0])
+        if (
+            address.is_private
+            or address.is_loopback
+            or address.is_link_local
+            or address.is_multicast
+            or address.is_reserved
+            or address.is_unspecified
+        ):
+            raise ValueError("Source media URL must resolve only to public network addresses.")
 
 
 def _download_file(url: str, destination: Path, *, max_bytes: int = 250 * 1024 * 1024) -> None:
@@ -351,7 +372,8 @@ def _remux_original_audio(source: Path, generated: Path, final: Path, source_met
             "copy",
             "-c:a",
             "copy",
-            "-shortest",
+            "-t",
+            f"{float(source_meta['duration_seconds']):.6f}",
             "-movflags",
             "+faststart",
             str(final),
@@ -384,7 +406,8 @@ def _remux_original_audio(source: Path, generated: Path, final: Path, source_met
             "yuv420p",
             "-c:a",
             "copy",
-            "-shortest",
+            "-t",
+            f"{float(source_meta['duration_seconds']):.6f}",
             "-movflags",
             "+faststart",
             str(final),
