@@ -1,3 +1,4 @@
+from app.models.grannygrinds import GrannyGrindJob
 from app.models.entities import (
     Account,
     AppSession,
@@ -38,6 +39,7 @@ from app.models.entities import (
 )
 
 __all__ = [
+    "GrannyGrindJob",
     "Account",
     "AppSession",
     "Asset",
