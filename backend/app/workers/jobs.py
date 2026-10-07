@@ -1,5 +1,10 @@
 from app.db.session import SessionLocal
 from app.services.narration_service import process_narration_render
+from app.services.grannygrinds_service import (
+    poll_grannygrind_instagram,
+    poll_grannygrind_job,
+    process_grannygrind_job,
+)
 from app.services.pipeline_service import process_resume_pipeline
 from app.services.publication_execution_service import (
     poll_youtube_publication_target,
@@ -59,5 +64,32 @@ def recover_youtube_publication_targets_task():
     db = SessionLocal()
     try:
         scan_recoverable_publication_targets(db)
+    finally:
+        db.close()
+
+
+@celery_app.task(name="app.workers.jobs.process_grannygrind_job_task")
+def process_grannygrind_job_task(job_id: str):
+    db = SessionLocal()
+    try:
+        process_grannygrind_job(db, job_id)
+    finally:
+        db.close()
+
+
+@celery_app.task(name="app.workers.jobs.poll_grannygrind_job_task")
+def poll_grannygrind_job_task(job_id: str):
+    db = SessionLocal()
+    try:
+        poll_grannygrind_job(db, job_id)
+    finally:
+        db.close()
+
+
+@celery_app.task(name="app.workers.jobs.poll_grannygrind_instagram_task")
+def poll_grannygrind_instagram_task(job_id: str):
+    db = SessionLocal()
+    try:
+        poll_grannygrind_instagram(db, job_id)
     finally:
         db.close()
