@@ -31,6 +31,7 @@ def upgrade() -> None:
         sa.Column("source_storage_key", sa.Text(), nullable=True),
         sa.Column("source_public_url", sa.Text(), nullable=True),
         sa.Column("source_metadata_json", sa.JSON(), nullable=False, server_default=sa.text("'{}'")),
+        sa.Column("generation_attempt", sa.Integer(), server_default="0", nullable=False),
         sa.Column("runway_task_id", sa.String(length=255), nullable=True),
         sa.Column("runway_response_json", sa.JSON(), nullable=False, server_default=sa.text("'{}'")),
         sa.Column("transformed_storage_key", sa.Text(), nullable=True),
