@@ -18,6 +18,10 @@ class GrannyGrindCreate(BaseModel):
     confirm_paid_generation: bool = False
 
 
+class GrannyGrindRegenerate(BaseModel):
+    confirm_paid_generation: bool = False
+
+
 class GrannyGrindReview(BaseModel):
     notes: str | None = Field(default=None, max_length=2000)
 
@@ -47,6 +51,7 @@ class GrannyGrindJobResponse(BaseModel):
     status: str
     source_public_url: str | None
     source_metadata_json: dict
+    generation_attempt: int
     runway_task_id: str | None
     transformed_public_url: str | None
     transformed_metadata_json: dict
