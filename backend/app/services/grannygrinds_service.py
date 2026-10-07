@@ -81,18 +81,19 @@ def _next_character(db: Session) -> dict[str, Any]:
 
 
 def build_granny_prompt(character: dict[str, Any]) -> str:
-    return (
-        "Edit this existing skateboarding video in place. Replace ONLY the primary skateboarder with "
+    prompt = (
+        "Edit this real skate video in place. Change ONLY the primary skateboarder into "
         f"{character['look']}, wearing {character['wardrobe']}. "
-        "The replacement granny must perform the exact same body motion as the original skater: preserve pose, "
-        "limb positions, speed, balance, trajectory, board contact points, trick timing, takeoff, rotation, catch, "
-        "landing, and roll-away. Keep the skateboard itself unchanged. Keep every other person unchanged. "
-        "Preserve the original camera framing, camera motion, lens feel, cuts, background, architecture, obstacles, "
-        "rails, stairs, ground, lighting, shadows, weather, color, depth of field, and scene timing. "
-        "Do not add or remove objects. Do not change the environment. Do not add text, logos, effects, or stylization. "
-        "The result must look like the exact same real video, except the primary skater is this photorealistic granny "
-        "in her fixed wardrobe."
+        "Match the original skater's pose, limbs, speed, balance, trajectory, board contact, takeoff, rotation, "
+        "catch, landing and roll-away exactly. Keep the skateboard unchanged. Keep every other person unchanged. "
+        "Preserve frame timing, cuts, camera framing and motion, lens, background, architecture, rails, stairs, "
+        "obstacles, ground, lighting, shadows, weather, color and depth of field. Do not add, remove or move scene "
+        "objects. No text, logos, effects or stylization. The output must look like the same original footage, "
+        "with only the primary skater replaced by this photorealistic granny in her fixed wardrobe."
     )
+    if len(prompt) > 1000:
+        raise ValueError("GrannyGrinds Aleph prompt exceeded 1000 characters.")
+    return prompt
 
 
 def _serialize_job(job: GrannyGrindJob) -> dict[str, Any]:
