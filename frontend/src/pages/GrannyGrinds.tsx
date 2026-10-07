@@ -58,6 +58,7 @@ export function GrannyGrindsPage() {
   const [sourceCreditText, setSourceCreditText] = useState("");
   const [rightsStatus, setRightsStatus] = useState<GrannyGrindRightsStatus>("credited");
   const [confirmPaidGeneration, setConfirmPaidGeneration] = useState(false);
+  const [confirmRegeneration, setConfirmRegeneration] = useState(false);
   const [reviewNotes, setReviewNotes] = useState("");
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
@@ -121,6 +122,21 @@ export function GrannyGrindsPage() {
       setConfirmPaidGeneration(false);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Could not create GrannyGrinds clip.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function handleRegenerate() {
+    if (!selected || !confirmRegeneration) return;
+    try {
+      setBusy("regenerate");
+      setError("");
+      const updated = await api.regenerateGrannyGrindJob(selected.id);
+      setJobs((current) => current.map((job) => job.id === updated.id ? updated : job));
+      setConfirmRegeneration(false);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Regeneration failed.");
     } finally {
       setBusy("");
     }
@@ -303,6 +319,7 @@ export function GrannyGrindsPage() {
                   <div><span>Granny</span><strong>{selected.granny_name}</strong></div>
                   <div><span>Source</span><strong>{selected.source_creator_handle || "—"}</strong></div>
                   <div><span>Rights record</span><strong>{formatStatus(selected.rights_status)}</strong></div>
+                  <div><span>Generation</span><strong>attempt {selected.generation_attempt + 1}</strong></div>
                   <div><span>Runway task</span><strong>{selected.runway_task_id ? "submitted" : "—"}</strong></div>
                 </div>
                 <div className="link-row">
@@ -403,6 +420,25 @@ export function GrannyGrindsPage() {
                       {busy === "reject" ? "Rejecting…" : "Reject"}
                     </button>
                   </div>
+                </section>
+              ) : null}
+
+              {["failed", "rejected"].includes(selected.status) ? (
+                <section className="panel">
+                  <p className="eyebrow">Regenerate</p>
+                  <h2>Try the same granny again</h2>
+                  <p className="subtle">Keeps {selected.granny_name} and the same wardrobe, but changes the generation seed for another Aleph attempt.</p>
+                  <label className="toggle-chip paid-confirmation">
+                    <input
+                      type="checkbox"
+                      checked={confirmRegeneration}
+                      onChange={(event) => setConfirmRegeneration(event.target.checked)}
+                    />
+                    <span>I want to spend credits on another Aleph generation.</span>
+                  </label>
+                  <button type="button" onClick={handleRegenerate} disabled={Boolean(busy) || !confirmRegeneration}>
+                    {busy === "regenerate" ? "Regenerating…" : "Regenerate same granny"}
+                  </button>
                 </section>
               ) : null}
 
