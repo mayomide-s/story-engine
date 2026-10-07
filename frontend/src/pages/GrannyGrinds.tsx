@@ -29,7 +29,7 @@ function statusTone(status: string) {
 }
 
 function formatStatus(status: string) {
-  return status.replaceAll("_", " ");
+  return status.replace(/_/g, " ");
 }
 
 function formatNumber(value: unknown, digits = 0) {
