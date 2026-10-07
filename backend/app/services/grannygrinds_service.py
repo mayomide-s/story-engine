@@ -111,6 +111,7 @@ def _serialize_job(job: GrannyGrindJob) -> dict[str, Any]:
         "status": job.status,
         "source_public_url": job.source_public_url,
         "source_metadata_json": job.source_metadata_json or {},
+        "generation_attempt": int(job.generation_attempt or 0),
         "runway_task_id": job.runway_task_id,
         "transformed_public_url": job.transformed_public_url,
         "transformed_metadata_json": job.transformed_metadata_json or {},
@@ -156,6 +157,37 @@ def create_grannygrind_job(db: Session, payload: GrannyGrindCreate) -> dict[str,
         prompt_text=build_granny_prompt(character),
         status="queued",
     )
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+
+    from app.workers.jobs import process_grannygrind_job_task
+
+    process_grannygrind_job_task.delay(job.id)
+    return _serialize_job(job)
+
+
+def regenerate_grannygrind_job(db: Session, job_id: str, *, confirm_paid_generation: bool) -> dict[str, Any]:
+    job = db.get(GrannyGrindJob, job_id)
+    if job is None:
+        raise ValueError("GrannyGrinds job not found.")
+    if not confirm_paid_generation:
+        raise GrannyGrindsConflictError("Paid Runway Aleph regeneration must be explicitly confirmed.")
+    if job.status not in {"failed", "rejected", "needs_review"}:
+        raise GrannyGrindsConflictError("Only failed, rejected, or review-pending clips can be regenerated.")
+
+    job.generation_attempt = int(job.generation_attempt or 0) + 1
+    job.runway_task_id = None
+    job.runway_response_json = {}
+    job.transformed_storage_key = None
+    job.transformed_public_url = None
+    job.transformed_metadata_json = {}
+    job.qc_json = {}
+    job.review_notes = None
+    job.approved_at = None
+    job.rejected_at = None
+    job.last_error = None
+    job.status = "queued"
     db.add(job)
     db.commit()
     db.refresh(job)
@@ -311,7 +343,7 @@ def process_grannygrind_job(db: Session, job_id: str) -> None:
         submission = runway.submit_edit(
             video_url=_runway_input_url(job),
             prompt=job.prompt_text,
-            seed=int(character["seed"]),
+            seed=int(character["seed"]) + int(job.generation_attempt or 0),
         )
         job.runway_task_id = submission["task_id"]
         job.runway_response_json = {
