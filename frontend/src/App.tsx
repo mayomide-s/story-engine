@@ -12,6 +12,7 @@ import { IdeasPage } from "./pages/Ideas";
 import { SettingsPage } from "./pages/Settings";
 import { VideoReviewPage } from "./pages/VideoReview";
 import { PerformancePage } from "./pages/Performance";
+import { GrannyGrindsPage } from "./pages/GrannyGrinds";
 import {
   PublicDataDeletionPage,
   PublicHomePage,
@@ -258,6 +259,10 @@ export default function App() {
               <span className="nav-icon">D</span>
               <span className="nav-label">Dashboard</span>
             </NavLink>
+            <NavLink to="/grannygrinds" title="GrannyGrinds">
+              <span className="nav-icon">G</span>
+              <span className="nav-label">GrannyGrinds</span>
+            </NavLink>
             <NavLink to="/queue" title="Idea Queue">
               <span className="nav-icon">Q</span>
               <span className="nav-label">Idea Queue</span>
@@ -307,6 +312,7 @@ export default function App() {
       <main className="content">
         <Routes>
           <Route path="/app" element={<DashboardPage />} />
+          <Route path="/grannygrinds" element={<GrannyGrindsPage />} />
           <Route path="/queue" element={<IdeaQueuePage />} />
           <Route path="/assets" element={<AssetLibraryPage />} />
           <Route path="/app/batch-planner" element={<BatchPlannerPage />} />
