@@ -945,6 +945,45 @@ async function requestText(path: string, options?: RequestInit, baseUrl = API_BA
   return response.text();
 }
 
+async function requestForm<T>(path: string, formData: FormData): Promise<T> {
+  let response: Response;
+  try {
+    const headers = new Headers();
+    if (currentCsrfToken) {
+      headers.set("X-CSRF-Token", currentCsrfToken);
+    }
+    response = await fetch(`${API_BASE}${path}`, {
+      method: "POST",
+      headers,
+      credentials: "include",
+      body: formData,
+    });
+  } catch {
+    throw new Error("Backend unavailable");
+  }
+  if (!response.ok) {
+    let detail = `Request failed: ${response.status}`;
+    try {
+      const payload = await response.json();
+      if (typeof payload?.detail === "string") {
+        detail = payload.detail;
+      } else if (payload?.detail) {
+        detail = JSON.stringify(payload.detail);
+      }
+    } catch {
+      // ignore non-json error bodies
+    }
+    if (response.status === 401) {
+      clearCurrentCsrfToken();
+      window.dispatchEvent(new CustomEvent("app-access-expired"));
+    }
+    throw new Error(detail);
+  }
+  const payload = await response.json();
+  updateCsrfTokenFromPayload(payload);
+  return payload;
+}
+
 export const api = {
   getAccessStatus: () => request<AccessStatus>("/access/status"),
   login: (password: string) =>
@@ -1252,6 +1291,8 @@ export const api = {
       method: "POST",
       body: JSON.stringify(payload)
     }),
+  uploadGrannyGrindJob: (formData: FormData) =>
+    requestForm<GrannyGrindJob>("/grannygrinds/jobs/upload", formData),
   regenerateGrannyGrindJob: (jobId: string) =>
     request<GrannyGrindJob>(`/grannygrinds/jobs/${jobId}/regenerate`, {
       method: "POST",
