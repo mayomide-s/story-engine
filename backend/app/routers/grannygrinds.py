@@ -11,6 +11,7 @@ from app.schemas.grannygrinds import (
     GrannyGrindCreate,
     GrannyGrindJobResponse,
     GrannyGrindPublishRequest,
+    GrannyGrindRegenerate,
     GrannyGrindReview,
 )
 from app.services.access_service import require_app_access, require_csrf_protection
@@ -21,6 +22,7 @@ from app.services.grannygrinds_service import (
     get_grannygrind_job,
     list_granny_characters,
     list_grannygrind_jobs,
+    regenerate_grannygrind_job,
     reject_grannygrind_job,
     request_instagram_publish,
 )
@@ -62,6 +64,20 @@ def get_job(job_id: UUID, db: Session = Depends(get_db)):
         return get_grannygrind_job(db, str(job_id))
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/jobs/{job_id}/regenerate", response_model=GrannyGrindJobResponse)
+def regenerate_job(job_id: UUID, payload: GrannyGrindRegenerate, db: Session = Depends(get_db)):
+    try:
+        return regenerate_grannygrind_job(
+            db,
+            str(job_id),
+            confirm_paid_generation=payload.confirm_paid_generation,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except GrannyGrindsConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.post("/jobs/{job_id}/approve", response_model=GrannyGrindJobResponse)
