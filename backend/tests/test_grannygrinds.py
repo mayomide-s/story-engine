@@ -17,6 +17,7 @@ def test_granny_prompt_is_preservation_first():
     assert "camera" in prompt
     assert "do not change the environment" in prompt
     assert "powder-blue floral midi dress" in prompt
+    assert len(build_granny_prompt(GRANNY_CHARACTER_SPECS[0])) <= 1000
 
 
 def test_preservation_qc_passes_matching_video_metadata():
