@@ -140,6 +140,8 @@ def list_grannygrind_jobs(db: Session, *, limit: int = 50) -> list[dict[str, Any
 
 
 def create_grannygrind_job(db: Session, payload: GrannyGrindCreate) -> dict[str, Any]:
+    if not payload.confirm_paid_generation:
+        raise GrannyGrindsConflictError("Paid Runway Aleph generation must be explicitly confirmed.")
     character = _next_character(db)
     job = GrannyGrindJob(
         source_post_url=str(payload.source_post_url),
