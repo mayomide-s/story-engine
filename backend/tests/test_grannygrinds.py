@@ -57,3 +57,13 @@ def test_preservation_qc_rejects_geometry_drift():
     qc = build_preservation_qc(source, final)
     assert qc["resolution_match"] is False
     assert qc["structural_pass"] is False
+
+
+def test_create_payload_requires_paid_confirmation_by_default():
+    from app.schemas.grannygrinds import GrannyGrindCreate
+
+    payload = GrannyGrindCreate(
+        source_post_url="https://example.com/post",
+        source_media_url="https://example.com/video.mp4",
+    )
+    assert payload.confirm_paid_generation is False
