@@ -15,7 +15,7 @@ def test_granny_prompt_is_preservation_first():
     assert "change only the primary skateboarder" in prompt
     assert "keep the skateboard unchanged" in prompt
     assert "camera" in prompt
-    assert "do not change the environment" in prompt
+    assert "do not add, remove or move scene objects" in prompt
     assert "powder-blue floral midi dress" in prompt
     assert len(build_granny_prompt(GRANNY_CHARACTER_SPECS[0])) <= 1000
 
