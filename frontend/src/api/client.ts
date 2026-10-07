@@ -780,6 +780,51 @@ export type AccessLogoutResponse = {
   session_expires_at?: string | null;
 };
 
+
+export type GrannyGrindRightsStatus = "unreviewed" | "credited" | "permission_confirmed";
+
+export type GrannyCharacter = {
+  key: string;
+  name: string;
+  wardrobe: string;
+  rotation_order: number;
+};
+
+export type GrannyGrindJob = {
+  id: string;
+  source_post_url: string;
+  source_media_url: string;
+  source_creator_handle?: string | null;
+  source_credit_text?: string | null;
+  rights_status: GrannyGrindRightsStatus;
+  granny_key: string;
+  granny_name: string;
+  prompt_text: string;
+  status: string;
+  source_public_url?: string | null;
+  source_metadata_json: Record<string, unknown>;
+  generation_attempt: number;
+  runway_task_id?: string | null;
+  transformed_public_url?: string | null;
+  transformed_metadata_json: Record<string, unknown>;
+  qc_json: Record<string, any>;
+  review_notes?: string | null;
+  instagram_media_id?: string | null;
+  instagram_permalink?: string | null;
+  last_error?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type GrannyGrindCreatePayload = {
+  source_post_url: string;
+  source_media_url: string;
+  source_creator_handle?: string | null;
+  source_credit_text?: string | null;
+  rights_status: GrannyGrindRightsStatus;
+  confirm_paid_generation: boolean;
+};
+
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000/api";
 const BACKEND_BASE = API_BASE.replace(/\/api\/?$/, "");
 let currentCsrfToken: string | null = null;
@@ -898,6 +943,45 @@ async function requestText(path: string, options?: RequestInit, baseUrl = API_BA
     throw new Error(detail);
   }
   return response.text();
+}
+
+async function requestForm<T>(path: string, formData: FormData): Promise<T> {
+  let response: Response;
+  try {
+    const headers = new Headers();
+    if (currentCsrfToken) {
+      headers.set("X-CSRF-Token", currentCsrfToken);
+    }
+    response = await fetch(`${API_BASE}${path}`, {
+      method: "POST",
+      headers,
+      credentials: "include",
+      body: formData,
+    });
+  } catch {
+    throw new Error("Backend unavailable");
+  }
+  if (!response.ok) {
+    let detail = `Request failed: ${response.status}`;
+    try {
+      const payload = await response.json();
+      if (typeof payload?.detail === "string") {
+        detail = payload.detail;
+      } else if (payload?.detail) {
+        detail = JSON.stringify(payload.detail);
+      }
+    } catch {
+      // ignore non-json error bodies
+    }
+    if (response.status === 401) {
+      clearCurrentCsrfToken();
+      window.dispatchEvent(new CustomEvent("app-access-expired"));
+    }
+    throw new Error(detail);
+  }
+  const payload = await response.json();
+  updateCsrfTokenFromPayload(payload);
+  return payload;
 }
 
 export const api = {
@@ -1195,5 +1279,38 @@ export const api = {
   reconcilePublicationTarget: (targetId: string) =>
     request<{ job: PublicationJob }>(`/publication-targets/${targetId}/reconcile`, {
       method: "POST"
+    }),
+  listGrannyCharacters: () =>
+    request<GrannyCharacter[]>("/grannygrinds/characters"),
+  listGrannyGrindJobs: () =>
+    request<GrannyGrindJob[]>("/grannygrinds/jobs"),
+  getGrannyGrindJob: (jobId: string) =>
+    request<GrannyGrindJob>(`/grannygrinds/jobs/${jobId}`),
+  createGrannyGrindJob: (payload: GrannyGrindCreatePayload) =>
+    request<GrannyGrindJob>("/grannygrinds/jobs", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    }),
+  uploadGrannyGrindJob: (formData: FormData) =>
+    requestForm<GrannyGrindJob>("/grannygrinds/jobs/upload", formData),
+  regenerateGrannyGrindJob: (jobId: string) =>
+    request<GrannyGrindJob>(`/grannygrinds/jobs/${jobId}/regenerate`, {
+      method: "POST",
+      body: JSON.stringify({ confirm_paid_generation: true })
+    }),
+  approveGrannyGrindJob: (jobId: string, notes = "") =>
+    request<GrannyGrindJob>(`/grannygrinds/jobs/${jobId}/approve`, {
+      method: "POST",
+      body: JSON.stringify({ notes })
+    }),
+  rejectGrannyGrindJob: (jobId: string, notes = "") =>
+    request<GrannyGrindJob>(`/grannygrinds/jobs/${jobId}/reject`, {
+      method: "POST",
+      body: JSON.stringify({ notes })
+    }),
+  publishGrannyGrindJob: (jobId: string) =>
+    request<GrannyGrindJob>(`/grannygrinds/jobs/${jobId}/publish`, {
+      method: "POST",
+      body: JSON.stringify({ caption: null, share_to_feed: true })
     }),
 };

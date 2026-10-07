@@ -81,6 +81,16 @@ class Settings(BaseSettings):
     youtube_poll_interval_seconds: int = Field(default=30, alias="YOUTUBE_POLL_INTERVAL_SECONDS")
     youtube_max_poll_attempts: int = Field(default=20, alias="YOUTUBE_MAX_POLL_ATTEMPTS")
 
+    instagram_access_token: str = Field(default="", alias="INSTAGRAM_ACCESS_TOKEN")
+    instagram_user_id: str = Field(default="", alias="INSTAGRAM_USER_ID")
+    instagram_graph_api_version: str = Field(default="v26.0", alias="INSTAGRAM_GRAPH_API_VERSION")
+
+    grannygrinds_autopublish: bool = Field(default=False, alias="GRANNYGRINDS_AUTOPUBLISH")
+    grannygrinds_poll_interval_seconds: int = Field(default=10, alias="GRANNYGRINDS_POLL_INTERVAL_SECONDS")
+    grannygrinds_max_poll_attempts: int = Field(default=90, alias="GRANNYGRINDS_MAX_POLL_ATTEMPTS")
+    grannygrinds_instagram_poll_interval_seconds: int = Field(default=10, alias="GRANNYGRINDS_INSTAGRAM_POLL_INTERVAL_SECONDS")
+    grannygrinds_instagram_max_poll_attempts: int = Field(default=60, alias="GRANNYGRINDS_INSTAGRAM_MAX_POLL_ATTEMPTS")
+
     video_provider: Literal["mock", "runway"] = Field(default="mock", alias="VIDEO_PROVIDER")
     storage_provider: Literal["local", "r2"] = Field(default="local", alias="STORAGE_PROVIDER")
     local_storage_path: str = Field(default="./storage", alias="LOCAL_STORAGE_PATH")
@@ -266,6 +276,11 @@ class Settings(BaseSettings):
             errors.append(
                 f"Missing required narration settings for {mode_label}: {', '.join(missing['narration'])}"
             )
+        if self.grannygrinds_autopublish:
+            if not self.instagram_access_token:
+                errors.append("INSTAGRAM_ACCESS_TOKEN is required when GRANNYGRINDS_AUTOPUBLISH=true.")
+            if not self.instagram_user_id:
+                errors.append("INSTAGRAM_USER_ID is required when GRANNYGRINDS_AUTOPUBLISH=true.")
         cors_origins = self.cors_allowed_origins_list()
         if any(origin == "*" for origin in cors_origins):
             errors.append("CORS_ALLOWED_ORIGINS cannot contain '*' when credentials are enabled.")
