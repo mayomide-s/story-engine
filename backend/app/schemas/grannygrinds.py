@@ -15,6 +15,7 @@ class GrannyGrindCreate(BaseModel):
     source_creator_handle: str | None = Field(default=None, max_length=255)
     source_credit_text: str | None = Field(default=None, max_length=1000)
     rights_status: RightsStatus = "unreviewed"
+    confirm_paid_generation: bool = False
 
 
 class GrannyGrindReview(BaseModel):
