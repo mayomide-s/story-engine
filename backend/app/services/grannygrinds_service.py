@@ -5,6 +5,7 @@ import json
 import socket
 import subprocess
 import tempfile
+import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -156,6 +157,66 @@ def create_grannygrind_job(db: Session, payload: GrannyGrindCreate) -> dict[str,
         granny_name=character["name"],
         prompt_text=build_granny_prompt(character),
         status="queued",
+    )
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+
+    from app.workers.jobs import process_grannygrind_job_task
+
+    process_grannygrind_job_task.delay(job.id)
+    return _serialize_job(job)
+
+
+def create_grannygrind_uploaded_job(
+    db: Session,
+    *,
+    source_path: Path,
+    source_post_url: str,
+    source_creator_handle: str | None,
+    source_credit_text: str | None,
+    rights_status: str,
+    confirm_paid_generation: bool,
+) -> dict[str, Any]:
+    if not confirm_paid_generation:
+        raise GrannyGrindsConflictError("Paid Runway Aleph generation must be explicitly confirmed.")
+    parsed_post = urlparse(source_post_url)
+    if parsed_post.scheme not in {"http", "https"} or not parsed_post.netloc:
+        raise ValueError("Original post URL must be an absolute HTTP(S) URL.")
+    if rights_status not in {"unreviewed", "credited", "permission_confirmed"}:
+        raise ValueError("Invalid source rights status.")
+
+    metadata = probe_video(source_path)
+    validate_aleph_source(metadata)
+
+    storage = get_storage_provider()
+    if storage.name == "local":
+        raise GrannyGrindsConflictError(
+            "Uploaded GrannyGrinds sources require public HTTPS storage such as R2 before paid Runway generation."
+        )
+
+    character = _next_character(db)
+    job_id = str(uuid.uuid4())
+    storage_key = f"grannygrinds/source/{job_id}.mp4"
+    stored = storage.save_file(str(source_path), storage_key)
+    public_url = str(stored.get("public_url") or "")
+    if not public_url.startswith("https://"):
+        raise GrannyGrindsConflictError("Uploaded source storage must expose a public HTTPS URL for Runway.")
+
+    job = GrannyGrindJob(
+        id=job_id,
+        source_post_url=source_post_url,
+        source_media_url=public_url,
+        source_creator_handle=(source_creator_handle or "").strip() or None,
+        source_credit_text=(source_credit_text or "").strip() or None,
+        rights_status=rights_status,
+        granny_key=character["key"],
+        granny_name=character["name"],
+        prompt_text=build_granny_prompt(character),
+        status="queued",
+        source_storage_key=stored["storage_key"],
+        source_public_url=public_url,
+        source_metadata_json=metadata,
     )
     db.add(job)
     db.commit()
@@ -323,20 +384,23 @@ def process_grannygrind_job(db: Session, job_id: str) -> None:
     db.commit()
 
     try:
-        with tempfile.TemporaryDirectory(prefix="grannygrinds-ingest-") as tmp:
-            source_path = Path(tmp) / "source.mp4"
-            _download_file(job.source_media_url, source_path)
-            metadata = probe_video(source_path)
-            validate_aleph_source(metadata)
+        if job.source_storage_key and job.source_public_url and job.source_metadata_json:
+            validate_aleph_source(job.source_metadata_json)
+        else:
+            with tempfile.TemporaryDirectory(prefix="grannygrinds-ingest-") as tmp:
+                source_path = Path(tmp) / "source.mp4"
+                _download_file(job.source_media_url, source_path)
+                metadata = probe_video(source_path)
+                validate_aleph_source(metadata)
 
-            storage = get_storage_provider()
-            storage_key = f"grannygrinds/source/{job.id}.mp4"
-            stored = storage.save_file(str(source_path), storage_key)
-            job.source_storage_key = stored["storage_key"]
-            job.source_public_url = stored["public_url"]
-            job.source_metadata_json = metadata
-            db.add(job)
-            db.commit()
+                storage = get_storage_provider()
+                storage_key = f"grannygrinds/source/{job.id}.mp4"
+                stored = storage.save_file(str(source_path), storage_key)
+                job.source_storage_key = stored["storage_key"]
+                job.source_public_url = stored["public_url"]
+                job.source_metadata_json = metadata
+                db.add(job)
+                db.commit()
 
         character = _character_for_key(job.granny_key)
         runway = RunwayAlephClient()
